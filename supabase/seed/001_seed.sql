@@ -1,0 +1,37 @@
+insert into public.profiles (id, full_name, email, role, phone) values
+  ('11111111-1111-1111-1111-111111111111', 'Олена Коваль', 'admin@polissya.local', 'admin', '+380671110101'),
+  ('22222222-2222-2222-2222-222222222222', 'Ігор Мельник', 'tech@polissya.local', 'tech_manager', '+380672220202'),
+  ('33333333-3333-3333-3333-333333333333', 'Марина Савчук', 'store@polissya.local', 'store_manager', '+380673330303'),
+  ('44444444-4444-4444-4444-444444444444', 'Андрій Романюк', 'worker@polissya.local', 'worker', '+380674440404')
+on conflict (id) do nothing;
+
+insert into public.objects (id, name, type, object_number, city, district, address, manager_id) values
+  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Магазин Полісся 01', 'store', '001', 'Житомир', 'Центр', 'вул. Київська, 12', '33333333-3333-3333-3333-333333333333'),
+  ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'Центральний склад', 'warehouse', 'WH-01', 'Коростень', null, 'просп. Миру, 44', '22222222-2222-2222-2222-222222222222'),
+  ('cccccccc-cccc-cccc-cccc-cccccccccccc', 'Виробництво Північ', 'production', 'PR-01', 'Новоград-Волинський', null, 'вул. Промислова, 8', '22222222-2222-2222-2222-222222222222'),
+  ('dddddddd-dddd-dddd-dddd-dddddddddddd', 'Офіс управління', 'office', 'OF-01', 'Житомир', 'Центр', 'майдан Соборний, 3', '11111111-1111-1111-1111-111111111111')
+on conflict (id) do nothing;
+
+update public.profiles
+set object_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
+where id = '33333333-3333-3333-3333-333333333333';
+
+insert into public.categories (id, name, description) values
+  ('ca000000-0000-0000-0000-000000000001', 'Холодильне обладнання', 'Холодильні вітрини, камери, компресори'),
+  ('ca000000-0000-0000-0000-000000000002', 'Електрика', 'Освітлення, щити, розетки, аварійні лінії'),
+  ('ca000000-0000-0000-0000-000000000003', 'Сантехніка', 'Вода, каналізація, змішувачі, протікання'),
+  ('ca000000-0000-0000-0000-000000000004', 'IT та звʼязок', 'Мережа, каси, принтери, робочі місця')
+on conflict (id) do nothing;
+
+insert into public.tickets (id, number, title, description, status, priority, object_id, category_id, created_by, assigned_to, due_at) values
+  ('00000000-0000-0000-0000-000000000001', 'PSD-2026-001', 'Не працює холодильна вітрина', 'Температура не опускається нижче +12, потрібна діагностика.', 'in_progress', 'critical', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'ca000000-0000-0000-0000-000000000001', '33333333-3333-3333-3333-333333333333', '44444444-4444-4444-4444-444444444444', now() + interval '6 hours'),
+  ('00000000-0000-0000-0000-000000000002', 'PSD-2026-002', 'Планова заміна LED-панелей', 'Частина світильників мерехтить у торговій залі.', 'new', 'medium', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'ca000000-0000-0000-0000-000000000002', '22222222-2222-2222-2222-222222222222', null, now() + interval '5 days'),
+  ('00000000-0000-0000-0000-000000000003', 'PSD-2026-003', 'Протікання біля мийки', 'Після нічної зміни зʼявляється вода під столом фасування.', 'waiting', 'high', 'cccccccc-cccc-cccc-cccc-cccccccccccc', 'ca000000-0000-0000-0000-000000000003', '22222222-2222-2222-2222-222222222222', '44444444-4444-4444-4444-444444444444', now() + interval '2 days')
+on conflict (id) do nothing;
+
+insert into public.ticket_comments (ticket_id, author_id, body) values
+  ('00000000-0000-0000-0000-000000000001', '22222222-2222-2222-2222-222222222222', 'Передав виконавцю, потрібна перевірка компресора та датчика температури.');
+
+insert into public.ticket_history (ticket_id, actor_id, action, metadata) values
+  ('00000000-0000-0000-0000-000000000001', '33333333-3333-3333-3333-333333333333', 'Заявку створено', '{"status":"new"}'),
+  ('00000000-0000-0000-0000-000000000001', '22222222-2222-2222-2222-222222222222', 'Призначено виконавця', '{"assigned_to":"44444444-4444-4444-4444-444444444444"}');
