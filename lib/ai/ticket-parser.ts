@@ -1,5 +1,5 @@
 import type { AiParsedTicket, AiPriority } from "@/types/ai";
-import { serviceDeskCategories, serviceDeskPriorities } from "./prompts";
+import { serviceDeskCategories, serviceDeskDepartments, serviceDeskPriorities } from "./prompts";
 
 export type AiTicketPriority = (typeof serviceDeskPriorities)[number];
 export type AiTicketCategory = (typeof serviceDeskCategories)[number];
@@ -23,16 +23,14 @@ export type AiTicketClassification = {
   recommendedAssignee?: string | null;
 };
 
-const ACTION_START_RE = /^(потрібно|треба|необхідно|прочистити|прикрутити|замінити|відремонтувати|переклеїти|полагодити|налаштувати|відправити|розвантажити|прибрати|перевірити|не працює|тече|протікає|зламався|зламалась|гуде|набирається)\b/iu;
+const ACTION_START_RE = /^(потрібно|треба|необхідно|прочистити|прикрутити|замінити|відремонтувати|переклеїти|полагодити|налаштувати|відправити|розвантажити|прибрати|перевірити|не працює|не робе|тече|протікає|потік|капає|зламався|зламалась|зламалось|гуде|набирається|вибиває|не відкривається|не закривається)\b/iu;
 
 export function normalizeTicketText(text: string) {
   return text.replace(/\s+/g, " ").trim();
 }
 
 function stripGreeting(text: string) {
-  return text
-    .replace(/^(добрий день|доброго дня|доброго ранку|добрий ранок|вітаю|привіт)[.!,\s-]*/iu, "")
-    .trim();
+  return text.replace(/^(добрий день|доброго дня|доброго ранку|добрий ранок|вітаю|привіт)[.!,\s-]*/iu, "").trim();
 }
 
 function escapeRegExp(value: string) {
@@ -64,23 +62,20 @@ function cleanupTaskText(text: string, objectHints: string[] = []) {
 function splitByActionSeparators(text: string) {
   const protectedText = text.replace(/([А-ЯІЇЄҐA-Z][\p{L}'’ʼ`-]+)\s*,\s*(\d+[а-яa-z]?)/giu, "$1 $2");
   const roughParts = protectedText
-    .split(/(?:;|\n|•|\s+-\s+)|,\s+(?=(?:потрібно|треба|необхідно|прочистити|прикрутити|замінити|відремонтувати|переклеїти|полагодити|налаштувати|відправити|розвантажити|прибрати|перевірити|не працює|тече|протікає|зламався|зламалась)\b)|\s+(?:і|та)\s+(?=(?:потрібно|треба|необхідно|прочистити|прикрутити|замінити|відремонтувати|переклеїти|полагодити|налаштувати|відправити|розвантажити|прибрати|перевірити|не працює|тече|протікає|зламався|зламалась)\b)/giu)
+    .split(/(?:;|\n|•|\s+-\s+)|,\s+(?=(?:потрібно|треба|необхідно|прочистити|прикрутити|замінити|відремонтувати|переклеїти|полагодити|налаштувати|відправити|розвантажити|прибрати|перевірити|не працює|не робе|тече|протікає|потік|капає|зламався|зламалась|зламалось|вибиває)\b)|\s+(?:і|та)\s+(?=(?:потрібно|треба|необхідно|прочистити|прикрутити|замінити|відремонтувати|переклеїти|полагодити|налаштувати|відправити|розвантажити|прибрати|перевірити|не працює|не робе|тече|протікає|потік|капає|зламався|зламалась|зламалось|вибиває)\b)/giu)
     .map((part) => part.trim())
     .filter(Boolean);
 
   if (roughParts.length <= 1) return roughParts;
-
   return roughParts.filter((part) => ACTION_START_RE.test(part) || looksLikeTicket(part));
 }
 
 export function splitPotentialTasks(text: string, objectHints: string[] = []) {
   const cleaned = cleanupTaskText(text, objectHints);
   if (!cleaned) return [];
-
   const parts = splitByActionSeparators(cleaned)
     .map((part) => cleanupTaskText(part, objectHints))
     .filter((part) => part.length >= 8 && looksLikeTicket(part));
-
   return parts.length > 0 ? parts : looksLikeTicket(cleaned) ? [cleaned] : [];
 }
 
@@ -90,26 +85,18 @@ export function shortTitleFromText(text: string) {
     .replace(/^треба\s+/iu, "")
     .replace(/^необхідно\s+/iu, "");
   if (!normalized) return null;
-  return normalized.length > 80 ? `${normalized.slice(0, 77)}...` : capitalizeFirst(normalized);
-}
-
-function capitalizeFirst(value: string) {
-  return value ? value[0].toUpperCase() + value.slice(1) : value;
+  return normalized.length > 80 ? `${normalized.slice(0, 77)}...` : normalized[0].toUpperCase() + normalized.slice(1);
 }
 
 function descriptionFromTask(task: string) {
-  const normalized = normalizeTicketText(task)
-    .replace(/\(([^)]+)\)/g, ". $1")
-    .replace(/\s+\./g, ".")
-    .replace(/\.+/g, ".")
-    .trim();
+  const normalized = normalizeTicketText(task).replace(/\(([^)]+)\)/g, ". $1").replace(/\s+\./g, ".").replace(/\.+/g, ".").trim();
   const withPrefix = /^(потрібно|треба|необхідно)\b/iu.test(normalized) ? normalized : `Потрібно ${normalized}`;
-  return `${capitalizeFirst(withPrefix).replace(/[.!?]+$/, "")}.`;
+  return `${withPrefix[0].toUpperCase() + withPrefix.slice(1).replace(/[.!?]+$/, "")}.`;
 }
 
 function titleFromTask(task: string, category: AiTicketCategory) {
   const value = task.toLowerCase();
-  if (/(унітаз)/u.test(value)) return "Проблема з унітазом";
+  if (/(унітаз)/u.test(value)) return /тече|протіка|потік|капає/u.test(value) ? "Протікає унітаз" : "Проблема з унітазом";
   if (/(змішувач|кран)/u.test(value)) return "Проблема зі змішувачем";
   if (/(кондиціон)/u.test(value)) return "Проблема з кондиціонером";
   if (/(холодиль|морозиль|температура)/u.test(value)) return "Проблема з холодильним обладнанням";
@@ -121,9 +108,9 @@ function titleFromTask(task: string, category: AiTicketCategory) {
 
 export function inferCategory(text: string): AiTicketCategory {
   const value = text.toLowerCase();
-  if (/(унітаз|змішувач|кран|вода|тече|каналізац|раковин|мийк|сифон|труба)/u.test(value)) return "Сантехніка";
-  if (/(світл|ламп|розет|електр|автомат|щиток|нема струму|відсутня електрика|кабель)/u.test(value)) return "Електрика";
-  if (/(плитк|стіна|стеля|двер|ручк|ремонт|будівельн|штукатур|підлога|вхід)/u.test(value)) return "Будівельні роботи";
+  if (/(унітаз|змішувач|кран|вода|тече|протіка|потік|капає|каналізац|раковин|мийк|сифон|труба)/u.test(value)) return "Сантехніка";
+  if (/(світл|ламп|розет|електр|автомат|щиток|нема струму|відсутня електрика|кабель|вибиває)/u.test(value)) return "Електрика";
+  if (/(плитк|стіна|стеля|двер|ручк|ремонт|будівельн|штукатур|підлога|вхід|не відкривається|не закривається)/u.test(value)) return "Будівельні роботи";
   if (/(студент|розвантаж|вантаж|перенести|допомога|відправити)/u.test(value)) return "Роботи студентів";
   if (/(холодиль|морозиль|температура|вітрин|компресор|камера)/u.test(value)) return "Холодильне обладнання";
   if (/(кондиціон|вентиляц|витяжк|клімат)/u.test(value)) return "Кондиціонування та вентиляція";
@@ -141,8 +128,8 @@ export function inferCategory(text: string): AiTicketCategory {
 export function inferPriority(text: string): AiPriority {
   const value = text.toLowerCase();
   if (/(нема електрики|відсутня електрика|затоп|пожеж|дим|аварі|не працює магазин)/u.test(value)) return "critical";
-  if (/(холодиль|морозиль|температура \+?1[0-9]|протікає|тече сильно|не працює каса|не працює кондиціонер|дуже гуде|набирається вода)/u.test(value)) return "high";
-  if (/(тече|не працює|зламав|потрібно|треба|терміново|прочистити)/u.test(value)) return "medium";
+  if (/(холодиль|морозиль|температура \+?1[0-9]|протікає|тече сильно|не працює каса|не працює кондиціонер|дуже гуде|набирається вода|вибиває світло)/u.test(value)) return "high";
+  if (/(тече|капає|не працює|не робе|зламав|потрібно|треба|терміново|прочистити)/u.test(value)) return "medium";
   return "low";
 }
 
@@ -163,7 +150,7 @@ export function recommendedAssigneeForCategory(category: AiTicketCategory) {
 
 export function looksLikeTicket(text: string) {
   const value = text.toLowerCase();
-  return /(не працю|злам|тече|потрібно|треба|температура|нема|відсутн|протіка|поламан|замінити|відправити|розвантаж|ремонт|переклеїти|не вмика|не включа|прочистити|прикрутити|гуде|набирається вода)/u.test(value);
+  return /(не працю|не робе|злам|тече|протіка|потік|капає|потрібно|треба|температура|нема|відсутн|поламан|замінити|відправити|розвантаж|ремонт|переклеїти|не вмика|не включа|прочистити|прикрутити|гуде|набирається|вибиває світло|не відкривається|не закривається)/u.test(value);
 }
 
 export function hasProblemDescription(text: string) {
@@ -179,7 +166,9 @@ export function parsePotentialTickets(text: string, objectHints: string[] = []):
       description: descriptionFromTask(task),
       category,
       priority: inferPriority(task),
-      recommendedDepartment: recommendedDepartmentForCategory(category),
+      recommendedDepartment: serviceDeskDepartments.includes(recommendedDepartmentForCategory(category) as (typeof serviceDeskDepartments)[number])
+        ? recommendedDepartmentForCategory(category)
+        : "Технічний відділ",
       confidence: Math.min(0.96, 0.68 + (ACTION_START_RE.test(task) ? 0.12 : 0) + (category !== "Інше" ? 0.08 : 0)),
     };
   });

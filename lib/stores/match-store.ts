@@ -1,34 +1,22 @@
 import { storeAddresses, type StoreAddress } from "@/lib/data/store-addresses";
 
-export type StoreMatchQuality = "exact" | "high_confidence" | "partial";
+export type StoreMatchStatus = "exact" | "high_confidence" | "ambiguous" | "not_found";
 
 export type StoreMatchCandidate = {
   store: StoreAddress;
   score: number;
-  confidence: number;
-  matchedBy: "name" | "alias" | "address" | "city_address" | "tokens";
-  matchedText: string;
+  matchedBy: "name" | "address" | "alias" | "city_address" | "normalized";
 };
 
-export type StoreMatch =
-  | {
-      status: "matched";
-      quality: StoreMatchQuality;
-      store: StoreAddress;
-      score: number;
-      confidence: number;
-      matchedBy: StoreMatchCandidate["matchedBy"];
-      candidates: StoreMatchCandidate[];
-    }
-  | {
-      status: "ambiguous";
-      quality: "ambiguous";
-      store: null;
-      score: number;
-      confidence: number;
-      matchedBy: "ambiguous";
-      candidates: StoreMatchCandidate[];
-    };
+export type StoreMatchResult = {
+  status: StoreMatchStatus;
+  bestMatch: StoreAddress | null;
+  candidates: StoreMatchCandidate[];
+  confidence: number;
+  reason: string;
+};
+
+export type StoreMatch = StoreMatchResult;
 
 const STREET_WORDS = new Set(["вул", "вулиця", "проспект", "пр", "провулок", "м", "місто", "район", "магазин"]);
 
@@ -42,10 +30,18 @@ export function normalizeStoreText(value: string) {
     .trim();
 }
 
+function compact(value: string) {
+  return normalizeStoreText(value).replace(/\s+/g, "");
+}
+
 function tokens(value: string) {
   return normalizeStoreText(value)
     .split(" ")
     .filter((token) => token.length > 1 && !STREET_WORDS.has(token));
+}
+
+function hasHouseNumber(value: string) {
+  return /\b\d+[a-zа-яіїєґ]?\b/iu.test(value);
 }
 
 function tokenScore(text: string, candidate: string) {
@@ -56,100 +52,117 @@ function tokenScore(text: string, candidate: string) {
   return matched / candidateTokens.length;
 }
 
-function hasHouseNumber(value: string) {
-  return /\b\d+[a-zа-яіїєґ]?\b/iu.test(value);
-}
-
-function scoreCandidate(text: string, store: StoreAddress): StoreMatchCandidate | null {
-  const normalizedText = normalizeStoreText(text);
-  const searchable = [
+function candidateValues(store: StoreAddress) {
+  return [
     { value: store.name, matchedBy: "name" as const, base: 98 },
     { value: store.address, matchedBy: "address" as const, base: 100 },
+    { value: `${store.city} ${store.address}`, matchedBy: "city_address" as const, base: 94 },
     ...store.aliases.map((alias) => ({ value: alias, matchedBy: "alias" as const, base: 96 })),
   ];
+}
 
-  let best: StoreMatchCandidate | null = null;
-  for (const candidate of searchable) {
+function scoreStore(text: string, store: StoreAddress): StoreMatchCandidate {
+  const normalizedText = normalizeStoreText(text);
+  const compactText = compact(text);
+  let best: StoreMatchCandidate = { store, score: 0, matchedBy: "normalized" };
+
+  for (const candidate of candidateValues(store)) {
     const normalizedCandidate = normalizeStoreText(candidate.value);
+    const compactCandidate = compact(candidate.value);
     if (!normalizedCandidate) continue;
 
     if (normalizedText.includes(normalizedCandidate)) {
-      const score = candidate.base;
-      best = { store, score, confidence: score / 100, matchedBy: candidate.matchedBy, matchedText: candidate.value };
+      if (candidate.base > best.score) best = { store, score: candidate.base, matchedBy: candidate.matchedBy };
+      continue;
+    }
+
+    if (compactCandidate && compactText.includes(compactCandidate)) {
+      const score = candidate.base - 1;
+      if (score > best.score) best = { store, score, matchedBy: candidate.matchedBy };
       continue;
     }
 
     const overlap = tokenScore(normalizedText, normalizedCandidate);
-    if (overlap >= 0.8) {
-      const score = Math.round(candidate.base * overlap);
-      if (!best || score > best.score) best = { store, score, confidence: score / 100, matchedBy: candidate.matchedBy, matchedText: candidate.value };
+    if (overlap >= 0.35) {
+      const numberPenalty = hasHouseNumber(store.address) && !hasHouseNumber(normalizedText) ? 18 : 0;
+      const score = Math.round(candidate.base * overlap) - numberPenalty;
+      if (score > best.score) best = { store, score, matchedBy: candidate.matchedBy };
     }
   }
 
-  const cityAddress = `${store.city} ${store.address}`;
-  const cityAddressOverlap = tokenScore(normalizedText, cityAddress);
-  if (cityAddressOverlap >= 0.65) {
-    const numberPenalty = hasHouseNumber(store.address) && !hasHouseNumber(normalizedText) ? 18 : 0;
-    const score = Math.round(92 * cityAddressOverlap) - numberPenalty;
-    if (!best || score > best.score) best = { store, score, confidence: Math.max(0, score) / 100, matchedBy: "city_address", matchedText: cityAddress };
-  }
+  const allText = `${store.name} ${store.city} ${store.district} ${store.address} ${store.aliases.join(" ")}`;
+  const normalizedScore = Math.round(78 * tokenScore(normalizedText, allText)) - (hasHouseNumber(store.address) && !hasHouseNumber(normalizedText) ? 20 : 0);
+  if (normalizedScore > best.score) best = { store, score: normalizedScore, matchedBy: "normalized" };
 
-  const fullText = `${store.name} ${store.city} ${store.district} ${store.address} ${store.aliases.join(" ")}`;
-  const overlap = tokenScore(normalizedText, fullText);
-  if (overlap >= 0.35) {
-    const numberPenalty = hasHouseNumber(store.address) && !hasHouseNumber(normalizedText) ? 20 : 0;
-    const score = Math.round(78 * overlap) - numberPenalty;
-    if (!best || score > best.score) best = { store, score, confidence: Math.max(0, score) / 100, matchedBy: "tokens", matchedText: fullText };
-  }
-
-  return best && best.score >= 45 ? best : null;
+  return { ...best, score: Math.max(0, Math.min(100, best.score)) };
 }
 
-function qualityForScore(score: number): StoreMatchQuality {
-  if (score >= 95) return "exact";
-  if (score >= 78) return "high_confidence";
-  return "partial";
-}
-
-export function isReliableStoreMatch(match: StoreMatch | null) {
-  return match?.status === "matched" && (match.quality === "exact" || match.quality === "high_confidence");
-}
-
-export function matchStore(text: string): StoreMatch | null {
-  const normalizedText = normalizeStoreText(text);
-  if (!normalizedText) return null;
-
-  const candidates = storeAddresses
-    .map((store) => scoreCandidate(normalizedText, store))
-    .filter((candidate): candidate is StoreMatchCandidate => Boolean(candidate))
-    .sort((a, b) => b.score - a.score);
-
-  if (candidates.length === 0) return null;
-
+function buildResult(candidates: StoreMatchCandidate[]): StoreMatchResult {
   const [best, second] = candidates;
-  const closeCandidates = candidates.filter((candidate) => best.score - candidate.score <= 8);
-  const ambiguousBySharedStreet = closeCandidates.length > 1 && best.score < 95;
-  const ambiguousByNumberlessAddress = closeCandidates.length > 1 && closeCandidates.some((candidate) => hasHouseNumber(candidate.store.address)) && !hasHouseNumber(normalizedText);
+  if (!best || best.score < 45) {
+    return {
+      status: "not_found",
+      bestMatch: null,
+      candidates: candidates.slice(0, 5),
+      confidence: 0,
+      reason: "Локальний довідник не знайшов достатньо схожий об'єкт.",
+    };
+  }
 
-  if (second && (ambiguousBySharedStreet || ambiguousByNumberlessAddress)) {
+  const closeCandidates = candidates.filter((candidate) => best.score - candidate.score <= 8);
+  const hasAmbiguousHouseNumber = closeCandidates.length > 1 && closeCandidates.some((candidate) => hasHouseNumber(candidate.store.address));
+  if (second && best.score < 95 && (closeCandidates.length > 1 || hasAmbiguousHouseNumber)) {
     return {
       status: "ambiguous",
-      quality: "ambiguous",
-      store: null,
-      score: best.score,
-      confidence: best.confidence,
-      matchedBy: "ambiguous",
-      candidates: closeCandidates,
+      bestMatch: null,
+      candidates: closeCandidates.slice(0, 5),
+      confidence: best.score / 100,
+      reason: "Знайдено кілька схожих об'єктів, потрібне уточнення AI.",
+    };
+  }
+
+  if (best.score >= 95) {
+    return {
+      status: "exact",
+      bestMatch: best.store,
+      candidates: candidates.slice(0, 5),
+      confidence: best.score / 100,
+      reason: "Локально знайдено точний збіг об'єкта.",
+    };
+  }
+
+  if (best.score >= 78) {
+    return {
+      status: "high_confidence",
+      bestMatch: best.store,
+      candidates: candidates.slice(0, 5),
+      confidence: best.score / 100,
+      reason: "Локально знайдено об'єкт з високою впевненістю.",
     };
   }
 
   return {
-    status: "matched",
-    quality: qualityForScore(best.score),
-    store: best.store,
-    score: best.score,
-    confidence: best.confidence,
-    matchedBy: best.matchedBy,
-    candidates,
+    status: "ambiguous",
+    bestMatch: null,
+    candidates: candidates.slice(0, 5),
+    confidence: best.score / 100,
+    reason: "Локальний збіг недостатньо впевнений.",
   };
+}
+
+export function getStoreCandidatesForAi(text: string) {
+  const normalizedText = normalizeStoreText(text);
+  if (!normalizedText) return [];
+  return storeAddresses
+    .map((store) => scoreStore(normalizedText, store))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 5);
+}
+
+export function matchStore(text: string): StoreMatchResult {
+  return buildResult(getStoreCandidatesForAi(text));
+}
+
+export function isReliableStoreMatch(match: StoreMatchResult | null | undefined) {
+  return match?.status === "exact" || match?.status === "high_confidence";
 }

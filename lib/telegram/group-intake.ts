@@ -1,5 +1,5 @@
-import { analyzeGroupMessage } from "@/lib/ai/classifier";
-import { isReliableStoreMatch, matchStore, normalizeStoreText, type StoreMatch } from "@/lib/stores/match-store";
+import { analyzeTelegramGroupMessage } from "@/lib/ai/group-message-analyzer";
+import { matchStore, normalizeStoreText, type StoreMatchResult } from "@/lib/stores/match-store";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { AiParsedTicket } from "@/types/ai";
 import type { Category, CompanyObject, Profile, TicketPriority } from "@/types/domain";
@@ -37,11 +37,16 @@ function objectScore(object: CompanyObject, aliases: string[]) {
   }, 0);
 }
 
-async function findObject(objects: CompanyObject[], storeMatch: StoreMatch) {
-  if (storeMatch.status !== "matched") return null;
-  const aliases = [storeMatch.store.name, storeMatch.store.address, storeMatch.store.city, storeMatch.store.district, storeMatch.store.id, ...storeMatch.store.aliases];
+async function findObject(objects: CompanyObject[], analysisObjectId: string, localStoreMatch: StoreMatchResult) {
+  const matchedStore =
+    localStoreMatch.bestMatch?.id === analysisObjectId
+      ? localStoreMatch.bestMatch
+      : localStoreMatch.candidates.find((candidate) => candidate.store.id === analysisObjectId)?.store;
+  if (!matchedStore) return null;
+
+  const aliases = [matchedStore.name, matchedStore.address, matchedStore.city, matchedStore.district, matchedStore.id, ...matchedStore.aliases];
   const scored = objects
-    .filter((object) => object.type === storeMatch.store.objectType)
+    .filter((object) => object.type === matchedStore.objectType)
     .map((object) => ({ object, score: objectScore(object, aliases) }))
     .filter((item) => item.score > 0)
     .sort((a, b) => b.score - a.score);
@@ -95,7 +100,7 @@ async function createPendingTicket({
   sourceGroupId,
   originalText,
   analysis,
-  storeMatch,
+  localStoreMatch,
 }: {
   supabase: ReturnType<typeof createAdminClient>;
   parsedTicket: AiParsedTicket;
@@ -105,8 +110,8 @@ async function createPendingTicket({
   message: TelegramMessage;
   sourceGroupId: string;
   originalText: string;
-  analysis: Awaited<ReturnType<typeof analyzeGroupMessage>>;
-  storeMatch: Extract<StoreMatch, { status: "matched" }>;
+  analysis: Awaited<ReturnType<typeof analyzeTelegramGroupMessage>>;
+  localStoreMatch: StoreMatchResult;
 }) {
   const telegramUserId = message.from?.id ? String(message.from.id) : null;
   const number = await nextTicketNumber(supabase);
@@ -129,7 +134,7 @@ async function createPendingTicket({
       telegram_user_name: telegramUserName(message),
       original_message_text: originalText,
       ai_confidence: parsedTicket.confidence,
-      ai_raw_result: { analysis, parsedTicket },
+      ai_raw_result: { localStoreMatch, analysis, parsedTicket },
       recommended_department: parsedTicket.recommendedDepartment,
     })
     .select("id, number")
@@ -150,12 +155,10 @@ async function createPendingTicket({
       telegram_message_id: String(message.message_id),
       telegram_source_group_id: sourceGroupId,
       ai_confidence: parsedTicket.confidence,
-      store_match: {
-        id: storeMatch.store.id,
-        quality: storeMatch.quality,
-        score: storeMatch.score,
-        confidence: storeMatch.confidence,
-        matchedBy: storeMatch.matchedBy,
+      local_store_match: {
+        status: localStoreMatch.status,
+        confidence: localStoreMatch.confidence,
+        bestMatch: localStoreMatch.bestMatch?.id ?? null,
       },
       recommended_department: parsedTicket.recommendedDepartment,
     },
@@ -172,26 +175,8 @@ export async function handleTelegramGroupMessage(message: TelegramMessage): Prom
   if (!text) return { handled: true, created: false, reason: "empty_message" };
   if (text.startsWith("/")) return { handled: true, created: false, reason: "command_ignored" };
 
-  const storeMatch = matchStore(text);
-  if (!storeMatch) return { handled: true, created: false, reason: "store_not_found" };
-  if (storeMatch.status === "ambiguous") {
-    console.info("[telegram-group-intake] ambiguous_store", {
-      message_id: message.message_id,
-      candidates: storeMatch.candidates.map((candidate) => ({ id: candidate.store.id, score: candidate.score, matchedBy: candidate.matchedBy })),
-    });
-    return { handled: true, created: false, reason: "ambiguous_store" };
-  }
-  if (!isReliableStoreMatch(storeMatch)) {
-    console.info("[telegram-group-intake] weak_store_match", {
-      message_id: message.message_id,
-      store_id: storeMatch.store.id,
-      quality: storeMatch.quality,
-      score: storeMatch.score,
-    });
-    return { handled: true, created: false, reason: "weak_store_match" };
-  }
-
-  const analysis = await analyzeGroupMessage({ text, source: "telegram_group", storeMatch });
+  const localStoreMatch = matchStore(text);
+  const analysis = await analyzeTelegramGroupMessage({ text, localStoreMatch });
   if (!analysis.isTicketMessage) return { handled: true, created: false, reason: "not_ticket" };
   if (!analysis.objectId) return { handled: true, created: false, reason: "store_not_found" };
   if (analysis.confidence < 0.6) return { handled: true, created: false, reason: "low_confidence" };
@@ -205,7 +190,7 @@ export async function handleTelegramGroupMessage(message: TelegramMessage): Prom
     supabase.from("objects").select("*").eq("is_active", true),
     supabase.from("categories").select("*").eq("is_active", true),
   ]);
-  const object = await findObject((objects ?? []) as CompanyObject[], storeMatch);
+  const object = await findObject((objects ?? []) as CompanyObject[], analysis.objectId, localStoreMatch);
   if (!object) return { handled: true, created: false, reason: "database_object_not_found" };
 
   const telegramUserId = message.from?.id ? String(message.from.id) : null;
@@ -231,7 +216,7 @@ export async function handleTelegramGroupMessage(message: TelegramMessage): Prom
       sourceGroupId,
       originalText: text,
       analysis,
-      storeMatch,
+      localStoreMatch,
     });
     if (ticket) created.push(ticket);
   }

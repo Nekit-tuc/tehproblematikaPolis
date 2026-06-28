@@ -6,14 +6,23 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
+import type { StoreMatchResult } from "@/lib/stores/match-store";
 import type { AiGroupMessageAnalysis } from "@/types/ai";
 
-const exampleText = "Добрий день. Шевченка,43 потрібно прочистить унітаз(дуже гуде, та набирається вода), прикрутити ручку в кабінеті керуючої";
+const exampleText = "Хлібна 22 протікає унітаз";
 
 type ApiResponse = {
   ok: boolean;
   data?: AiGroupMessageAnalysis;
+  analysis?: AiGroupMessageAnalysis;
+  localStoreMatch?: StoreMatchResult;
   error?: string;
+};
+
+type TestResult = {
+  localStoreMatch: StoreMatchResult;
+  analysis: AiGroupMessageAnalysis;
+  raw: ApiResponse;
 };
 
 function percent(value: number) {
@@ -22,7 +31,7 @@ function percent(value: number) {
 
 export function AiTestClient() {
   const [text, setText] = useState("");
-  const [result, setResult] = useState<AiGroupMessageAnalysis | null>(null);
+  const [result, setResult] = useState<TestResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
@@ -43,10 +52,11 @@ export function AiTestClient() {
           body: JSON.stringify({ text: message }),
         });
         const payload = (await response.json()) as ApiResponse;
-        if (!response.ok || !payload.ok || !payload.data) {
+        const analysis = payload.analysis ?? payload.data;
+        if (!response.ok || !payload.ok || !analysis || !payload.localStoreMatch) {
           throw new Error(payload.error ?? "Не вдалося виконати аналіз.");
         }
-        setResult(payload.data);
+        setResult({ localStoreMatch: payload.localStoreMatch, analysis, raw: payload });
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : "Не вдалося виконати аналіз.");
       }
@@ -88,21 +98,54 @@ export function AiTestClient() {
           <>
             <Card>
               <CardHeader>
-                <CardTitle>Результат аналізу</CardTitle>
-                <CardDescription>{result.reason}</CardDescription>
+                <CardTitle>Локальний match-store</CardTitle>
+                <CardDescription>{result.localStoreMatch.reason}</CardDescription>
               </CardHeader>
-              <CardContent className="grid gap-3 md:grid-cols-2">
-                <Info label="Це заявка" value={result.isTicketMessage ? "Так" : "Ні"} />
-                <Info label="Confidence" value={percent(result.confidence)} />
-                <Info label="Об'єкт" value={result.objectName ?? "-"} />
-                <Info label="Адреса" value={result.address ?? "-"} />
-                <Info label="Missing fields" value={result.missingFields.length ? result.missingFields.join(", ") : "-"} />
+              <CardContent className="space-y-4">
+                <div className="grid gap-3 md:grid-cols-3">
+                  <Info label="Status" value={result.localStoreMatch.status} />
+                  <Info label="Confidence" value={percent(result.localStoreMatch.confidence)} />
+                  <Info label="Best match" value={result.localStoreMatch.bestMatch?.name ?? "-"} />
+                </div>
+                {result.localStoreMatch.candidates.length > 0 ? (
+                  <div className="space-y-2">
+                    <div className="text-sm font-medium">Candidates</div>
+                    <div className="grid gap-2">
+                      {result.localStoreMatch.candidates.map((candidate) => (
+                        <div key={candidate.store.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-stone-950/30 p-3 text-sm">
+                          <div>
+                            <div className="font-medium">{candidate.store.name}</div>
+                            <div className="text-xs text-muted-foreground">{candidate.store.address}</div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Badge tone="gray">{candidate.matchedBy}</Badge>
+                            <Badge tone={candidate.score >= 78 ? "green" : "orange"}>{candidate.score}</Badge>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
               </CardContent>
             </Card>
 
-            {result.tickets.length > 0 ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>AI analysis</CardTitle>
+                <CardDescription>{result.analysis.reason}</CardDescription>
+              </CardHeader>
+              <CardContent className="grid gap-3 md:grid-cols-2">
+                <Info label="Це заявка" value={result.analysis.isTicketMessage ? "Так" : "Ні"} />
+                <Info label="Confidence" value={percent(result.analysis.confidence)} />
+                <Info label="Об'єкт" value={result.analysis.objectName ?? "-"} />
+                <Info label="Адреса" value={result.analysis.address ?? "-"} />
+                <Info label="Missing fields" value={result.analysis.missingFields.length ? result.analysis.missingFields.join(", ") : "-"} />
+              </CardContent>
+            </Card>
+
+            {result.analysis.tickets.length > 0 ? (
               <div className="grid gap-4">
-                {result.tickets.map((ticket, index) => (
+                {result.analysis.tickets.map((ticket, index) => (
                   <Card key={`${ticket.title}-${index}`}>
                     <CardHeader>
                       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -128,7 +171,7 @@ export function AiTestClient() {
               </CardHeader>
               <CardContent>
                 <pre className="max-h-[520px] overflow-auto rounded-md border border-border bg-stone-950/60 p-4 text-xs leading-5 text-stone-200">
-                  {JSON.stringify(result, null, 2)}
+                  {JSON.stringify(result.raw, null, 2)}
                 </pre>
               </CardContent>
             </Card>

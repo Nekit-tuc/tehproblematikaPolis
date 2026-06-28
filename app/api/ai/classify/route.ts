@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { analyzeGroupMessage } from "@/lib/ai/classifier";
+import { analyzeTelegramGroupMessage } from "@/lib/ai/group-message-analyzer";
+import { matchStore } from "@/lib/stores/match-store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,8 +13,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, error: "text is required" }, { status: 400 });
     }
 
-    const analysis = await analyzeGroupMessage({ text, source: "api" });
-    return NextResponse.json({ ok: true, data: analysis });
+    const localStoreMatch = matchStore(text);
+    const analysis = await analyzeTelegramGroupMessage({ text, localStoreMatch });
+    return NextResponse.json({ ok: true, data: analysis, localStoreMatch, analysis });
   } catch (error) {
     console.error("AI classify error", error);
     return NextResponse.json({ ok: false, error: "classification failed" }, { status: 500 });

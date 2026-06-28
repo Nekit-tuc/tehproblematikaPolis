@@ -50,6 +50,15 @@ export const storeAddresses: StoreAddress[] = [
     objectType: "store",
   },
   {
+    id: "store_hlibna_022",
+    name: "Магазин Хлібна 22",
+    city: "Житомир",
+    district: "Центр",
+    address: "м. Житомир, вул. Хлібна, 22",
+    aliases: ["Хлібна 22", "Хлібна,22", "Хлібна, 22", "Хлебная 22", "магазин Хлібна 22"],
+    objectType: "store",
+  },
+  {
     id: "store_kyivska_057",
     name: "Магазин Київська 57",
     city: "Житомир",
