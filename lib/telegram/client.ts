@@ -2,6 +2,7 @@ type InlineButton = { text: string; callback_data: string };
 
 export type TelegramUser = {
   id: number;
+  is_bot?: boolean;
   username?: string;
   first_name?: string;
   last_name?: string;
@@ -9,7 +10,7 @@ export type TelegramUser = {
 
 export type TelegramMessage = {
   message_id: number;
-  chat: { id: number };
+  chat: { id: number; type?: "private" | "group" | "supergroup" | "channel"; title?: string };
   from?: TelegramUser;
   text?: string;
   photo?: Array<{ file_id: string; file_unique_id: string; width: number; height: number; file_size?: number }>;

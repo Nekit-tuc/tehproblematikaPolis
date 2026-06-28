@@ -1,4 +1,5 @@
 import { Camera, Clock, MessageSquare } from "lucide-react";
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -9,11 +10,11 @@ import { PhotoSubmitButton } from "@/components/tickets/photo-submit-button";
 import { canAddTicketPhoto, canConfirmTicket, canEditTicket } from "@/lib/auth/permissions";
 import { requireAuth } from "@/lib/auth/server";
 import { photoTypeLabels } from "@/lib/photos";
-import { getTicket, getTicketComments, getTicketHistory, getTicketPhotos } from "@/lib/supabase/queries";
+import { getRelatedTicketsBySourceGroup, getTicket, getTicketComments, getTicketHistory, getTicketPhotos } from "@/lib/supabase/queries";
 import { priorityLabels, statusLabels } from "@/lib/labels";
 import { formatDate } from "@/lib/utils";
 import type { PhotoType, TicketPhotoWithUrl, TicketStatus } from "@/types/domain";
-import { addTicketCommentAction, confirmTicketAction, updateTicketStatusAction, uploadTicketPhotosAction } from "./actions";
+import { addTicketCommentAction, confirmTicketAction, rejectTicketAction, updateTicketStatusAction, uploadTicketPhotosAction } from "./actions";
 
 const photoGroups: PhotoType[] = ["before", "progress", "after"];
 
@@ -35,7 +36,8 @@ export default async function TicketDetailsPage({
   ]);
   const ticket = ticketResult.data;
   if (!ticket && !ticketResult.error) notFound();
-  const error = ticketResult.error ?? commentsResult.error ?? historyResult.error ?? photosResult.error;
+  const relatedResult = ticket?.telegram_source_group_id ? await getRelatedTicketsBySourceGroup(ticket.telegram_source_group_id, ticket.id) : { data: [], error: null };
+  const error = ticketResult.error ?? commentsResult.error ?? historyResult.error ?? photosResult.error ?? relatedResult.error;
 
   return (
     <div className="page-shell space-y-6">
@@ -59,10 +61,15 @@ export default async function TicketDetailsPage({
             <div className="flex flex-wrap justify-end gap-2">
               <Badge tone="orange">{statusLabels[ticket.status]}</Badge>
               <Badge tone={ticket.priority === "critical" ? "red" : "default"}>{priorityLabels[ticket.priority]}</Badge>
-              {canConfirmTicket(profile) && ticket.status === "new" ? (
-                <form action={confirmTicketAction.bind(null, ticket.id)}>
-                  <Button type="submit">Підтвердити і запустити в роботу</Button>
-                </form>
+              {canConfirmTicket(profile) && ticket.status === "pending_review" ? (
+                <>
+                  <form action={confirmTicketAction.bind(null, ticket.id)}>
+                    <Button type="submit">Підтвердити заявку</Button>
+                  </form>
+                  <form action={rejectTicketAction.bind(null, ticket.id)}>
+                    <Button type="submit" variant="destructive">Відхилити заявку</Button>
+                  </form>
+                </>
               ) : null}
             </div>
           </div>
@@ -93,6 +100,29 @@ export default async function TicketDetailsPage({
                         </Button>
                       ))}
                     </form>
+                  </CardContent>
+                </Card>
+              ) : null}
+              {relatedResult.data.length > 0 ? (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Пов'язані заявки з цього повідомлення</CardTitle>
+                    <CardDescription>Ці заявки створені з того самого повідомлення Telegram-групи.</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    {relatedResult.data.map((relatedTicket) => (
+                      <Link
+                        key={relatedTicket.id}
+                        href={`/tickets/${relatedTicket.id}`}
+                        className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-stone-950/30 p-3 text-sm transition-colors hover:bg-stone-900/70"
+                      >
+                        <div>
+                          <div className="font-medium text-orange-200">{relatedTicket.number} · {relatedTicket.title}</div>
+                          <div className="mt-1 text-xs text-muted-foreground">{relatedTicket.category?.name ?? "Без категорії"}</div>
+                        </div>
+                        <Badge tone={relatedTicket.status === "done" ? "green" : relatedTicket.status === "rejected" ? "red" : "orange"}>{statusLabels[relatedTicket.status]}</Badge>
+                      </Link>
+                    ))}
                   </CardContent>
                 </Card>
               ) : null}

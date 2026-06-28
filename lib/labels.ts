@@ -9,11 +9,13 @@ export const roleLabels: Record<UserRole, string> = {
 };
 
 export const statusLabels: Record<TicketStatus, string> = {
+  pending_review: "Очікує підтвердження",
   new: "Нова",
   in_progress: "В роботі",
   waiting: "Очікує",
   done: "Виконана",
   cancelled: "Скасована",
+  rejected: "Відхилена",
 };
 
 export const priorityLabels: Record<TicketPriority, string> = {

@@ -7,6 +7,7 @@ export function canAccessRoute(role: UserRole, pathname: string) {
   if (pathname.startsWith("/settings")) return false;
   if (pathname.startsWith("/users")) return role === "management";
   if (pathname.startsWith("/reports")) return role === "management" || role === "tech_manager";
+  if (pathname.startsWith("/ai-test")) return role === "management" || role === "tech_manager";
   if (pathname.startsWith("/tickets/new")) return role === "tech_manager" || role === "store_manager";
   if (pathname.startsWith("/objects")) return role === "management" || role === "tech_manager";
   return pathname.startsWith("/dashboard") || pathname.startsWith("/tickets");
@@ -48,6 +49,10 @@ export function canViewUsers(profile: Profile) {
 }
 
 export function canViewReports(profile: Profile) {
+  return profile.role === "admin" || profile.role === "management" || profile.role === "tech_manager";
+}
+
+export function canUseAiTest(profile: Profile) {
   return profile.role === "admin" || profile.role === "management" || profile.role === "tech_manager";
 }
 

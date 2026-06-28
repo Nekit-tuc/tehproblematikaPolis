@@ -1,6 +1,6 @@
 export type UserRole = "admin" | "management" | "tech_manager" | "worker" | "store_manager";
 export type ObjectType = "store" | "warehouse" | "production" | "office" | "other";
-export type TicketStatus = "new" | "in_progress" | "waiting" | "done" | "cancelled";
+export type TicketStatus = "pending_review" | "new" | "in_progress" | "waiting" | "done" | "cancelled" | "rejected";
 export type TicketPriority = "low" | "medium" | "high" | "critical";
 export type PhotoType = "before" | "progress" | "after";
 
@@ -52,6 +52,16 @@ export interface Ticket {
   assigned_to?: string | null;
   due_at?: string | null;
   completed_at?: string | null;
+  source?: string | null;
+  telegram_chat_id?: string | null;
+  telegram_message_id?: string | null;
+  telegram_source_group_id?: string | null;
+  telegram_user_id?: string | null;
+  telegram_user_name?: string | null;
+  original_message_text?: string | null;
+  ai_confidence?: number | null;
+  ai_raw_result?: Record<string, unknown> | null;
+  recommended_department?: string | null;
   created_at: string;
   updated_at: string;
 }

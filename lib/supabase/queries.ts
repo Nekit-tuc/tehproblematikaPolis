@@ -75,6 +75,18 @@ export async function getTicket(id: string): Promise<QueryResult<TicketWithRelat
   return { data: ticket, error: error?.message ?? null };
 }
 
+export async function getRelatedTicketsBySourceGroup(sourceGroupId: string, currentTicketId: string): Promise<QueryResult<TicketWithRelations[]>> {
+  if (!hasSupabaseEnv()) return emptyWithError([]);
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("tickets")
+    .select(ticketSelect)
+    .eq("telegram_source_group_id", sourceGroupId)
+    .neq("id", currentTicketId)
+    .order("created_at", { ascending: true });
+  return { data: (data ?? []) as TicketWithRelations[], error: error?.message ?? null };
+}
+
 export async function getTicketComments(ticketId: string): Promise<QueryResult<TicketCommentWithAuthor[]>> {
   if (!hasSupabaseEnv()) return emptyWithError([]);
   const supabase = await createClient();
