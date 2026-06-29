@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { analyzeTelegramGroupMessageWithMeta } from "@/lib/ai/group-message-analyzer";
+import { getOpenAiModel } from "@/lib/ai/openai-client";
 import { matchStore } from "@/lib/stores/match-store";
 
 export const runtime = "nodejs";
@@ -20,8 +21,10 @@ export async function POST(request: Request) {
       data: result.analysis,
       localStoreMatch,
       analysis: result.analysis,
+      aiMode: result.mode,
       mode: result.mode,
-      model: result.model,
+      openaiConfigured: result.openaiConfigured,
+      model: result.model ?? getOpenAiModel(),
       fallbackReason: result.fallbackReason,
     });
   } catch (error) {

@@ -17,7 +17,9 @@ type ApiResponse = {
   data?: AiGroupMessageAnalysis;
   analysis?: AiGroupMessageAnalysis;
   localStoreMatch?: StoreMatchResult;
+  aiMode?: "openai" | "fallback";
   mode?: "openai" | "fallback";
+  openaiConfigured?: boolean;
   model?: string | null;
   fallbackReason?: string;
   error?: string;
@@ -104,6 +106,19 @@ export function AiTestClient() {
           <>
             <Card>
               <CardHeader>
+                <CardTitle>OpenAI diagnostics</CardTitle>
+                <CardDescription>Server-side ENV check for Vercel. API key value is never returned.</CardDescription>
+              </CardHeader>
+              <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <Info label="AI mode" value={result.raw.aiMode ?? result.raw.mode ?? "-"} />
+                <Info label="OpenAI configured" value={result.raw.openaiConfigured ? "true" : "false"} />
+                <Info label="Model" value={result.raw.model ?? "-"} />
+                <Info label="Fallback reason" value={result.raw.fallbackReason ?? "-"} />
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
                 <CardTitle>Local Object Matcher</CardTitle>
                 <CardDescription>{result.localStoreMatch.reason}</CardDescription>
               </CardHeader>
@@ -153,7 +168,7 @@ export function AiTestClient() {
                 <Info label="Адреса" value={result.analysis.address ?? "-"} />
                 <Info label="Work Items" value={String(result.analysis.workItems.length)} />
                 <Info label="Tickets alias" value={String(result.analysis.tickets.length)} />
-                <Info label="Mode" value={result.raw.mode ?? "-"} />
+                <Info label="Mode" value={result.raw.aiMode ?? result.raw.mode ?? "-"} />
                 <Info label="Model" value={result.raw.model ?? "-"} />
                 {result.raw.fallbackReason ? <Info label="Fallback reason" value={result.raw.fallbackReason} /> : null}
                 <Info label="Missing fields" value={result.analysis.missingFields.length ? result.analysis.missingFields.join(", ") : "-"} />

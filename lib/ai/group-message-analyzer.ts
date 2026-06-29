@@ -19,8 +19,18 @@ export type AnalyzeTelegramGroupMessageResult = {
   analysis: AiGroupMessageAnalysis;
   mode: AiAnalyzerMode;
   model: string | null;
+  openaiConfigured: boolean;
   fallbackReason?: string;
 };
+
+class OpenAiAnalyzerError extends Error {
+  constructor(
+    public readonly code: "sdk" | "request" | "invalid_json",
+    message: string,
+  ) {
+    super(message);
+  }
+}
 
 function objectHintsFromMatch(match: StoreMatchResult | null) {
   const store = match?.bestMatch;
@@ -35,6 +45,7 @@ function fallbackAnalyze(input: AnalyzeTelegramGroupMessageInput, localStoreMatc
       analysis: safeNoTicket(),
       mode: "fallback",
       model: null,
+      openaiConfigured: hasOpenAiApiKey(),
       fallbackReason: fallbackReason ?? "Повідомлення не схоже на технічну заявку.",
     };
   }
@@ -44,6 +55,7 @@ function fallbackAnalyze(input: AnalyzeTelegramGroupMessageInput, localStoreMatc
       analysis: safeObjectMissing(),
       mode: "fallback",
       model: null,
+      openaiConfigured: hasOpenAiApiKey(),
       fallbackReason: fallbackReason ?? "Object Matcher не визначив об'єкт з достатньою впевненістю.",
     };
   }
@@ -66,6 +78,7 @@ function fallbackAnalyze(input: AnalyzeTelegramGroupMessageInput, localStoreMatc
     }),
     mode: "fallback",
     model: null,
+    openaiConfigured: hasOpenAiApiKey(),
     fallbackReason,
   };
 }
@@ -188,31 +201,57 @@ function enforceObjectPolicy(analysis: AiGroupMessageAnalysis, localStoreMatch: 
 }
 
 async function analyzeWithOpenAi(input: AnalyzeTelegramGroupMessageInput, localStoreMatch: StoreMatchResult): Promise<AiGroupMessageAnalysis> {
-  const client = getOpenAiClient();
-  if (!client) throw new Error("OPENAI_API_KEY is not configured");
+  const { client, error } = await getOpenAiClient();
+  if (!client) throw new OpenAiAnalyzerError(error === "OpenAI SDK error" ? "sdk" : "request", error ?? "OpenAI request failed");
   const categories = input.categories ?? serviceDeskCategories;
   const priorities = input.priorities ?? serviceDeskPriorities;
   const departments = input.recommendedDepartments ?? serviceDeskDepartments;
 
-  const completion = await client.chat.completions.create({
-    model: getOpenAiModel(),
-    temperature: 0.1,
-    response_format: { type: "json_object" },
-    messages: [
-      { role: "system", content: ticketClassifierSystemPrompt },
-      { role: "user", content: buildPrompt({ text: input.text, localStoreMatch, categories, priorities, departments }) },
-    ],
-  });
+  let content: string | null | undefined;
+  try {
+    const completion = await client.chat.completions.create({
+      model: getOpenAiModel(),
+      temperature: 0.1,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: ticketClassifierSystemPrompt },
+        { role: "user", content: buildPrompt({ text: input.text, localStoreMatch, categories, priorities, departments }) },
+      ],
+    });
+    content = completion.choices[0]?.message?.content;
+  } catch (requestError) {
+    throw new OpenAiAnalyzerError("request", shortErrorMessage(requestError));
+  }
 
-  const content = completion.choices[0]?.message?.content;
-  if (!content) throw new Error("OpenAI returned empty response");
-  const parsed = parseAiAnalysisJson({
-    content,
-    allowedCategories: categories,
-    allowedPriorities: priorities,
-    allowedDepartments: departments,
-  });
+  if (!content) throw new OpenAiAnalyzerError("invalid_json", "OpenAI returned invalid JSON");
+
+  let parsed: AiGroupMessageAnalysis;
+  try {
+    parsed = parseAiAnalysisJson({
+      content,
+      allowedCategories: categories,
+      allowedPriorities: priorities,
+      allowedDepartments: departments,
+    });
+  } catch (parseError) {
+    console.error("[ai-analyzer] OpenAI JSON parsing failed", parseError);
+    throw new OpenAiAnalyzerError("invalid_json", "OpenAI returned invalid JSON");
+  }
   return enforceObjectPolicy(parsed, localStoreMatch);
+}
+
+function shortErrorMessage(error: unknown) {
+  if (error instanceof Error && error.message.trim()) return error.message.trim().slice(0, 180);
+  return "unknown error";
+}
+
+function fallbackReasonFromOpenAiError(error: unknown) {
+  if (error instanceof OpenAiAnalyzerError) {
+    if (error.code === "sdk") return "OpenAI SDK error";
+    if (error.code === "invalid_json") return "OpenAI returned invalid JSON";
+    return `OpenAI request failed: ${error.message}`;
+  }
+  return `OpenAI request failed: ${shortErrorMessage(error)}`;
 }
 
 export async function analyzeTelegramGroupMessageWithMeta(input: AnalyzeTelegramGroupMessageInput): Promise<AnalyzeTelegramGroupMessageResult> {
@@ -226,9 +265,9 @@ export async function analyzeTelegramGroupMessageWithMeta(input: AnalyzeTelegram
 
   try {
     const analysis = await analyzeWithOpenAi(input, localStoreMatch);
-    return { analysis, mode: "openai", model: getOpenAiModel() };
+    return { analysis, mode: "openai", model: getOpenAiModel(), openaiConfigured: true };
   } catch (error) {
-    const fallbackReason = error instanceof Error ? error.message : "OpenAI analysis failed";
+    const fallbackReason = fallbackReasonFromOpenAiError(error);
     console.error("[ai-analyzer] OpenAI analysis failed, using AI v2 fallback parser.", error);
     return fallbackAnalyze(input, localStoreMatch, fallbackReason);
   }
