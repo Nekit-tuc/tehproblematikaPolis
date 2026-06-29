@@ -115,14 +115,20 @@ export function AiTestClient() {
                     <div className="text-sm font-medium">Кандидати</div>
                     <div className="grid gap-2">
                       {result.localStoreMatch.candidates.map((candidate) => (
-                        <div key={candidate.store.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-stone-950/30 p-3 text-sm">
-                          <div>
+                        <div key={candidate.store.id} className="grid gap-3 rounded-md border border-border bg-stone-950/30 p-3 text-sm">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div>
                             <div className="font-medium">{candidate.store.name}</div>
                             <div className="text-xs text-muted-foreground">{candidate.store.address}</div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Badge tone="gray">{candidate.matchedBy}</Badge>
+                              <Badge tone={candidate.score >= 85 ? "green" : candidate.score >= 50 ? "orange" : "gray"}>{candidate.score}</Badge>
+                            </div>
                           </div>
-                          <div className="flex items-center gap-2">
-                            <Badge tone="gray">{candidate.matchedBy}</Badge>
-                            <Badge tone={candidate.score >= 78 ? "green" : "orange"}>{candidate.score}</Badge>
+                          <div className="grid gap-2 md:grid-cols-2">
+                            <TokenList label="Matched tokens" tokens={candidate.matchedTokens ?? []} />
+                            <TokenList label="Missing tokens" tokens={candidate.missingTokens ?? []} />
                           </div>
                         </div>
                       ))}
@@ -196,6 +202,17 @@ function Info({ label, value }: { label: string; value: string }) {
     <div className="rounded-lg border border-border bg-stone-950/30 p-3">
       <div className="text-xs text-muted-foreground">{label}</div>
       <div className="mt-1 break-words text-sm font-medium">{value}</div>
+    </div>
+  );
+}
+
+function TokenList({ label, tokens }: { label: string; tokens: string[] }) {
+  return (
+    <div>
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="mt-1 flex flex-wrap gap-1">
+        {tokens.length > 0 ? tokens.map((token) => <Badge key={`${label}-${token}`} tone="gray">{token}</Badge>) : <span className="text-xs text-muted-foreground">-</span>}
+      </div>
     </div>
   );
 }

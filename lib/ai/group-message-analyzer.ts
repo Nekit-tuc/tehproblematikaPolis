@@ -64,6 +64,8 @@ function candidatesForAi(match: StoreMatchResult, text: string) {
     aliases: candidate.store.aliases,
     score: candidate.score,
     matchedBy: candidate.matchedBy,
+    matchedTokens: candidate.matchedTokens,
+    missingTokens: candidate.missingTokens,
   }));
 }
 

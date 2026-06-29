@@ -1,11 +1,28 @@
 import { storeAddresses, type StoreAddress } from "@/lib/data/store-addresses";
+import type { CompanyObject, ObjectType } from "@/types/domain";
 
 export type StoreMatchStatus = "exact" | "high_confidence" | "ambiguous" | "not_found";
+
+export type StoreObjectRecord = StoreAddress | (CompanyObject & { aliases?: string[] | null; objectType?: ObjectType | null });
+
+export type StoreMatchBy =
+  | "name"
+  | "address"
+  | "alias"
+  | "city_address"
+  | "district_address"
+  | "street_number"
+  | "object_number"
+  | "tokens"
+  | "compact"
+  | "normalized";
 
 export type StoreMatchCandidate = {
   store: StoreAddress;
   score: number;
-  matchedBy: "name" | "address" | "alias" | "city_address" | "normalized";
+  matchedBy: StoreMatchBy;
+  matchedTokens: string[];
+  missingTokens: string[];
 };
 
 export type StoreMatchResult = {
@@ -18,149 +35,290 @@ export type StoreMatchResult = {
 
 export type StoreMatch = StoreMatchResult;
 
-const STREET_WORDS = new Set(["вул", "вулиця", "проспект", "пр", "провулок", "м", "місто", "район", "магазин"]);
+const STOP_WORDS = new Set([
+  "м",
+  "місто",
+  "вул",
+  "вулиця",
+  "проспект",
+  "пр",
+  "провулок",
+  "площа",
+  "майдан",
+  "район",
+  "магазин",
+  "склад",
+  "офіс",
+  "тех",
+  "технічна",
+  "технічні",
+  "проблематика",
+  "проблема",
+  "проблеми",
+]);
+
+const TOKEN_REPLACEMENTS: Record<string, string> = {
+  небесної: "небесна",
+  небесну: "небесна",
+  небесній: "небесна",
+  сотні: "сотня",
+  сотню: "сотня",
+  хлібної: "хлібна",
+  хлібну: "хлібна",
+  хлібній: "хлібна",
+  богунії: "богунія",
+  богуния: "богунія",
+  богунію: "богунія",
+  привокзальна: "привокзальний",
+  привокзального: "привокзальний",
+  привокзальному: "привокзальний",
+  київської: "київська",
+  київську: "київська",
+  шевченка: "шевченка",
+  параджанова: "параджанова",
+};
 
 export function normalizeStoreText(value: string) {
   return value
     .toLowerCase()
     .replace(/[’ʼ`´]/g, "'")
     .replace(/[“”„«»"]/g, "'")
+    .replace(/[№#]/g, " ")
+    .replace(/(\p{L})(\d)/giu, "$1 $2")
+    .replace(/(\d)(\p{L})/giu, "$1 $2")
+    .replace(/\b(вул\.?|вулиця|просп\.?|пр\.?|пров\.?|провулок)\b/giu, " ")
     .replace(/[.,:;()\-–—/\\]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
 
-function compact(value: string) {
-  return normalizeStoreText(value).replace(/\s+/g, "");
+function normalizeToken(token: string) {
+  const normalized = token.toLowerCase().replace(/[’ʼ`´]/g, "'").trim();
+  if (!normalized) return "";
+  const replaced = TOKEN_REPLACEMENTS[normalized] ?? normalized;
+  if (/^\d+[a-zа-яіїєґ]?$/.test(replaced)) return replaced;
+  return replaced
+    .replace(/(ою|ею|ові|еві|ами|ями|ах|ях)$/u, "")
+    .replace(/(ої|ій|ого|ому|ою|ою|а|у|ю|і|и)$/u, (ending) => {
+      if (replaced.length <= ending.length + 4) return ending;
+      return "";
+    });
 }
 
-function tokens(value: string) {
+export function tokenizeStoreText(value: string) {
   return normalizeStoreText(value)
     .split(" ")
-    .filter((token) => token.length > 1 && !STREET_WORDS.has(token));
+    .map(normalizeToken)
+    .filter((token) => token.length > 0 && !STOP_WORDS.has(token));
 }
 
-function hasHouseNumber(value: string) {
-  return /\b\d+[a-zа-яіїєґ]?\b/iu.test(value);
+function unique(values: string[]) {
+  return [...new Set(values.filter(Boolean))];
 }
 
-function tokenScore(text: string, candidate: string) {
-  const textTokens = new Set(tokens(text));
-  const candidateTokens = tokens(candidate);
-  if (textTokens.size === 0 || candidateTokens.length === 0) return 0;
-  const matched = candidateTokens.filter((token) => textTokens.has(token)).length;
-  return matched / candidateTokens.length;
+function compact(value: string) {
+  return tokenizeStoreText(value).join("");
 }
 
-function candidateValues(store: StoreAddress) {
+function getStoreType(record: StoreObjectRecord): ObjectType {
+  if ("objectType" in record && record.objectType) return record.objectType;
+  if ("type" in record && record.type) return record.type;
+  return "store";
+}
+
+function toStoreAddress(record: StoreObjectRecord): StoreAddress {
+  const aliases = "aliases" in record && Array.isArray(record.aliases) ? record.aliases : [];
+  return {
+    id: record.id,
+    name: record.name,
+    address: record.address,
+    city: record.city,
+    district: record.district ?? "",
+    aliases,
+    objectType: getStoreType(record),
+  };
+}
+
+function objectNumber(record: StoreObjectRecord) {
+  return "object_number" in record && typeof record.object_number === "string" ? record.object_number : null;
+}
+
+function candidateValues(record: StoreObjectRecord) {
+  const aliases = "aliases" in record && Array.isArray(record.aliases) ? record.aliases : [];
+  const number = objectNumber(record);
   return [
-    { value: store.name, matchedBy: "name" as const, base: 98 },
-    { value: store.address, matchedBy: "address" as const, base: 100 },
-    { value: `${store.city} ${store.address}`, matchedBy: "city_address" as const, base: 94 },
-    ...store.aliases.map((alias) => ({ value: alias, matchedBy: "alias" as const, base: 96 })),
-  ];
+    { value: record.name, matchedBy: "name" as const, base: 95 },
+    { value: record.address, matchedBy: "address" as const, base: 95 },
+    { value: `${record.city} ${record.address}`, matchedBy: "city_address" as const, base: 94 },
+    { value: `${record.district ?? ""} ${record.address}`, matchedBy: "district_address" as const, base: 92 },
+    ...(number ? [{ value: number, matchedBy: "object_number" as const, base: 62 }] : []),
+    ...aliases.map((alias) => ({ value: alias, matchedBy: "alias" as const, base: 92 })),
+  ].filter((candidate) => candidate.value.trim().length > 0);
 }
 
-function scoreStore(text: string, store: StoreAddress): StoreMatchCandidate {
-  const normalizedText = normalizeStoreText(text);
-  const compactText = compact(text);
-  let best: StoreMatchCandidate = { store, score: 0, matchedBy: "normalized" };
+function importantTokens(record: StoreObjectRecord) {
+  const values = [record.name, record.address, record.district ?? "", objectNumber(record) ?? "", ...("aliases" in record && Array.isArray(record.aliases) ? record.aliases : [])];
+  const all = values.flatMap(tokenizeStoreText);
+  const numbers = all.filter((token) => /\d/.test(token));
+  const words = all.filter((token) => !/\d/.test(token) && token.length > 2);
+  return unique([...words, ...numbers]);
+}
 
-  for (const candidate of candidateValues(store)) {
+function streetNumberTokens(record: StoreObjectRecord) {
+  const addressTokens = tokenizeStoreText(record.address);
+  const numberTokens = addressTokens.filter((token) => /\d/.test(token));
+  const wordTokens = addressTokens.filter((token) => !/\d/.test(token) && token.length > 2);
+  return unique([...wordTokens, ...numberTokens]);
+}
+
+function tokenOverlap(textTokens: Set<string>, candidateTokens: string[]) {
+  const important = candidateTokens.filter((token) => token.length > 0 && !STOP_WORDS.has(token));
+  if (important.length === 0) return { ratio: 0, matchedTokens: [], missingTokens: [] };
+  const matchedTokens = important.filter((token) => textTokens.has(token));
+  const missingTokens = important.filter((token) => !textTokens.has(token));
+  return { ratio: matchedTokens.length / important.length, matchedTokens: unique(matchedTokens), missingTokens: unique(missingTokens) };
+}
+
+function buildCandidate(record: StoreObjectRecord, score: number, matchedBy: StoreMatchBy, matchedTokens: string[], missingTokens: string[]): StoreMatchCandidate {
+  return {
+    store: toStoreAddress(record),
+    score: Math.max(0, Math.min(100, Math.round(score))),
+    matchedBy,
+    matchedTokens: unique(matchedTokens),
+    missingTokens: unique(missingTokens),
+  };
+}
+
+function betterCandidate(current: StoreMatchCandidate, next: StoreMatchCandidate) {
+  if (next.score > current.score) return next;
+  if (next.score === current.score && next.matchedTokens.length > current.matchedTokens.length) return next;
+  return current;
+}
+
+function scoreRecord(text: string, record: StoreObjectRecord): StoreMatchCandidate {
+  const normalizedText = normalizeStoreText(text);
+  const textTokens = new Set(tokenizeStoreText(text));
+  const compactText = compact(text);
+  const allImportantTokens = importantTokens(record);
+  let best = buildCandidate(record, 0, "normalized", [], allImportantTokens);
+
+  for (const candidate of candidateValues(record)) {
+    const candidateTokens = tokenizeStoreText(candidate.value);
     const normalizedCandidate = normalizeStoreText(candidate.value);
     const compactCandidate = compact(candidate.value);
-    if (!normalizedCandidate) continue;
+    const overlap = tokenOverlap(textTokens, candidateTokens);
 
-    if (normalizedText.includes(normalizedCandidate)) {
-      if (candidate.base > best.score) best = { store, score: candidate.base, matchedBy: candidate.matchedBy };
+    if (normalizedCandidate && normalizedText.includes(normalizedCandidate)) {
+      best = betterCandidate(best, buildCandidate(record, candidate.base, candidate.matchedBy, candidateTokens, []));
       continue;
     }
 
     if (compactCandidate && compactText.includes(compactCandidate)) {
-      const score = candidate.base - 1;
-      if (score > best.score) best = { store, score, matchedBy: candidate.matchedBy };
+      best = betterCandidate(best, buildCandidate(record, Math.max(candidate.base, 95), "compact", candidateTokens, []));
       continue;
     }
 
-    const overlap = tokenScore(normalizedText, normalizedCandidate);
-    if (overlap >= 0.35) {
-      const numberPenalty = hasHouseNumber(store.address) && !hasHouseNumber(normalizedText) ? 18 : 0;
-      const score = Math.round(candidate.base * overlap) - numberPenalty;
-      if (score > best.score) best = { store, score, matchedBy: candidate.matchedBy };
+    if (overlap.ratio > 0) {
+      const hasNumber = candidateTokens.some((token) => /\d/.test(token));
+      const matchedNumber = overlap.matchedTokens.some((token) => /\d/.test(token));
+      const numberPenalty = hasNumber && !matchedNumber ? 22 : 0;
+      const objectNumberPenalty = candidate.matchedBy === "object_number" ? 18 : 0;
+      const score = candidate.base * overlap.ratio - numberPenalty - objectNumberPenalty;
+      best = betterCandidate(best, buildCandidate(record, score, candidate.matchedBy, overlap.matchedTokens, overlap.missingTokens));
     }
   }
 
-  const allText = `${store.name} ${store.city} ${store.district} ${store.address} ${store.aliases.join(" ")}`;
-  const normalizedScore = Math.round(78 * tokenScore(normalizedText, allText)) - (hasHouseNumber(store.address) && !hasHouseNumber(normalizedText) ? 20 : 0);
-  if (normalizedScore > best.score) best = { store, score: normalizedScore, matchedBy: "normalized" };
+  const streetTokens = streetNumberTokens(record);
+  const streetOverlap = tokenOverlap(textTokens, streetTokens);
+  const streetHasNumber = streetTokens.some((token) => /\d/.test(token));
+  const streetMatchedNumber = streetOverlap.matchedTokens.some((token) => /\d/.test(token));
+  if (streetOverlap.ratio > 0) {
+    const base = streetOverlap.ratio === 1 && streetHasNumber && streetMatchedNumber ? 93 : 82 * streetOverlap.ratio;
+    const penalty = streetHasNumber && !streetMatchedNumber ? 25 : 0;
+    best = betterCandidate(best, buildCandidate(record, base - penalty, "street_number", streetOverlap.matchedTokens, streetOverlap.missingTokens));
+  }
 
-  return { ...best, score: Math.max(0, Math.min(100, best.score)) };
+  const importantOverlap = tokenOverlap(textTokens, allImportantTokens);
+  if (importantOverlap.ratio > 0) {
+    const hasAnyNumber = allImportantTokens.some((token) => /\d/.test(token));
+    const matchedNumber = importantOverlap.matchedTokens.some((token) => /\d/.test(token));
+    const completeImportantScore = importantOverlap.ratio === 1 ? 88 : 78 * importantOverlap.ratio;
+    const penalty = hasAnyNumber && !matchedNumber ? 24 : 0;
+    best = betterCandidate(best, buildCandidate(record, completeImportantScore - penalty, "tokens", importantOverlap.matchedTokens, importantOverlap.missingTokens));
+  }
+
+  return best;
 }
 
 function buildResult(candidates: StoreMatchCandidate[]): StoreMatchResult {
-  const [best, second] = candidates;
-  if (!best || best.score < 45) {
+  const sorted = candidates.sort((a, b) => b.score - a.score || b.matchedTokens.length - a.matchedTokens.length);
+  const [best, second] = sorted;
+  const topFive = sorted.slice(0, 5);
+
+  if (!best || best.score < 50) {
     return {
       status: "not_found",
       bestMatch: null,
-      candidates: candidates.slice(0, 5),
+      candidates: topFive,
       confidence: 0,
-      reason: "Локальний довідник не знайшов достатньо схожий об'єкт.",
+      reason: "Object Matcher v2 не знайшов достатньо схожий об'єкт.",
     };
   }
 
-  const closeCandidates = candidates.filter((candidate) => best.score - candidate.score <= 8);
-  const hasAmbiguousHouseNumber = closeCandidates.length > 1 && closeCandidates.some((candidate) => hasHouseNumber(candidate.store.address));
-  if (second && best.score < 95 && (closeCandidates.length > 1 || hasAmbiguousHouseNumber)) {
+  const gap = second ? best.score - second.score : 100;
+  const closeCandidates = sorted.filter((candidate) => best.score - candidate.score <= 7);
+
+  if (closeCandidates.length > 1 && best.score < 95) {
     return {
       status: "ambiguous",
       bestMatch: null,
       candidates: closeCandidates.slice(0, 5),
       confidence: best.score / 100,
-      reason: "Знайдено кілька схожих об'єктів, потрібне уточнення AI.",
+      reason: "Object Matcher v2 знайшов кілька близьких кандидатів.",
     };
   }
 
-  if (best.score >= 95) {
+  if (best.score >= 95 && gap >= 5) {
     return {
       status: "exact",
       bestMatch: best.store,
-      candidates: candidates.slice(0, 5),
+      candidates: topFive,
       confidence: best.score / 100,
-      reason: "Локально знайдено точний збіг об'єкта.",
+      reason: "Object Matcher v2 знайшов точний збіг об'єкта.",
     };
   }
 
-  if (best.score >= 78) {
+  if (best.score >= 85) {
     return {
       status: "high_confidence",
       bestMatch: best.store,
-      candidates: candidates.slice(0, 5),
+      candidates: topFive,
       confidence: best.score / 100,
-      reason: "Локально знайдено об'єкт з високою впевненістю.",
+      reason: "Object Matcher v2 знайшов об'єкт з високою впевненістю.",
     };
   }
 
   return {
     status: "ambiguous",
     bestMatch: null,
-    candidates: candidates.slice(0, 5),
+    candidates: topFive,
     confidence: best.score / 100,
-    reason: "Локальний збіг недостатньо впевнений.",
+    reason: "Object Matcher v2 має частковий збіг, але впевненості недостатньо.",
   };
 }
 
-export function getStoreCandidatesForAi(text: string) {
+export function getStoreCandidatesForAi(text: string, records: StoreObjectRecord[] = storeAddresses) {
   const normalizedText = normalizeStoreText(text);
   if (!normalizedText) return [];
-  return storeAddresses
-    .map((store) => scoreStore(normalizedText, store))
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 5);
+  return records.map((record) => scoreRecord(normalizedText, record)).sort((a, b) => b.score - a.score || b.matchedTokens.length - a.matchedTokens.length).slice(0, 5);
 }
 
-export function matchStore(text: string): StoreMatchResult {
-  return buildResult(getStoreCandidatesForAi(text));
+export function matchStore(text: string, records: StoreObjectRecord[] = storeAddresses): StoreMatchResult {
+  return buildResult(getStoreCandidatesForAi(text, records));
+}
+
+export function matchStoreFromObjects(text: string, objects: StoreObjectRecord[]): StoreMatchResult {
+  return matchStore(text, objects);
 }
 
 export function isReliableStoreMatch(match: StoreMatchResult | null | undefined) {

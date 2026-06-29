@@ -41,6 +41,15 @@ export const storeAddresses: StoreAddress[] = [
     objectType: "store",
   },
   {
+    id: "store_nebesna_sotnia_030",
+    name: "Магазин Небесна сотня 30",
+    city: "Житомир",
+    district: "Центр",
+    address: "м. Житомир, вул. Небесна сотня, 30",
+    aliases: ["Небесна сотня 30", "Небесна Сотня,30", "Небесна30", "магазин Небесна сотня 30"],
+    objectType: "store",
+  },
+  {
     id: "store_shevchenka_043",
     name: "Магазин Шевченка 43",
     city: "Житомир",
