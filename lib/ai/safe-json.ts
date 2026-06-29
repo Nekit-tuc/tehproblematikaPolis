@@ -50,17 +50,23 @@ function asStringOrNull(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
-function normalizePriority(value: unknown, allowedPriorities: readonly AiPriority[]) {
-  return typeof value === "string" && allowedPriorities.includes(value as AiPriority) ? (value as AiPriority) : "medium";
+function requirePriority(value: unknown, allowedPriorities: readonly AiPriority[]) {
+  if (typeof value === "string" && allowedPriorities.includes(value as AiPriority)) return value as AiPriority;
+  throw new Error(`AI response priority is not allowed: ${String(value)}`);
 }
 
-function normalizeWorkType(value: unknown) {
-  return typeof value === "string" && WORK_TYPES.includes(value as AiWorkType) ? (value as AiWorkType) : "other";
+function requireWorkType(value: unknown) {
+  if (typeof value === "string" && WORK_TYPES.includes(value as AiWorkType)) return value as AiWorkType;
+  throw new Error(`AI response workType is not allowed: ${String(value)}`);
 }
 
-function normalizeCategory(value: unknown, allowedCategories: readonly string[]) {
-  if (typeof value !== "string") return allowedCategories[allowedCategories.length - 1] ?? "Інше";
-  return allowedCategories.find((category) => category === value) ?? allowedCategories.find((category) => category.toLowerCase() === value.toLowerCase()) ?? allowedCategories[allowedCategories.length - 1] ?? "Інше";
+function requireCategory(value: unknown, allowedCategories: readonly string[]) {
+  if (typeof value !== "string") throw new Error("AI response category is not a string");
+  const exact = allowedCategories.find((category) => category === value);
+  const caseInsensitive = allowedCategories.find((category) => category.toLowerCase() === value.toLowerCase());
+  const category = exact ?? caseInsensitive;
+  if (!category) throw new Error(`AI response category is not allowed: ${value}`);
+  return category;
 }
 
 function normalizeDepartment(value: unknown, allowedDepartments: readonly string[]) {
@@ -92,25 +98,23 @@ export function parseAiAnalysisJson({
   const rawWorkItems = Array.isArray(value.workItems) ? value.workItems : Array.isArray(value.tickets) ? value.tickets : null;
   if (!rawWorkItems) throw new Error("AI response workItems/tickets is not an array");
 
-  const workItems: AiWorkItem[] = rawWorkItems
-    .map((ticket): AiWorkItem | null => {
-      if (!ticket || typeof ticket !== "object") return null;
-      const item = ticket as Record<string, unknown>;
-      const title = asStringOrNull(item.title);
-      const description = asStringOrNull(item.description);
-      if (!title || !description) return null;
-      return {
-        title,
-        description,
-        category: normalizeCategory(item.category, allowedCategories),
-        workType: normalizeWorkType(item.workType),
-        priority: normalizePriority(item.priority, allowedPriorities),
-        recommendedDepartment: normalizeDepartment(item.recommendedDepartment, allowedDepartments),
-        confidence: clampConfidence(item.confidence),
-        reasoning: asStringOrNull(item.reasoning) ?? "AI визначив окрему роботу з повідомлення Telegram-групи.",
-      };
-    })
-    .filter((ticket): ticket is AiWorkItem => Boolean(ticket));
+  const workItems: AiWorkItem[] = rawWorkItems.map((ticket): AiWorkItem => {
+    if (!ticket || typeof ticket !== "object") throw new Error("AI response workItem is not an object");
+    const item = ticket as Record<string, unknown>;
+    const title = asStringOrNull(item.title);
+    const description = asStringOrNull(item.description);
+    if (!title || !description) throw new Error("AI response workItem title/description is missing");
+    return {
+      title,
+      description,
+      category: requireCategory(item.category, allowedCategories),
+      workType: requireWorkType(item.workType),
+      priority: requirePriority(item.priority, allowedPriorities),
+      recommendedDepartment: normalizeDepartment(item.recommendedDepartment, allowedDepartments),
+      confidence: clampConfidence(item.confidence),
+      reasoning: asStringOrNull(item.reasoning) ?? "AI визначив окрему роботу з повідомлення Telegram-групи.",
+    };
+  });
 
   const missingFields = Array.isArray(value.missingFields) ? value.missingFields.filter((field): field is string => typeof field === "string") : [];
   if (workItems.length === 0 && !missingFields.includes("workItems")) missingFields.push("workItems");

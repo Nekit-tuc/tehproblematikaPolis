@@ -13,32 +13,61 @@ export type AnalyzeTelegramGroupMessageInput = {
   recommendedDepartments?: readonly string[];
 };
 
+export type AiAnalyzerMode = "openai" | "fallback";
+
+export type AnalyzeTelegramGroupMessageResult = {
+  analysis: AiGroupMessageAnalysis;
+  mode: AiAnalyzerMode;
+  model: string | null;
+  fallbackReason?: string;
+};
+
 function objectHintsFromMatch(match: StoreMatchResult | null) {
   const store = match?.bestMatch;
   if (!store) return [];
   return [store.id, store.name, store.address, store.city, store.district, ...store.aliases].filter(Boolean);
 }
 
-function mockAnalyze(input: AnalyzeTelegramGroupMessageInput, localStoreMatch: StoreMatchResult): AiGroupMessageAnalysis {
+function fallbackAnalyze(input: AnalyzeTelegramGroupMessageInput, localStoreMatch: StoreMatchResult, fallbackReason?: string): AnalyzeTelegramGroupMessageResult {
   const text = input.text?.trim() ?? "";
-  if (!looksLikeWorkMessage(text)) return safeNoTicket();
-  if (!isReliableStoreMatch(localStoreMatch) || !localStoreMatch.bestMatch) return safeObjectMissing();
+  if (!looksLikeWorkMessage(text)) {
+    return {
+      analysis: safeNoTicket(),
+      mode: "fallback",
+      model: null,
+      fallbackReason: fallbackReason ?? "Повідомлення не схоже на технічну заявку.",
+    };
+  }
+
+  if (!isReliableStoreMatch(localStoreMatch) || !localStoreMatch.bestMatch) {
+    return {
+      analysis: safeObjectMissing(),
+      mode: "fallback",
+      model: null,
+      fallbackReason: fallbackReason ?? "Object Matcher не визначив об'єкт з достатньою впевненістю.",
+    };
+  }
 
   const workItems = extractWorkItems(text, objectHintsFromMatch(localStoreMatch));
   const itemConfidence = workItems.length > 0 ? Math.min(...workItems.map((item) => item.confidence)) : 0;
   const confidence = workItems.length > 0 ? Math.min(0.98, 0.42 + localStoreMatch.confidence * 0.35 + itemConfidence * 0.2) : 0.45;
   const missingFields = workItems.length === 0 ? ["workItems"] : [];
 
-  return withTicketAlias({
-    isTicketMessage: true,
-    objectId: localStoreMatch.bestMatch.id,
-    objectName: localStoreMatch.bestMatch.name,
-    address: localStoreMatch.bestMatch.address,
-    confidence,
-    workItems,
-    missingFields,
-    reason: workItems.length > 0 ? "Повідомлення розібрано локальним AI v2 fallback parser у Work Items." : "Не вдалося виділити окремі роботи.",
-  });
+  return {
+    analysis: withTicketAlias({
+      isTicketMessage: true,
+      objectId: localStoreMatch.bestMatch.id,
+      objectName: localStoreMatch.bestMatch.name,
+      address: localStoreMatch.bestMatch.address,
+      confidence,
+      workItems,
+      missingFields,
+      reason: workItems.length > 0 ? "Повідомлення розібрано локальним AI v2 fallback parser у Work Items." : "Не вдалося виділити окремі роботи.",
+    }),
+    mode: "fallback",
+    model: null,
+    fallbackReason,
+  };
 }
 
 function storeForAi(match: StoreMatchResult) {
@@ -82,12 +111,29 @@ function buildPrompt({
   priorities: readonly AiPriority[];
   departments: readonly string[];
 }) {
+  const reliable = isReliableStoreMatch(localStoreMatch);
   return JSON.stringify({
-    text,
-    localStoreMatchStatus: localStoreMatch.status,
-    localStoreMatchReason: localStoreMatch.reason,
+    originalMessageText: text,
+    localStoreMatch: {
+      status: localStoreMatch.status,
+      confidence: localStoreMatch.confidence,
+      reason: localStoreMatch.reason,
+      bestMatch: localStoreMatch.bestMatch
+        ? {
+            objectId: localStoreMatch.bestMatch.id,
+            objectName: localStoreMatch.bestMatch.name,
+            address: localStoreMatch.bestMatch.address,
+            city: localStoreMatch.bestMatch.city,
+            district: localStoreMatch.bestMatch.district,
+            aliases: localStoreMatch.bestMatch.aliases,
+          }
+        : null,
+      candidates: candidatesForAi(localStoreMatch, text),
+    },
     fixedStore: storeForAi(localStoreMatch),
-    candidateStores: isReliableStoreMatch(localStoreMatch) ? [] : candidatesForAi(localStoreMatch, text),
+    objectSelectionPolicy: reliable
+      ? "localStoreMatch is exact/high_confidence. You must use fixedStore and must not change objectId/objectName/address."
+      : "localStoreMatch is ambiguous/not_found. You may choose exactly one object only from localStoreMatch.candidates. If unsure, return objectId=null and workItems=[].",
     allowedCategories: categories,
     allowedPriorities: priorities,
     allowedWorkTypes: serviceDeskWorkTypes,
@@ -101,7 +147,7 @@ function buildPrompt({
       workItems: [
         {
           title: "string",
-          description: "string",
+          description: "string without store name/address",
           category: "one of allowedCategories",
           workType: "one of allowedWorkTypes",
           priority: "one of allowedPriorities",
@@ -169,19 +215,26 @@ async function analyzeWithOpenAi(input: AnalyzeTelegramGroupMessageInput, localS
   return enforceObjectPolicy(parsed, localStoreMatch);
 }
 
-export async function analyzeTelegramGroupMessage(input: AnalyzeTelegramGroupMessageInput): Promise<AiGroupMessageAnalysis> {
+export async function analyzeTelegramGroupMessageWithMeta(input: AnalyzeTelegramGroupMessageInput): Promise<AnalyzeTelegramGroupMessageResult> {
   const text = input.text?.trim() ?? "";
   const localStoreMatch = input.localStoreMatch ?? matchStore(text);
 
   if (!hasOpenAiApiKey()) {
     console.warn("[ai-analyzer] OPENAI_API_KEY is not configured, using AI v2 fallback parser.");
-    return mockAnalyze(input, localStoreMatch);
+    return fallbackAnalyze(input, localStoreMatch, "OPENAI_API_KEY is not configured");
   }
 
   try {
-    return await analyzeWithOpenAi(input, localStoreMatch);
+    const analysis = await analyzeWithOpenAi(input, localStoreMatch);
+    return { analysis, mode: "openai", model: getOpenAiModel() };
   } catch (error) {
+    const fallbackReason = error instanceof Error ? error.message : "OpenAI analysis failed";
     console.error("[ai-analyzer] OpenAI analysis failed, using AI v2 fallback parser.", error);
-    return mockAnalyze(input, localStoreMatch);
+    return fallbackAnalyze(input, localStoreMatch, fallbackReason);
   }
+}
+
+export async function analyzeTelegramGroupMessage(input: AnalyzeTelegramGroupMessageInput): Promise<AiGroupMessageAnalysis> {
+  const result = await analyzeTelegramGroupMessageWithMeta(input);
+  return result.analysis;
 }

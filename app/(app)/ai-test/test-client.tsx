@@ -17,6 +17,9 @@ type ApiResponse = {
   data?: AiGroupMessageAnalysis;
   analysis?: AiGroupMessageAnalysis;
   localStoreMatch?: StoreMatchResult;
+  mode?: "openai" | "fallback";
+  model?: string | null;
+  fallbackReason?: string;
   error?: string;
 };
 
@@ -150,6 +153,9 @@ export function AiTestClient() {
                 <Info label="Адреса" value={result.analysis.address ?? "-"} />
                 <Info label="Work Items" value={String(result.analysis.workItems.length)} />
                 <Info label="Tickets alias" value={String(result.analysis.tickets.length)} />
+                <Info label="Mode" value={result.raw.mode ?? "-"} />
+                <Info label="Model" value={result.raw.model ?? "-"} />
+                {result.raw.fallbackReason ? <Info label="Fallback reason" value={result.raw.fallbackReason} /> : null}
                 <Info label="Missing fields" value={result.analysis.missingFields.length ? result.analysis.missingFields.join(", ") : "-"} />
               </CardContent>
             </Card>

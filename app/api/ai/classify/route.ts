@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { analyzeTelegramGroupMessage } from "@/lib/ai/group-message-analyzer";
+import { analyzeTelegramGroupMessageWithMeta } from "@/lib/ai/group-message-analyzer";
 import { matchStore } from "@/lib/stores/match-store";
 
 export const runtime = "nodejs";
@@ -14,8 +14,16 @@ export async function POST(request: Request) {
     }
 
     const localStoreMatch = matchStore(text);
-    const analysis = await analyzeTelegramGroupMessage({ text, localStoreMatch });
-    return NextResponse.json({ ok: true, data: analysis, localStoreMatch, analysis });
+    const result = await analyzeTelegramGroupMessageWithMeta({ text, localStoreMatch });
+    return NextResponse.json({
+      ok: true,
+      data: result.analysis,
+      localStoreMatch,
+      analysis: result.analysis,
+      mode: result.mode,
+      model: result.model,
+      fallbackReason: result.fallbackReason,
+    });
   } catch (error) {
     console.error("AI classify error", error);
     return NextResponse.json({ ok: false, error: "classification failed" }, { status: 500 });
