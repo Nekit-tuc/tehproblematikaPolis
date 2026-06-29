@@ -67,7 +67,7 @@ export function AiTestClient() {
   const workItems = result?.analysis.workItems.length ? result.analysis.workItems : result?.analysis.tickets ?? [];
 
   return (
-    <div className="grid gap-6 xl:grid-cols-[minmax(0,520px)_1fr]">
+    <div className="grid gap-6">
       <Card>
         <CardHeader>
           <CardTitle>Текст повідомлення з Telegram-групи</CardTitle>
