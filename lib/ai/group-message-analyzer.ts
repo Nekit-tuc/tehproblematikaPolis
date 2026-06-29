@@ -1,9 +1,9 @@
 import { getStoreCandidatesForAi, isReliableStoreMatch, matchStore, type StoreMatchResult } from "@/lib/stores/match-store";
 import type { AiGroupMessageAnalysis, AiPriority } from "@/types/ai";
 import { getOpenAiClient, getOpenAiModel, hasOpenAiApiKey } from "./openai-client";
-import { serviceDeskCategories, serviceDeskDepartments, serviceDeskPriorities, ticketClassifierSystemPrompt } from "./prompts";
-import { hasProblemDescription, looksLikeTicket, parsePotentialTickets } from "./ticket-parser";
-import { parseAiAnalysisJson, safeNoTicket, safeObjectMissing } from "./safe-json";
+import { serviceDeskCategories, serviceDeskDepartments, serviceDeskPriorities, serviceDeskWorkTypes, ticketClassifierSystemPrompt } from "./prompts";
+import { parseAiAnalysisJson, safeNoTicket, safeObjectMissing, withTicketAlias } from "./safe-json";
+import { extractWorkItems, looksLikeWorkMessage } from "./work-item-extractor";
 
 export type AnalyzeTelegramGroupMessageInput = {
   text: string;
@@ -16,33 +16,29 @@ export type AnalyzeTelegramGroupMessageInput = {
 function objectHintsFromMatch(match: StoreMatchResult | null) {
   const store = match?.bestMatch;
   if (!store) return [];
-  return [store.id, store.name, store.address, store.city, store.district, ...store.aliases];
+  return [store.id, store.name, store.address, store.city, store.district, ...store.aliases].filter(Boolean);
 }
 
 function mockAnalyze(input: AnalyzeTelegramGroupMessageInput, localStoreMatch: StoreMatchResult): AiGroupMessageAnalysis {
   const text = input.text?.trim() ?? "";
-  if (!looksLikeTicket(text)) return safeNoTicket();
+  if (!looksLikeWorkMessage(text)) return safeNoTicket();
   if (!isReliableStoreMatch(localStoreMatch) || !localStoreMatch.bestMatch) return safeObjectMissing();
 
-  const hasDescription = hasProblemDescription(text);
-  const tickets = hasDescription ? parsePotentialTickets(text, objectHintsFromMatch(localStoreMatch)) : [];
-  const ticketConfidence = tickets.length > 0 ? Math.min(...tickets.map((ticket) => ticket.confidence)) : 0;
-  const confidence = Math.min(0.98, 0.35 + localStoreMatch.confidence * 0.35 + (hasDescription ? 0.18 : 0) + ticketConfidence * 0.12);
-  const missingFields = [
-    !hasDescription ? "problem_description" : null,
-    tickets.length === 0 ? "tickets" : null,
-  ].filter(Boolean) as string[];
+  const workItems = extractWorkItems(text, objectHintsFromMatch(localStoreMatch));
+  const itemConfidence = workItems.length > 0 ? Math.min(...workItems.map((item) => item.confidence)) : 0;
+  const confidence = workItems.length > 0 ? Math.min(0.98, 0.42 + localStoreMatch.confidence * 0.35 + itemConfidence * 0.2) : 0.45;
+  const missingFields = workItems.length === 0 ? ["workItems"] : [];
 
-  return {
+  return withTicketAlias({
     isTicketMessage: true,
     objectId: localStoreMatch.bestMatch.id,
     objectName: localStoreMatch.bestMatch.name,
     address: localStoreMatch.bestMatch.address,
     confidence,
-    tickets,
+    workItems,
     missingFields,
-    reason: tickets.length > 0 ? "Повідомлення розібрано локальним fallback-парсером." : "Не вдалося виділити окремі проблеми.",
-  };
+    reason: workItems.length > 0 ? "Повідомлення розібрано локальним AI v2 fallback parser у Work Items." : "Не вдалося виділити окремі роботи.",
+  });
 }
 
 function storeForAi(match: StoreMatchResult) {
@@ -92,6 +88,7 @@ function buildPrompt({
     candidateStores: isReliableStoreMatch(localStoreMatch) ? [] : candidatesForAi(localStoreMatch, text),
     allowedCategories: categories,
     allowedPriorities: priorities,
+    allowedWorkTypes: serviceDeskWorkTypes,
     allowedRecommendedDepartments: departments,
     requiredJsonShape: {
       isTicketMessage: "boolean",
@@ -99,16 +96,19 @@ function buildPrompt({
       objectName: "string|null",
       address: "string|null",
       confidence: "number 0..1",
-      tickets: [
+      workItems: [
         {
           title: "string",
           description: "string",
           category: "one of allowedCategories",
+          workType: "one of allowedWorkTypes",
           priority: "one of allowedPriorities",
           recommendedDepartment: "one of allowedRecommendedDepartments|null|Технічний відділ",
           confidence: "number 0..1",
+          reasoning: "string",
         },
       ],
+      tickets: "same array as workItems for backward compatibility",
       missingFields: "string[]",
       reason: "string",
     },
@@ -116,27 +116,27 @@ function buildPrompt({
 }
 
 function enforceObjectPolicy(analysis: AiGroupMessageAnalysis, localStoreMatch: StoreMatchResult): AiGroupMessageAnalysis {
-  if (!analysis.isTicketMessage) return analysis;
+  if (!analysis.isTicketMessage) return withTicketAlias(analysis);
 
   if (isReliableStoreMatch(localStoreMatch) && localStoreMatch.bestMatch) {
-    return {
+    return withTicketAlias({
       ...analysis,
       objectId: localStoreMatch.bestMatch.id,
       objectName: localStoreMatch.bestMatch.name,
       address: localStoreMatch.bestMatch.address,
       missingFields: analysis.missingFields.filter((field) => field !== "object"),
-    };
+    });
   }
 
   const chosen = localStoreMatch.candidates.find((candidate) => candidate.store.id === analysis.objectId)?.store;
   if (!chosen || analysis.confidence < 0.7) return safeObjectMissing("Не вдалося впевнено визначити об'єкт.");
-  return {
+  return withTicketAlias({
     ...analysis,
     objectId: chosen.id,
     objectName: chosen.name,
     address: chosen.address,
     missingFields: analysis.missingFields.filter((field) => field !== "object"),
-  };
+  });
 }
 
 async function analyzeWithOpenAi(input: AnalyzeTelegramGroupMessageInput, localStoreMatch: StoreMatchResult): Promise<AiGroupMessageAnalysis> {
@@ -172,14 +172,14 @@ export async function analyzeTelegramGroupMessage(input: AnalyzeTelegramGroupMes
   const localStoreMatch = input.localStoreMatch ?? matchStore(text);
 
   if (!hasOpenAiApiKey()) {
-    console.warn("[ai-analyzer] OPENAI_API_KEY is not configured, using mock fallback.");
+    console.warn("[ai-analyzer] OPENAI_API_KEY is not configured, using AI v2 fallback parser.");
     return mockAnalyze(input, localStoreMatch);
   }
 
   try {
     return await analyzeWithOpenAi(input, localStoreMatch);
   } catch (error) {
-    console.error("[ai-analyzer] OpenAI analysis failed, using mock fallback.", error);
+    console.error("[ai-analyzer] OpenAI analysis failed, using AI v2 fallback parser.", error);
     return mockAnalyze(input, localStoreMatch);
   }
 }

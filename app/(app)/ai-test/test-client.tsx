@@ -9,7 +9,8 @@ import { Textarea } from "@/components/ui/textarea";
 import type { StoreMatchResult } from "@/lib/stores/match-store";
 import type { AiGroupMessageAnalysis } from "@/types/ai";
 
-const exampleText = "Хлібна 22 протікає унітаз";
+const exampleText =
+  "Добрий день. Шевченка,43 потрібно прочистить унітаз(дуже гуде, та набирається вода), прикрутити ручку в кабінеті керуючої";
 
 type ApiResponse = {
   ok: boolean;
@@ -63,12 +64,14 @@ export function AiTestClient() {
     });
   }
 
+  const workItems = result?.analysis.workItems.length ? result.analysis.workItems : result?.analysis.tickets ?? [];
+
   return (
     <div className="grid gap-6 xl:grid-cols-[minmax(0,520px)_1fr]">
       <Card>
         <CardHeader>
           <CardTitle>Текст повідомлення з Telegram-групи</CardTitle>
-          <CardDescription>Ця форма тільки тестує аналіз. Заявки не створюються.</CardDescription>
+          <CardDescription>Форма тільки тестує AI v2 аналіз. Заявки не створюються.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <Textarea
@@ -98,7 +101,7 @@ export function AiTestClient() {
           <>
             <Card>
               <CardHeader>
-                <CardTitle>Локальний match-store</CardTitle>
+                <CardTitle>Local Object Matcher</CardTitle>
                 <CardDescription>{result.localStoreMatch.reason}</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -109,7 +112,7 @@ export function AiTestClient() {
                 </div>
                 {result.localStoreMatch.candidates.length > 0 ? (
                   <div className="space-y-2">
-                    <div className="text-sm font-medium">Candidates</div>
+                    <div className="text-sm font-medium">Кандидати</div>
                     <div className="grid gap-2">
                       {result.localStoreMatch.candidates.map((candidate) => (
                         <div key={candidate.store.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-stone-950/30 p-3 text-sm">
@@ -131,7 +134,7 @@ export function AiTestClient() {
 
             <Card>
               <CardHeader>
-                <CardTitle>AI analysis</CardTitle>
+                <CardTitle>AI v2 analysis</CardTitle>
                 <CardDescription>{result.analysis.reason}</CardDescription>
               </CardHeader>
               <CardContent className="grid gap-3 md:grid-cols-2">
@@ -139,25 +142,31 @@ export function AiTestClient() {
                 <Info label="Confidence" value={percent(result.analysis.confidence)} />
                 <Info label="Об'єкт" value={result.analysis.objectName ?? "-"} />
                 <Info label="Адреса" value={result.analysis.address ?? "-"} />
+                <Info label="Work Items" value={String(result.analysis.workItems.length)} />
+                <Info label="Tickets alias" value={String(result.analysis.tickets.length)} />
                 <Info label="Missing fields" value={result.analysis.missingFields.length ? result.analysis.missingFields.join(", ") : "-"} />
               </CardContent>
             </Card>
 
-            {result.analysis.tickets.length > 0 ? (
+            {workItems.length > 0 ? (
               <div className="grid gap-4">
-                {result.analysis.tickets.map((ticket, index) => (
-                  <Card key={`${ticket.title}-${index}`}>
+                {workItems.map((item, index) => (
+                  <Card key={`${item.title}-${index}`}>
                     <CardHeader>
                       <div className="flex flex-wrap items-center justify-between gap-3">
-                        <CardTitle>{ticket.title}</CardTitle>
-                        <Badge tone={ticket.priority === "critical" ? "red" : ticket.priority === "high" ? "orange" : "gray"}>{ticket.priority}</Badge>
+                        <CardTitle>{item.title}</CardTitle>
+                        <Badge tone={item.priority === "critical" ? "red" : item.priority === "high" ? "orange" : "gray"}>{item.priority}</Badge>
                       </div>
-                      <CardDescription>{ticket.description}</CardDescription>
+                      <CardDescription>{item.description}</CardDescription>
                     </CardHeader>
                     <CardContent className="grid gap-3 md:grid-cols-3">
-                      <Info label="Категорія" value={ticket.category} />
-                      <Info label="Підрозділ" value={ticket.recommendedDepartment ?? "-"} />
-                      <Info label="Confidence" value={percent(ticket.confidence)} />
+                      <Info label="Категорія" value={item.category} />
+                      <Info label="Тип роботи" value={item.workType} />
+                      <Info label="Підрозділ" value={item.recommendedDepartment ?? "-"} />
+                      <Info label="Confidence" value={percent(item.confidence)} />
+                      <div className="md:col-span-3">
+                        <Info label="Reasoning" value={item.reasoning} />
+                      </div>
                     </CardContent>
                   </Card>
                 ))}

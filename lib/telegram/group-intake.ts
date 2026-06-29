@@ -1,8 +1,9 @@
 import { analyzeTelegramGroupMessage } from "@/lib/ai/group-message-analyzer";
+import { buildPendingReviewTicketDraft } from "@/lib/ai/ticket-builder";
 import { matchStore, normalizeStoreText, type StoreMatchResult } from "@/lib/stores/match-store";
 import { createAdminClient } from "@/lib/supabase/admin";
-import type { AiParsedTicket } from "@/types/ai";
-import type { Category, CompanyObject, Profile, TicketPriority } from "@/types/domain";
+import type { AiWorkItem } from "@/types/ai";
+import type { Category, CompanyObject, Profile } from "@/types/domain";
 import type { TelegramMessage } from "./client";
 
 type IntakeResult =
@@ -92,7 +93,7 @@ async function requesterForTelegramUser(supabase: ReturnType<typeof createAdminC
 
 async function createPendingTicket({
   supabase,
-  parsedTicket,
+  workItem,
   object,
   category,
   requester,
@@ -103,7 +104,7 @@ async function createPendingTicket({
   localStoreMatch,
 }: {
   supabase: ReturnType<typeof createAdminClient>;
-  parsedTicket: AiParsedTicket;
+  workItem: AiWorkItem;
   object: CompanyObject;
   category: Category;
   requester: Profile;
@@ -113,30 +114,22 @@ async function createPendingTicket({
   analysis: Awaited<ReturnType<typeof analyzeTelegramGroupMessage>>;
   localStoreMatch: StoreMatchResult;
 }) {
-  const telegramUserId = message.from?.id ? String(message.from.id) : null;
   const number = await nextTicketNumber(supabase);
   const { data: ticket, error } = await supabase
     .from("tickets")
-    .insert({
+    .insert(buildPendingReviewTicketDraft({
       number,
-      title: parsedTicket.title,
-      description: parsedTicket.description,
-      status: "pending_review",
-      priority: (parsedTicket.priority ?? "medium") as TicketPriority,
-      object_id: object.id,
-      category_id: category.id,
-      created_by: requester.id,
-      source: "telegram_group",
-      telegram_chat_id: String(message.chat.id),
-      telegram_message_id: String(message.message_id),
-      telegram_source_group_id: sourceGroupId,
-      telegram_user_id: telegramUserId,
-      telegram_user_name: telegramUserName(message),
-      original_message_text: originalText,
-      ai_confidence: parsedTicket.confidence,
-      ai_raw_result: { localStoreMatch, analysis, parsedTicket },
-      recommended_department: parsedTicket.recommendedDepartment,
-    })
+      workItem,
+      object,
+      category,
+      requester,
+      message,
+      sourceGroupId,
+      originalText,
+      analysis,
+      localStoreMatch,
+      telegramUserName: telegramUserName(message),
+    }))
     .select("id, number")
     .single();
 
@@ -154,13 +147,13 @@ async function createPendingTicket({
       telegram_chat_id: String(message.chat.id),
       telegram_message_id: String(message.message_id),
       telegram_source_group_id: sourceGroupId,
-      ai_confidence: parsedTicket.confidence,
+      ai_confidence: workItem.confidence,
       local_store_match: {
         status: localStoreMatch.status,
         confidence: localStoreMatch.confidence,
         bestMatch: localStoreMatch.bestMatch?.id ?? null,
       },
-      recommended_department: parsedTicket.recommendedDepartment,
+      recommended_department: workItem.recommendedDepartment,
     },
   });
 
@@ -180,10 +173,11 @@ export async function handleTelegramGroupMessage(message: TelegramMessage): Prom
   if (!analysis.isTicketMessage) return { handled: true, created: false, reason: "not_ticket" };
   if (!analysis.objectId) return { handled: true, created: false, reason: "store_not_found" };
   if (analysis.confidence < 0.6) return { handled: true, created: false, reason: "low_confidence" };
-  if (analysis.tickets.length === 0) return { handled: true, created: false, reason: "no_parsed_tickets" };
+  const workItems = analysis.workItems.length > 0 ? analysis.workItems : analysis.tickets;
+  if (workItems.length === 0) return { handled: true, created: false, reason: "no_work_items" };
 
-  const eligibleTickets = analysis.tickets.filter((ticket) => ticket.confidence >= 0.6);
-  if (eligibleTickets.length === 0) return { handled: true, created: false, reason: "no_confident_parsed_tickets" };
+  const eligibleWorkItems = workItems.filter((item) => item.confidence >= 0.6);
+  if (eligibleWorkItems.length === 0) return { handled: true, created: false, reason: "no_confident_work_items" };
 
   const supabase = createAdminClient();
   const [{ data: objects }, { data: categories }] = await Promise.all([
@@ -199,16 +193,16 @@ export async function handleTelegramGroupMessage(message: TelegramMessage): Prom
 
   const sourceGroupId = `${message.chat.id}_${message.message_id}`;
   const created = [];
-  for (const parsedTicket of eligibleTickets) {
-    const category = findCategory((categories ?? []) as Category[], parsedTicket.category);
+  for (const workItem of eligibleWorkItems) {
+    const category = findCategory((categories ?? []) as Category[], workItem.category);
     if (!category) {
-      console.info("[telegram-group-intake] category_not_found", { category: parsedTicket.category });
+      console.info("[telegram-group-intake] category_not_found", { category: workItem.category });
       continue;
     }
 
     const ticket = await createPendingTicket({
       supabase,
-      parsedTicket,
+      workItem,
       object,
       category,
       requester,

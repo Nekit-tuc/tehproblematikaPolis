@@ -1,4 +1,6 @@
-import type { AiGroupMessageAnalysis, AiParsedTicket, AiPriority } from "@/types/ai";
+import type { AiGroupMessageAnalysis, AiPriority, AiWorkItem, AiWorkType } from "@/types/ai";
+
+const WORK_TYPES: AiWorkType[] = ["repair", "install", "replace", "inspect", "administrative", "cleaning", "safety", "other"];
 
 export function extractJsonObject(content: string) {
   const trimmed = content.trim();
@@ -13,30 +15,35 @@ export function clampConfidence(value: unknown) {
   return Math.max(0, Math.min(1, number));
 }
 
+export function withTicketAlias(analysis: Omit<AiGroupMessageAnalysis, "tickets"> & { tickets?: AiWorkItem[] }): AiGroupMessageAnalysis {
+  const workItems = analysis.workItems ?? [];
+  return { ...analysis, workItems, tickets: analysis.tickets ?? workItems };
+}
+
 export function safeNoTicket(reason = "Повідомлення не схоже на технічну заявку."): AiGroupMessageAnalysis {
-  return {
+  return withTicketAlias({
     isTicketMessage: false,
     objectId: null,
     objectName: null,
     address: null,
     confidence: 0,
-    tickets: [],
+    workItems: [],
     missingFields: ["problem_description"],
     reason,
-  };
+  });
 }
 
 export function safeObjectMissing(reason = "Не вдалося впевнено визначити об'єкт."): AiGroupMessageAnalysis {
-  return {
+  return withTicketAlias({
     isTicketMessage: true,
     objectId: null,
     objectName: null,
     address: null,
     confidence: 0.4,
-    tickets: [],
+    workItems: [],
     missingFields: ["object"],
     reason,
-  };
+  });
 }
 
 function asStringOrNull(value: unknown) {
@@ -45,6 +52,10 @@ function asStringOrNull(value: unknown) {
 
 function normalizePriority(value: unknown, allowedPriorities: readonly AiPriority[]) {
   return typeof value === "string" && allowedPriorities.includes(value as AiPriority) ? (value as AiPriority) : "medium";
+}
+
+function normalizeWorkType(value: unknown) {
+  return typeof value === "string" && WORK_TYPES.includes(value as AiWorkType) ? (value as AiWorkType) : "other";
 }
 
 function normalizeCategory(value: unknown, allowedCategories: readonly string[]) {
@@ -77,10 +88,12 @@ export function parseAiAnalysisJson({
   const value = raw as Record<string, unknown>;
 
   if (value.isTicketMessage !== true) return safeNoTicket(asStringOrNull(value.reason) ?? undefined);
-  if (!Array.isArray(value.tickets)) throw new Error("AI response tickets is not an array");
 
-  const tickets: AiParsedTicket[] = value.tickets
-    .map((ticket): AiParsedTicket | null => {
+  const rawWorkItems = Array.isArray(value.workItems) ? value.workItems : Array.isArray(value.tickets) ? value.tickets : null;
+  if (!rawWorkItems) throw new Error("AI response workItems/tickets is not an array");
+
+  const workItems: AiWorkItem[] = rawWorkItems
+    .map((ticket): AiWorkItem | null => {
       if (!ticket || typeof ticket !== "object") return null;
       const item = ticket as Record<string, unknown>;
       const title = asStringOrNull(item.title);
@@ -90,24 +103,26 @@ export function parseAiAnalysisJson({
         title,
         description,
         category: normalizeCategory(item.category, allowedCategories),
+        workType: normalizeWorkType(item.workType),
         priority: normalizePriority(item.priority, allowedPriorities),
         recommendedDepartment: normalizeDepartment(item.recommendedDepartment, allowedDepartments),
         confidence: clampConfidence(item.confidence),
+        reasoning: asStringOrNull(item.reasoning) ?? "AI визначив окрему роботу з повідомлення Telegram-групи.",
       };
     })
-    .filter((ticket): ticket is AiParsedTicket => Boolean(ticket));
+    .filter((ticket): ticket is AiWorkItem => Boolean(ticket));
 
   const missingFields = Array.isArray(value.missingFields) ? value.missingFields.filter((field): field is string => typeof field === "string") : [];
-  if (tickets.length === 0 && !missingFields.includes("tickets")) missingFields.push("tickets");
+  if (workItems.length === 0 && !missingFields.includes("workItems")) missingFields.push("workItems");
 
-  return {
+  return withTicketAlias({
     isTicketMessage: true,
     objectId: asStringOrNull(value.objectId),
     objectName: asStringOrNull(value.objectName),
     address: asStringOrNull(value.address),
     confidence: clampConfidence(value.confidence),
-    tickets,
+    workItems,
     missingFields,
     reason: asStringOrNull(value.reason) ?? "AI проаналізував повідомлення.",
-  } satisfies AiGroupMessageAnalysis;
+  });
 }

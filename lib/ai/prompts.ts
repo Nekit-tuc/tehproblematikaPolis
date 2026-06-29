@@ -4,6 +4,11 @@ export const serviceDeskCategories = [
   "Сантехніка",
   "Електрика",
   "Будівельні роботи",
+  "Малярні роботи",
+  "Покрівля",
+  "Водовідведення",
+  "Двері та замки",
+  "Вікна",
   "Роботи студентів",
   "Холодильне обладнання",
   "Кондиціонування та вентиляція",
@@ -15,42 +20,77 @@ export const serviceDeskCategories = [
   "Вивіски та реклама",
   "Прибирання",
   "Благоустрій території",
+  "Пожежна безпека",
+  "Адміністративне питання",
   "Інше",
 ] as const;
 
 export const serviceDeskPriorities = ["low", "medium", "high", "critical"] as const;
 
+export const serviceDeskWorkTypes = ["repair", "install", "replace", "inspect", "administrative", "cleaning", "safety", "other"] as const;
+
 export const serviceDeskDepartments = [
   "Сантехнік",
   "Електрик",
   "Будівельна бригада",
+  "Малярна бригада",
+  "Покрівельник",
+  "Водовідведення",
+  "Двері та замки",
+  "Вікна",
   "Студентська бригада",
   "Холодильне обладнання",
   "Кліматична служба",
   "IT / POS",
+  "Пожежна безпека",
+  "Адміністрація",
   "Технічний менеджер",
   "Технічний відділ",
 ] as const;
 
 export const ticketClassifierSystemPrompt = `
 Ти AI-диспетчер Polissya Service Desk.
-Поверни тільки валідний JSON без markdown і без тексту навколо.
+Основна одиниця аналізу - Work Item: окрема незалежна робота або доручення, яке можна перетворити в одну заявку.
 
-Дворівнева логіка:
-1. Якщо localStoreMatchStatus exact або high_confidence, використовуй тільки fixedStore. Не змінюй objectId/objectName/address.
-2. Якщо localStoreMatchStatus ambiguous або not_found, можеш вибрати рівно один об'єкт тільки з candidateStores.
-3. Якщо не впевнений у виборі об'єкта, поверни objectId=null, tickets=[], missingFields=["object"].
-4. Якщо вибираєш об'єкт з candidateStores, confidence має бути >= 0.7.
+Поверни тільки валідний JSON без markdown.
 
-Правила заявок:
-- одне повідомлення може містити кілька різних технічних проблем;
-- кожна різна проблема має бути окремим елементом tickets[];
-- не розділяй одну проблему на кілька заявок, якщо це один вузол або обладнання;
-- "унітаз гуде і набирається вода" = 1 ticket;
-- "прочистити унітаз, прикрутити ручку" = 2 tickets;
-- ігноруй привітання, зайві слова, помилки, суржик і розмовний стиль;
+Правила:
+- одне повідомлення Telegram-групи може містити багато workItems;
+- не об'єднуй різні роботи в одну;
+- не дроби одну проблему одного вузла або обладнання на кілька workItems;
+- адресу або назву магазину не включай в description;
+- текст у дужках перенось у description як уточнення;
+- якщо localStoreMatchStatus exact або high_confidence, використовуй fixedStore і не вигадуй інший objectId;
+- якщо localStoreMatchStatus ambiguous або not_found і не можеш впевнено вибрати один candidateStore, поверни objectId=null, workItems=[], tickets=[], missingFields=["object"];
 - category вибирай тільки з allowedCategories;
 - priority вибирай тільки з allowedPriorities;
-- recommendedDepartment вибирай тільки з allowedRecommendedDepartments, або null, або "Технічний відділ";
-- якщо повідомлення не схоже на технічну заявку, поверни isTicketMessage=false, confidence=0, tickets=[].
+- workType вибирай тільки з allowedWorkTypes;
+- recommendedDepartment вибирай тільки з allowedRecommendedDepartments, null або "Технічний відділ";
+- якщо повідомлення не схоже на технічну заявку, поверни isTicketMessage=false, confidence=0, workItems=[], tickets=[].
+
+JSON shape:
+{
+  "isTicketMessage": true,
+  "objectId": "string|null",
+  "objectName": "string|null",
+  "address": "string|null",
+  "confidence": 0.92,
+  "workItems": [
+    {
+      "title": "string",
+      "description": "string",
+      "category": "one of allowedCategories",
+      "workType": "repair|install|replace|inspect|administrative|cleaning|safety|other",
+      "priority": "low|medium|high|critical",
+      "recommendedDepartment": "one of allowedRecommendedDepartments|null",
+      "confidence": 0.9,
+      "reasoning": "short reason"
+    }
+  ],
+  "tickets": [],
+  "missingFields": [],
+  "reason": "string"
+}
+
+tickets має бути alias до workItems для сумісності.
 `.trim();
