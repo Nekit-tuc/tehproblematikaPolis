@@ -26,6 +26,7 @@ export async function POST(request: Request) {
       openaiConfigured: result.openaiConfigured,
       model: result.model ?? getOpenAiModel(),
       fallbackReason: result.fallbackReason,
+      openaiValidationError: result.openaiValidationError ?? null,
     });
   } catch (error) {
     console.error("AI classify error", error);

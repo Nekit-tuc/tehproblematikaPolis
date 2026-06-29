@@ -22,6 +22,7 @@ type ApiResponse = {
   openaiConfigured?: boolean;
   model?: string | null;
   fallbackReason?: string;
+  openaiValidationError?: string | null;
   error?: string;
 };
 
@@ -114,6 +115,7 @@ export function AiTestClient() {
                 <Info label="OpenAI configured" value={result.raw.openaiConfigured ? "true" : "false"} />
                 <Info label="Model" value={result.raw.model ?? "-"} />
                 <Info label="Fallback reason" value={result.raw.fallbackReason ?? "-"} />
+                <Info label="OpenAI validation" value={result.raw.openaiValidationError ?? "-"} />
               </CardContent>
             </Card>
 

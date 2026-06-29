@@ -2,7 +2,7 @@ import { getStoreCandidatesForAi, isReliableStoreMatch, matchStore, type StoreMa
 import type { AiGroupMessageAnalysis, AiPriority } from "@/types/ai";
 import { getOpenAiClient, getOpenAiModel, hasOpenAiApiKey } from "./openai-client";
 import { serviceDeskCategories, serviceDeskDepartments, serviceDeskPriorities, serviceDeskWorkTypes, ticketClassifierSystemPrompt } from "./prompts";
-import { parseAiAnalysisJson, safeNoTicket, safeObjectMissing, withTicketAlias } from "./safe-json";
+import { parseAiAnalysisJsonWithMeta, safeNoTicket, safeObjectMissing, withTicketAlias } from "./safe-json";
 import { extractWorkItems, looksLikeWorkMessage } from "./work-item-extractor";
 
 export type AnalyzeTelegramGroupMessageInput = {
@@ -21,6 +21,7 @@ export type AnalyzeTelegramGroupMessageResult = {
   model: string | null;
   openaiConfigured: boolean;
   fallbackReason?: string;
+  openaiValidationError?: string | null;
 };
 
 class OpenAiAnalyzerError extends Error {
@@ -32,6 +33,41 @@ class OpenAiAnalyzerError extends Error {
     super(message);
   }
 }
+
+const workItemSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["title", "description", "category", "workType", "priority", "recommendedDepartment", "confidence", "reasoning"],
+  properties: {
+    title: { type: "string" },
+    description: { type: "string" },
+    category: { type: "string" },
+    workType: { type: "string", enum: ["repair", "install", "replace", "inspect", "administrative", "cleaning", "safety", "other"] },
+    priority: { type: "string", enum: ["low", "medium", "high", "critical"] },
+    recommendedDepartment: { type: ["string", "null"] },
+    confidence: { type: "number" },
+    reasoning: { type: "string" },
+  },
+} as const;
+
+const aiWorkItemsAnalysisJsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["isTicketMessage", "objectId", "objectName", "address", "confidence", "workItems", "tickets", "missingFields", "reason", "mode", "model"],
+  properties: {
+    isTicketMessage: { type: "boolean" },
+    objectId: { type: ["string", "null"] },
+    objectName: { type: ["string", "null"] },
+    address: { type: ["string", "null"] },
+    confidence: { type: "number" },
+    workItems: { type: "array", items: workItemSchema },
+    tickets: { type: "array", items: workItemSchema },
+    missingFields: { type: "array", items: { type: "string" } },
+    reason: { type: "string" },
+    mode: { type: "string" },
+    model: { type: "string" },
+  },
+} as const;
 
 function objectHintsFromMatch(match: StoreMatchResult | null) {
   const store = match?.bestMatch;
@@ -173,6 +209,8 @@ function buildPrompt({
       tickets: "same array as workItems for backward compatibility",
       missingFields: "string[]",
       reason: "string",
+      mode: "openai",
+      model: getOpenAiModel(),
     },
   });
 }
@@ -201,7 +239,7 @@ function enforceObjectPolicy(analysis: AiGroupMessageAnalysis, localStoreMatch: 
   });
 }
 
-async function analyzeWithOpenAi(input: AnalyzeTelegramGroupMessageInput, localStoreMatch: StoreMatchResult): Promise<AiGroupMessageAnalysis> {
+async function analyzeWithOpenAi(input: AnalyzeTelegramGroupMessageInput, localStoreMatch: StoreMatchResult): Promise<{ analysis: AiGroupMessageAnalysis; validationError: string | null }> {
   const { client, error } = await getOpenAiClient();
   if (!client) throw new OpenAiAnalyzerError(error === "OpenAI SDK error" ? "sdk" : "request", error ?? "OpenAI request failed");
   const categories = input.categories ?? serviceDeskCategories;
@@ -210,14 +248,13 @@ async function analyzeWithOpenAi(input: AnalyzeTelegramGroupMessageInput, localS
 
   let content: string | null | undefined;
   try {
-    const completion = await client.chat.completions.create({
-      model: getOpenAiModel(),
-      temperature: 0.1,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: ticketClassifierSystemPrompt },
-        { role: "user", content: buildPrompt({ text: input.text, localStoreMatch, categories, priorities, departments }) },
-      ],
+    const completion = await createOpenAiCompletion({
+      client,
+      input,
+      localStoreMatch,
+      categories,
+      priorities,
+      departments,
     });
     content = completion.choices[0]?.message?.content;
     console.log("OpenAI raw response:", redactPotentialSecrets(content ?? ""));
@@ -227,9 +264,9 @@ async function analyzeWithOpenAi(input: AnalyzeTelegramGroupMessageInput, localS
 
   if (!content) throw new OpenAiAnalyzerError("invalid_json", "OpenAI returned invalid JSON", "");
 
-  let parsed: AiGroupMessageAnalysis;
+  let parsed: { analysis: AiGroupMessageAnalysis; validationError: string | null };
   try {
-    parsed = parseAiAnalysisJson({
+    parsed = parseAiAnalysisJsonWithMeta({
       content,
       allowedCategories: categories,
       allowedPriorities: priorities,
@@ -239,7 +276,61 @@ async function analyzeWithOpenAi(input: AnalyzeTelegramGroupMessageInput, localS
     console.error("[ai-analyzer] OpenAI JSON parsing failed", parseError);
     throw new OpenAiAnalyzerError("invalid_json", `OpenAI returned invalid JSON: ${rawContentSnippet(content)}`, rawContentSnippet(content));
   }
-  return enforceObjectPolicy(parsed, localStoreMatch);
+  return {
+    analysis: enforceObjectPolicy(parsed.analysis, localStoreMatch),
+    validationError: parsed.validationError,
+  };
+}
+
+async function createOpenAiCompletion({
+  client,
+  input,
+  localStoreMatch,
+  categories,
+  priorities,
+  departments,
+}: {
+  client: NonNullable<Awaited<ReturnType<typeof getOpenAiClient>>["client"]>;
+  input: AnalyzeTelegramGroupMessageInput;
+  localStoreMatch: StoreMatchResult;
+  categories: readonly string[];
+  priorities: readonly AiPriority[];
+  departments: readonly string[];
+}) {
+  const messages = [
+    { role: "system" as const, content: ticketClassifierSystemPrompt },
+    { role: "user" as const, content: buildPrompt({ text: input.text, localStoreMatch, categories, priorities, departments }) },
+  ];
+
+  try {
+    return await client.chat.completions.create({
+      model: getOpenAiModel(),
+      temperature: 0.1,
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: "ai_work_items_analysis",
+          strict: true,
+          schema: aiWorkItemsAnalysisJsonSchema,
+        },
+      },
+      messages,
+    });
+  } catch (schemaError) {
+    if (!isJsonSchemaUnsupportedError(schemaError)) throw schemaError;
+    console.warn("[ai-analyzer] json_schema response_format is not supported, retrying with json_object.", schemaError);
+    return client.chat.completions.create({
+      model: getOpenAiModel(),
+      temperature: 0.1,
+      response_format: { type: "json_object" },
+      messages,
+    });
+  }
+}
+
+function isJsonSchemaUnsupportedError(error: unknown) {
+  const message = shortErrorMessage(error).toLowerCase();
+  return message.includes("json_schema") || message.includes("response_format") || message.includes("schema");
 }
 
 function shortErrorMessage(error: unknown) {
@@ -274,8 +365,8 @@ export async function analyzeTelegramGroupMessageWithMeta(input: AnalyzeTelegram
   }
 
   try {
-    const analysis = await analyzeWithOpenAi(input, localStoreMatch);
-    return { analysis, mode: "openai", model: getOpenAiModel(), openaiConfigured: true };
+    const { analysis, validationError } = await analyzeWithOpenAi(input, localStoreMatch);
+    return { analysis, mode: "openai", model: getOpenAiModel(), openaiConfigured: true, openaiValidationError: validationError };
   } catch (error) {
     const fallbackReason = fallbackReasonFromOpenAiError(error);
     console.error("[ai-analyzer] OpenAI analysis failed, using AI v2 fallback parser.", error);

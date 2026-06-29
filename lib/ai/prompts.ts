@@ -101,7 +101,9 @@ export const ticketClassifierSystemPrompt = `
   ],
   "tickets": [],
   "missingFields": [],
-  "reason": "string"
+  "reason": "string",
+  "mode": "openai",
+  "model": "model name"
 }
 
 tickets має бути той самий масив, що й workItems, для сумісності.

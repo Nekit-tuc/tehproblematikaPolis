@@ -2,6 +2,11 @@ import type { AiGroupMessageAnalysis, AiPriority, AiWorkItem, AiWorkType } from 
 
 const WORK_TYPES: AiWorkType[] = ["repair", "install", "replace", "inspect", "administrative", "cleaning", "safety", "other"];
 
+export type ParsedAiAnalysis = {
+  analysis: AiGroupMessageAnalysis;
+  validationError: string | null;
+};
+
 export function extractJsonObject(content: string) {
   const trimmed = content.trim();
   const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
@@ -21,7 +26,7 @@ export function clampConfidence(value: unknown) {
 
 export function withTicketAlias(analysis: Omit<AiGroupMessageAnalysis, "tickets"> & { tickets?: AiWorkItem[] }): AiGroupMessageAnalysis {
   const workItems = analysis.workItems ?? [];
-  return { ...analysis, workItems, tickets: analysis.tickets ?? workItems };
+  return { ...analysis, workItems, tickets: workItems };
 }
 
 export function safeNoTicket(reason = "Повідомлення не схоже на технічну заявку."): AiGroupMessageAnalysis {
@@ -54,23 +59,30 @@ function asStringOrNull(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
-function requirePriority(value: unknown, allowedPriorities: readonly AiPriority[]) {
+function normalizePriority(value: unknown, allowedPriorities: readonly AiPriority[], warnings: string[]) {
   if (typeof value === "string" && allowedPriorities.includes(value as AiPriority)) return value as AiPriority;
-  throw new Error(`AI response priority is not allowed: ${String(value)}`);
+  warnings.push(`priority normalized from ${String(value)} to medium`);
+  return "medium";
 }
 
-function requireWorkType(value: unknown) {
+function normalizeWorkType(value: unknown, warnings: string[]) {
   if (typeof value === "string" && WORK_TYPES.includes(value as AiWorkType)) return value as AiWorkType;
-  throw new Error(`AI response workType is not allowed: ${String(value)}`);
+  warnings.push(`workType normalized from ${String(value)} to other`);
+  return "other";
 }
 
-function requireCategory(value: unknown, allowedCategories: readonly string[]) {
-  if (typeof value !== "string") throw new Error("AI response category is not a string");
-  const exact = allowedCategories.find((category) => category === value);
-  const caseInsensitive = allowedCategories.find((category) => category.toLowerCase() === value.toLowerCase());
-  const category = exact ?? caseInsensitive;
-  if (!category) throw new Error(`AI response category is not allowed: ${value}`);
-  return category;
+function normalizeCategory(value: unknown, allowedCategories: readonly string[], warnings: string[]) {
+  const fallback = allowedCategories[allowedCategories.length - 1] ?? "Інше";
+  if (typeof value !== "string") {
+    warnings.push(`category normalized from ${String(value)} to ${fallback}`);
+    return fallback;
+  }
+
+  const category = allowedCategories.find((allowed) => allowed === value) ?? allowedCategories.find((allowed) => allowed.toLowerCase() === value.toLowerCase());
+  if (category) return category;
+
+  warnings.push(`category normalized from ${value} to ${fallback}`);
+  return fallback;
 }
 
 function normalizeDepartment(value: unknown, allowedDepartments: readonly string[]) {
@@ -80,7 +92,7 @@ function normalizeDepartment(value: unknown, allowedDepartments: readonly string
   return allowedDepartments.find((allowed) => allowed === department) ?? allowedDepartments.find((allowed) => allowed.toLowerCase() === department.toLowerCase()) ?? "Технічний відділ";
 }
 
-export function parseAiAnalysisJson({
+export function parseAiAnalysisJsonWithMeta({
   content,
   allowedCategories,
   allowedPriorities,
@@ -90,17 +102,41 @@ export function parseAiAnalysisJson({
   allowedCategories: readonly string[];
   allowedPriorities: readonly AiPriority[];
   allowedDepartments: readonly string[];
-}) {
+}): ParsedAiAnalysis {
+  const warnings: string[] = [];
   const jsonText = extractJsonObject(content);
   if (!jsonText) throw new Error("AI response does not contain a JSON object");
+
   const raw = JSON.parse(jsonText) as unknown;
   if (!raw || typeof raw !== "object") throw new Error("AI response JSON is not an object");
   const value = raw as Record<string, unknown>;
 
-  if (value.isTicketMessage !== true) return safeNoTicket(asStringOrNull(value.reason) ?? undefined);
+  if (value.isTicketMessage !== true) {
+    return {
+      analysis: safeNoTicket(asStringOrNull(value.reason) ?? undefined),
+      validationError: null,
+    };
+  }
 
-  const rawWorkItems = Array.isArray(value.workItems) ? value.workItems : Array.isArray(value.tickets) ? value.tickets : null;
+  const workItemsArray = Array.isArray(value.workItems) ? value.workItems : null;
+  const ticketsArray = Array.isArray(value.tickets) ? value.tickets : null;
+  const hasWorkItems = Boolean(workItemsArray && workItemsArray.length > 0);
+  const hasTickets = Boolean(ticketsArray && ticketsArray.length > 0);
+  const rawWorkItems: unknown[] | null = hasWorkItems
+    ? workItemsArray
+    : hasTickets
+      ? ticketsArray
+      : workItemsArray
+        ? workItemsArray
+        : ticketsArray
+          ? ticketsArray
+          : null;
+
   if (!rawWorkItems) throw new Error("AI response workItems/tickets is not an array");
+  if (!ticketsArray && workItemsArray) warnings.push("tickets missing; using workItems alias");
+  if (!workItemsArray && ticketsArray) warnings.push("workItems missing; using tickets alias");
+  if (!("mode" in value)) warnings.push("mode missing from OpenAI JSON");
+  if (!("model" in value)) warnings.push("model missing from OpenAI JSON");
 
   const workItems: AiWorkItem[] = rawWorkItems.map((ticket): AiWorkItem => {
     if (!ticket || typeof ticket !== "object") throw new Error("AI response workItem is not an object");
@@ -108,12 +144,13 @@ export function parseAiAnalysisJson({
     const title = asStringOrNull(item.title);
     const description = asStringOrNull(item.description);
     if (!title || !description) throw new Error("AI response workItem title/description is missing");
+
     return {
       title,
       description,
-      category: requireCategory(item.category, allowedCategories),
-      workType: requireWorkType(item.workType),
-      priority: requirePriority(item.priority, allowedPriorities),
+      category: normalizeCategory(item.category, allowedCategories, warnings),
+      workType: normalizeWorkType(item.workType, warnings),
+      priority: normalizePriority(item.priority, allowedPriorities, warnings),
       recommendedDepartment: normalizeDepartment(item.recommendedDepartment, allowedDepartments),
       confidence: clampConfidence(item.confidence),
       reasoning: asStringOrNull(item.reasoning) ?? "AI визначив окрему роботу з повідомлення Telegram-групи.",
@@ -123,7 +160,7 @@ export function parseAiAnalysisJson({
   const missingFields = Array.isArray(value.missingFields) ? value.missingFields.filter((field): field is string => typeof field === "string") : [];
   if (workItems.length === 0 && !missingFields.includes("workItems")) missingFields.push("workItems");
 
-  return withTicketAlias({
+  const analysis = withTicketAlias({
     isTicketMessage: true,
     objectId: asStringOrNull(value.objectId),
     objectName: asStringOrNull(value.objectName),
@@ -133,4 +170,18 @@ export function parseAiAnalysisJson({
     missingFields,
     reason: asStringOrNull(value.reason) ?? "AI проаналізував повідомлення.",
   });
+
+  return {
+    analysis,
+    validationError: warnings.length > 0 ? warnings.join("; ") : null,
+  };
+}
+
+export function parseAiAnalysisJson(input: {
+  content: string;
+  allowedCategories: readonly string[];
+  allowedPriorities: readonly AiPriority[];
+  allowedDepartments: readonly string[];
+}) {
+  return parseAiAnalysisJsonWithMeta(input).analysis;
 }
