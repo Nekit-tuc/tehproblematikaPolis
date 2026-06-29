@@ -4,9 +4,13 @@ const WORK_TYPES: AiWorkType[] = ["repair", "install", "replace", "inspect", "ad
 
 export function extractJsonObject(content: string) {
   const trimmed = content.trim();
-  if (trimmed.startsWith("{") && trimmed.endsWith("}")) return trimmed;
-  const match = trimmed.match(/\{[\s\S]*\}/);
-  return match?.[0] ?? null;
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const candidate = fenced?.[1]?.trim() ?? trimmed;
+  if (candidate.startsWith("{") && candidate.endsWith("}")) return candidate;
+  const firstBrace = candidate.indexOf("{");
+  const lastBrace = candidate.lastIndexOf("}");
+  if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) return null;
+  return candidate.slice(firstBrace, lastBrace + 1).trim();
 }
 
 export function clampConfidence(value: unknown) {

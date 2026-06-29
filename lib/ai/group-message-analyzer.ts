@@ -27,6 +27,7 @@ class OpenAiAnalyzerError extends Error {
   constructor(
     public readonly code: "sdk" | "request" | "invalid_json",
     message: string,
+    public readonly rawContentSnippet?: string,
   ) {
     super(message);
   }
@@ -219,11 +220,12 @@ async function analyzeWithOpenAi(input: AnalyzeTelegramGroupMessageInput, localS
       ],
     });
     content = completion.choices[0]?.message?.content;
+    console.log("OpenAI raw response:", redactPotentialSecrets(content ?? ""));
   } catch (requestError) {
     throw new OpenAiAnalyzerError("request", shortErrorMessage(requestError));
   }
 
-  if (!content) throw new OpenAiAnalyzerError("invalid_json", "OpenAI returned invalid JSON");
+  if (!content) throw new OpenAiAnalyzerError("invalid_json", "OpenAI returned invalid JSON", "");
 
   let parsed: AiGroupMessageAnalysis;
   try {
@@ -235,7 +237,7 @@ async function analyzeWithOpenAi(input: AnalyzeTelegramGroupMessageInput, localS
     });
   } catch (parseError) {
     console.error("[ai-analyzer] OpenAI JSON parsing failed", parseError);
-    throw new OpenAiAnalyzerError("invalid_json", "OpenAI returned invalid JSON");
+    throw new OpenAiAnalyzerError("invalid_json", `OpenAI returned invalid JSON: ${rawContentSnippet(content)}`, rawContentSnippet(content));
   }
   return enforceObjectPolicy(parsed, localStoreMatch);
 }
@@ -248,10 +250,18 @@ function shortErrorMessage(error: unknown) {
 function fallbackReasonFromOpenAiError(error: unknown) {
   if (error instanceof OpenAiAnalyzerError) {
     if (error.code === "sdk") return "OpenAI SDK error";
-    if (error.code === "invalid_json") return "OpenAI returned invalid JSON";
+    if (error.code === "invalid_json") return error.message;
     return `OpenAI request failed: ${error.message}`;
   }
   return `OpenAI request failed: ${shortErrorMessage(error)}`;
+}
+
+function rawContentSnippet(content: string) {
+  return redactPotentialSecrets(content).replace(/\s+/g, " ").trim().slice(0, 200);
+}
+
+function redactPotentialSecrets(value: string) {
+  return value.replace(/sk-[A-Za-z0-9_-]+/g, "[REDACTED_OPENAI_KEY]");
 }
 
 export async function analyzeTelegramGroupMessageWithMeta(input: AnalyzeTelegramGroupMessageInput): Promise<AnalyzeTelegramGroupMessageResult> {
