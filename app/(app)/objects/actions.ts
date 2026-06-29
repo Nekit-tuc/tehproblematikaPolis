@@ -17,6 +17,7 @@ type ObjectPayloadResult =
         city: string;
         district: string | null;
         address: string;
+        aliases: string[];
         manager_id: string | null;
         is_active: boolean;
       };
@@ -29,6 +30,17 @@ function text(formData: FormData, key: string) {
 
 function bool(formData: FormData, key: string) {
   return formData.get(key) === "on";
+}
+
+function aliases(formData: FormData) {
+  return [
+    ...new Set(
+      text(formData, "aliases")
+        .split(/\r?\n|,/g)
+        .map((value) => value.trim())
+        .filter(Boolean),
+    ),
+  ];
 }
 
 function readObjectPayload(formData: FormData): ObjectPayloadResult {
@@ -54,6 +66,7 @@ function readObjectPayload(formData: FormData): ObjectPayloadResult {
       city,
       district: district || null,
       address,
+      aliases: aliases(formData),
       manager_id: managerId || null,
       is_active: isActive,
     },

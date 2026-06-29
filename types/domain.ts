@@ -26,6 +26,7 @@ export interface CompanyObject {
   city: string;
   district?: string | null;
   address: string;
+  aliases?: string[] | null;
   manager_id?: string | null;
   is_active: boolean;
   created_at: string;

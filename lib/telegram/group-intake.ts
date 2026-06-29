@@ -1,6 +1,7 @@
 import { analyzeTelegramGroupMessage } from "@/lib/ai/group-message-analyzer";
 import { buildPendingReviewTicketDraft } from "@/lib/ai/ticket-builder";
 import { matchStore, normalizeStoreText, type StoreMatchResult } from "@/lib/stores/match-store";
+import { loadMatcherObjectsFromSupabase } from "@/lib/stores/object-source";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { AiWorkItem } from "@/types/ai";
 import type { Category, CompanyObject, Profile } from "@/types/domain";
@@ -39,6 +40,9 @@ function objectScore(object: CompanyObject, aliases: string[]) {
 }
 
 async function findObject(objects: CompanyObject[], analysisObjectId: string, localStoreMatch: StoreMatchResult) {
+  const direct = objects.find((object) => object.id === analysisObjectId);
+  if (direct) return direct;
+
   const matchedStore =
     localStoreMatch.bestMatch?.id === analysisObjectId
       ? localStoreMatch.bestMatch
@@ -153,6 +157,7 @@ async function createPendingTicket({
         confidence: localStoreMatch.confidence,
         bestMatch: localStoreMatch.bestMatch?.id ?? null,
       },
+      object_source: "supabase_objects",
       recommended_department: workItem.recommendedDepartment,
     },
   });
@@ -168,7 +173,12 @@ export async function handleTelegramGroupMessage(message: TelegramMessage): Prom
   if (!text) return { handled: true, created: false, reason: "empty_message" };
   if (text.startsWith("/")) return { handled: true, created: false, reason: "command_ignored" };
 
-  const localStoreMatch = matchStore(text);
+  const supabase = createAdminClient();
+  const [objectSource, { data: categories }] = await Promise.all([
+    loadMatcherObjectsFromSupabase(supabase),
+    supabase.from("categories").select("*").eq("is_active", true),
+  ]);
+  const localStoreMatch = matchStore(text, objectSource.records);
   const analysis = await analyzeTelegramGroupMessage({ text, localStoreMatch });
   if (!analysis.isTicketMessage) return { handled: true, created: false, reason: "not_ticket" };
   if (!analysis.objectId) return { handled: true, created: false, reason: "store_not_found" };
@@ -179,12 +189,8 @@ export async function handleTelegramGroupMessage(message: TelegramMessage): Prom
   const eligibleWorkItems = workItems.filter((item) => item.confidence >= 0.6);
   if (eligibleWorkItems.length === 0) return { handled: true, created: false, reason: "no_confident_work_items" };
 
-  const supabase = createAdminClient();
-  const [{ data: objects }, { data: categories }] = await Promise.all([
-    supabase.from("objects").select("*").eq("is_active", true),
-    supabase.from("categories").select("*").eq("is_active", true),
-  ]);
-  const object = await findObject((objects ?? []) as CompanyObject[], analysis.objectId, localStoreMatch);
+  const objects = objectSource.source === "supabase_objects" ? (objectSource.records as CompanyObject[]) : [];
+  const object = await findObject(objects, analysis.objectId, localStoreMatch);
   if (!object) return { handled: true, created: false, reason: "database_object_not_found" };
 
   const telegramUserId = message.from?.id ? String(message.from.id) : null;

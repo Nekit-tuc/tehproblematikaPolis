@@ -17,6 +17,7 @@ type ApiResponse = {
   data?: AiGroupMessageAnalysis;
   analysis?: AiGroupMessageAnalysis;
   localStoreMatch?: StoreMatchResult;
+  objectSource?: { source: "supabase_objects" | "static_store_addresses"; count: number; error: string | null };
   aiMode?: "openai" | "fallback";
   mode?: "openai" | "fallback";
   openaiConfigured?: boolean;
@@ -116,6 +117,9 @@ export function AiTestClient() {
                 <Info label="Model" value={result.raw.model ?? "-"} />
                 <Info label="Fallback reason" value={result.raw.fallbackReason ?? "-"} />
                 <Info label="OpenAI validation" value={result.raw.openaiValidationError ?? "-"} />
+                <Info label="Object source" value={result.raw.objectSource?.source ?? "-"} />
+                <Info label="Object count" value={String(result.raw.objectSource?.count ?? "-")} />
+                {result.raw.objectSource?.error ? <Info label="Object source error" value={result.raw.objectSource.error} /> : null}
               </CardContent>
             </Card>
 

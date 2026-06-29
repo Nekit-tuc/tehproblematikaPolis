@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { TD, TH, THead, TBody, TR, Table } from "@/components/ui/table";
+import { Textarea } from "@/components/ui/textarea";
 import { objectTypeLabels } from "@/lib/labels";
 import { requireRole } from "@/lib/auth/server";
 import { getObjects, getProfiles } from "@/lib/supabase/queries";
@@ -33,7 +34,7 @@ function filterObjects(objects: CompanyObject[], filters: { q?: string; type?: s
     if (filters.status === "active" && !object.is_active) return false;
     if (filters.status === "inactive" && object.is_active) return false;
     if (!query) return true;
-    return [object.name, getObjectNumber(object), object.address, object.city, getObjectDistrict(object)]
+    return [object.name, getObjectNumber(object), object.address, object.city, getObjectDistrict(object), ...(object.aliases ?? [])]
       .join(" ")
       .toLowerCase()
       .includes(query);
@@ -185,6 +186,14 @@ function ObjectForm({
       <Field label="Місто"><Input name="city" required defaultValue={object?.city ?? ""} placeholder="Житомир" /></Field>
       <Field label="Район"><Input name="district" defaultValue={object ? getObjectDistrict(object) : ""} placeholder="Центр" /></Field>
       <Field label="Адреса"><Input name="address" required defaultValue={object?.address ?? ""} placeholder="вул. Київська, 12" /></Field>
+      <Field label="Аліаси / варіанти написання">
+        <Textarea
+          name="aliases"
+          defaultValue={object?.aliases?.join("\n") ?? ""}
+          placeholder={"Вільський шлях 115\nВільський115\nВільського шляху 115"}
+          className="min-h-24"
+        />
+      </Field>
       <Field label="Відповідальний керуючий">
         <Select name="manager_id" defaultValue={object?.manager_id ?? ""}>
           <option value="">Не призначено</option>
