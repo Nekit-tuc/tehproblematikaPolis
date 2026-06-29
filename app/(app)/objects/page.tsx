@@ -1,17 +1,17 @@
 import type React from "react";
 import { Alert } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { TD, TH, THead, TBody, TR, Table } from "@/components/ui/table";
+import { TH, THead, TBody, TR, Table } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { objectTypeLabels } from "@/lib/labels";
 import { requireRole } from "@/lib/auth/server";
 import { getObjects, getProfiles } from "@/lib/supabase/queries";
 import type { CompanyObject, ObjectType, Profile } from "@/types/domain";
-import { createObjectAction, updateObjectAction } from "./actions";
+import { createObjectAction } from "./actions";
+import { ObjectRow } from "./object-row";
 
 const objectTypes: ObjectType[] = ["store", "warehouse", "production", "office", "other"];
 
@@ -117,7 +117,7 @@ export default async function ObjectsPage({ searchParams }: { searchParams: Prom
             <Table>
               <THead>
                 <TR>
-                  <TH>Назва</TH><TH>№</TH><TH>Тип</TH><TH>Місто / район</TH><TH>Адреса</TH><TH>Керуючий</TH><TH>Статус</TH><TH>Дії</TH>
+                  <TH>Назва</TH><TH>№</TH><TH>Тип</TH><TH>Місто / район</TH><TH>Адреса</TH><TH>Керуючий</TH><TH>Статус</TH>
                 </TR>
               </THead>
               <TBody>
@@ -130,36 +130,6 @@ export default async function ObjectsPage({ searchParams }: { searchParams: Prom
         </CardContent>
       </Card>
     </div>
-  );
-}
-
-function ObjectRow({ object, managers, canManage }: { object: CompanyObject; managers: Profile[]; canManage: boolean }) {
-  const manager = managers.find((item) => item.id === object.manager_id);
-  return (
-    <>
-      <TR>
-        <TD className="font-medium">{object.name}</TD>
-        <TD>{getObjectNumber(object)}</TD>
-        <TD>{getObjectTypeLabel(object.type)}</TD>
-        <TD>{object.city}{getObjectDistrict(object) ? ` / ${getObjectDistrict(object)}` : ""}</TD>
-        <TD>{object.address}</TD>
-        <TD>{manager?.full_name ?? "-"}</TD>
-        <TD><Badge tone={object.is_active ? "green" : "gray"}>{object.is_active ? "Активний" : "Неактивний"}</Badge></TD>
-        <TD>{canManage ? <details className="min-w-32"><summary className="cursor-pointer text-orange-200">Редагувати</summary></details> : "-"}</TD>
-      </TR>
-      {canManage ? (
-        <TR>
-          <TD colSpan={8} className="bg-stone-950/20">
-            <details>
-              <summary className="cursor-pointer py-2 text-sm text-orange-200">Форма редагування: {object.name}</summary>
-              <div className="py-3">
-                <ObjectForm action={updateObjectAction.bind(null, object.id)} object={object} managers={managers} submitLabel="Зберегти зміни" />
-              </div>
-            </details>
-          </TD>
-        </TR>
-      ) : null}
-    </>
   );
 }
 
