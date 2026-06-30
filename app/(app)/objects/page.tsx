@@ -42,12 +42,17 @@ function getNextObjectNumber(objects: CompanyObject[]) {
   return String(max.number + 1).padStart(max.width, "0");
 }
 
-function filterObjects(objects: CompanyObject[], filters: { q?: string; type?: string; status?: string }) {
+function getDistricts(objects: CompanyObject[]) {
+  return [...new Set(objects.map((object) => getObjectDistrict(object).trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, "uk"));
+}
+
+function filterObjects(objects: CompanyObject[], filters: { q?: string; type?: string; status?: string; district?: string }) {
   const query = filters.q?.trim().toLowerCase();
   return objects.filter((object) => {
     if (filters.type && filters.type !== "all" && object.type !== filters.type) return false;
     if (filters.status === "active" && !object.is_active) return false;
     if (filters.status === "inactive" && object.is_active) return false;
+    if (filters.district && filters.district !== "all" && getObjectDistrict(object) !== filters.district) return false;
     if (!query) return true;
     return [object.name, getObjectNumber(object), object.address, object.city, getObjectDistrict(object), ...(object.aliases ?? [])]
       .join(" ")
@@ -56,7 +61,7 @@ function filterObjects(objects: CompanyObject[], filters: { q?: string; type?: s
   });
 }
 
-export default async function ObjectsPage({ searchParams }: { searchParams: Promise<{ q?: string; type?: string; status?: string; error?: string; success?: string }> }) {
+export default async function ObjectsPage({ searchParams }: { searchParams: Promise<{ q?: string; type?: string; status?: string; district?: string; error?: string; success?: string }> }) {
   const { profile } = await requireRole(["admin", "management", "tech_manager"]);
   const params = await searchParams;
   const [objectsResult, profilesResult] = await Promise.all([getObjects(), getProfiles()]);
@@ -65,10 +70,12 @@ export default async function ObjectsPage({ searchParams }: { searchParams: Prom
     q: params.q,
     type: params.type ?? "all",
     status: params.status ?? "active",
+    district: params.district ?? "all",
   });
   const managers = profilesResult.data.filter((item) => item.role === "store_manager" || item.role === "management" || item.role === "tech_manager" || item.role === "admin");
   const canManage = profile.role === "admin";
   const nextObjectNumber = getNextObjectNumber(objectsResult.data);
+  const districts = getDistricts(objectsResult.data);
 
   return (
     <div className="page-shell space-y-6">
@@ -79,6 +86,8 @@ export default async function ObjectsPage({ searchParams }: { searchParams: Prom
       {error ? <Alert title="Помилка довідника об'єктів">{error}</Alert> : null}
       {params.success === "created" ? <Alert title="Об'єкт створено">Новий об'єкт додано до довідника.</Alert> : null}
       {params.success === "updated" ? <Alert title="Об'єкт оновлено">Зміни збережено.</Alert> : null}
+      {params.success === "activated" ? <Alert title="Об'єкт активовано">Статус об'єкта змінено на активний.</Alert> : null}
+      {params.success === "deactivated" ? <Alert title="Об'єкт деактивовано">Об'єкт приховано з активного довідника без видалення заявок.</Alert> : null}
 
       {canManage ? (
         <Card>
@@ -87,7 +96,7 @@ export default async function ObjectsPage({ searchParams }: { searchParams: Prom
             <CardDescription>Обов'язкові поля: назва, тип, номер, місто/район та адреса.</CardDescription>
           </CardHeader>
           <CardContent>
-            <CreateObjectForm managers={managers} nextObjectNumber={nextObjectNumber} />
+            <CreateObjectForm managers={managers} nextObjectNumber={nextObjectNumber} districts={districts} />
           </CardContent>
         </Card>
       ) : null}
@@ -98,7 +107,7 @@ export default async function ObjectsPage({ searchParams }: { searchParams: Prom
           <CardDescription>Пошук працює по назві, номеру, адресі та місту.</CardDescription>
         </CardHeader>
         <CardContent>
-          <form className="grid gap-4 md:grid-cols-4">
+          <form className="grid gap-4 md:grid-cols-5">
             <Field label="Пошук"><Input name="q" defaultValue={params.q ?? ""} placeholder="Назва, номер, адреса, місто" /></Field>
             <Field label="Тип">
               <Select name="type" defaultValue={params.type ?? "all"}>
@@ -111,6 +120,12 @@ export default async function ObjectsPage({ searchParams }: { searchParams: Prom
                 <option value="active">Активні</option>
                 <option value="inactive">Неактивні</option>
                 <option value="all">Всі</option>
+              </Select>
+            </Field>
+            <Field label="Район">
+              <Select name="district" defaultValue={params.district ?? "all"}>
+                <option value="all">Всі райони</option>
+                {districts.map((district) => <option key={district} value={district}>{district}</option>)}
               </Select>
             </Field>
             <div className="flex items-end gap-2">
@@ -138,7 +153,7 @@ export default async function ObjectsPage({ searchParams }: { searchParams: Prom
               </THead>
               <TBody>
                 {filteredObjects.map((object) => (
-                  <ObjectRow key={object.id} object={object} managers={managers} canManage={canManage} />
+                  <ObjectRow key={object.id} object={object} managers={managers} canManage={canManage} districts={districts} />
                 ))}
               </TBody>
             </Table>

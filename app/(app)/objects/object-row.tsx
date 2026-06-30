@@ -10,7 +10,7 @@ import { TD, TR } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { objectTypeLabels } from "@/lib/labels";
 import type { CompanyObject, ObjectType, Profile } from "@/types/domain";
-import { updateObjectAction } from "./actions";
+import { deactivateObjectAction, setObjectActiveAction, updateObjectAction } from "./actions";
 
 const objectTypes: ObjectType[] = ["store", "warehouse", "production", "office", "other"];
 
@@ -26,7 +26,7 @@ function getObjectTypeLabel(type: CompanyObject["type"]) {
   return objectTypeLabels[type] ?? type;
 }
 
-export function ObjectRow({ object, managers, canManage }: { object: CompanyObject; managers: Profile[]; canManage: boolean }) {
+export function ObjectRow({ object, managers, canManage, districts }: { object: CompanyObject; managers: Profile[]; canManage: boolean; districts: string[] }) {
   const [isOpen, setIsOpen] = useState(false);
   const rowId = `object-row-${object.id}`;
   const manager = managers.find((item) => item.id === object.manager_id);
@@ -73,7 +73,16 @@ export function ObjectRow({ object, managers, canManage }: { object: CompanyObje
         <TD>{object.address}</TD>
         <TD>{manager?.full_name ?? "-"}</TD>
         <TD>
-          <Badge tone={object.is_active ? "green" : "gray"}>{object.is_active ? "Активний" : "Неактивний"}</Badge>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge tone={object.is_active ? "green" : "gray"}>{object.is_active ? "Активний" : "Неактивний"}</Badge>
+            {canManage ? (
+              <form action={setObjectActiveAction.bind(null, object.id, !object.is_active)}>
+                <Button type="submit" variant="outline" size="sm" className="h-8 px-2 text-xs">
+                  {object.is_active ? "Зробити неактивним" : "Активувати"}
+                </Button>
+              </form>
+            ) : null}
+          </div>
         </TD>
       </TR>
       {canManage && isOpen ? (
@@ -84,7 +93,7 @@ export function ObjectRow({ object, managers, canManage }: { object: CompanyObje
                 <span>▼</span>
                 <span>Форма редагування: {object.name}</span>
               </div>
-              <ObjectForm action={updateObjectAction.bind(null, object.id)} object={object} managers={managers} submitLabel="Зберегти зміни" />
+              <ObjectForm action={updateObjectAction.bind(null, object.id)} object={object} managers={managers} districts={districts} submitLabel="Зберегти зміни" />
             </div>
           </TD>
         </TR>
@@ -97,11 +106,13 @@ function ObjectForm({
   action,
   object,
   managers,
+  districts,
   submitLabel,
 }: {
   action: (formData: FormData) => void | Promise<void>;
   object: CompanyObject;
   managers: Profile[];
+  districts: string[];
   submitLabel: string;
 }) {
   return (
@@ -125,7 +136,15 @@ function ObjectForm({
         <Input name="city" required defaultValue={object.city} placeholder="Житомир" />
       </Field>
       <Field label="Район">
-        <Input name="district" defaultValue={getObjectDistrict(object)} placeholder="Центр" />
+        <Select name="district" defaultValue={getObjectDistrict(object)}>
+          <option value="">Не вибрано</option>
+          {districts.map((district) => (
+            <option key={district} value={district}>{district}</option>
+          ))}
+        </Select>
+      </Field>
+      <Field label="Інший район">
+        <Input name="other_district" placeholder="Новий район" />
       </Field>
       <Field label="Адреса">
         <Input name="address" required defaultValue={object.address} placeholder="вул. Київська, 12" />
@@ -155,6 +174,21 @@ function ObjectForm({
       <div className="flex items-end">
         <Button type="submit">{submitLabel}</Button>
       </div>
+      {object.is_active ? (
+        <div className="flex items-end">
+          <Button
+            type="submit"
+            variant="destructive"
+            formAction={deactivateObjectAction.bind(null, object.id)}
+            formNoValidate
+            onClick={(event) => {
+              if (!window.confirm("Ви точно хочете видалити цей обʼєкт?")) event.preventDefault();
+            }}
+          >
+            Деактивувати об'єкт
+          </Button>
+        </div>
+      ) : null}
     </form>
   );
 }

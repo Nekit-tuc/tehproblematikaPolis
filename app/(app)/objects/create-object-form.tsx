@@ -18,6 +18,7 @@ type FormState = {
   objectNumber: string;
   city: string;
   district: string;
+  otherDistrict: string;
   address: string;
   aliases: string;
   managerId: string;
@@ -29,8 +30,9 @@ function initialState(nextObjectNumber: string): FormState {
     name: "",
     type: "store",
     objectNumber: nextObjectNumber,
-    city: "",
+    city: "Житомир",
     district: "",
+    otherDistrict: "",
     address: "",
     aliases: "",
     managerId: "",
@@ -80,7 +82,7 @@ function generateAliases(name: string, address: string) {
   ]).join("\n");
 }
 
-export function CreateObjectForm({ managers, nextObjectNumber }: { managers: Profile[]; nextObjectNumber: string }) {
+export function CreateObjectForm({ managers, nextObjectNumber, districts }: { managers: Profile[]; nextObjectNumber: string; districts: string[] }) {
   const [form, setForm] = useState<FormState>(() => initialState(nextObjectNumber));
 
   useEffect(() => {
@@ -121,7 +123,15 @@ export function CreateObjectForm({ managers, nextObjectNumber }: { managers: Pro
         <Input name="city" required value={form.city} onChange={(event) => setField("city", event.target.value)} placeholder="Житомир" autoComplete="off" />
       </Field>
       <Field label="Район">
-        <Input name="district" value={form.district} onChange={(event) => setField("district", event.target.value)} placeholder="Центр" autoComplete="off" />
+        <Select name="district" value={form.district} onChange={(event) => setField("district", event.target.value)}>
+          <option value="">Не вибрано</option>
+          {districts.map((district) => (
+            <option key={district} value={district}>{district}</option>
+          ))}
+        </Select>
+      </Field>
+      <Field label="Інший район">
+        <Input name="other_district" value={form.otherDistrict} onChange={(event) => setField("otherDistrict", event.target.value)} placeholder="Новий район" autoComplete="off" />
       </Field>
       <Field label="Адреса">
         <Input name="address" required value={form.address} onChange={(event) => setField("address", event.target.value)} placeholder="вул. Київська, 12" autoComplete="off" />

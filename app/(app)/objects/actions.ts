@@ -48,7 +48,7 @@ function readObjectPayload(formData: FormData): ObjectPayloadResult {
   const type = text(formData, "type") as ObjectType;
   const objectNumber = text(formData, "object_number");
   const city = text(formData, "city");
-  const district = text(formData, "district");
+  const district = text(formData, "other_district") || text(formData, "district");
   const address = text(formData, "address");
   const managerId = text(formData, "manager_id");
   const isActive = bool(formData, "is_active");
@@ -104,4 +104,19 @@ export async function updateObjectAction(objectId: string, formData: FormData) {
 
   revalidatePath("/objects");
   redirect("/objects?success=updated");
+}
+
+export async function setObjectActiveAction(objectId: string, isActive: boolean) {
+  await requireRole(["admin"]);
+
+  const supabase = await createClient();
+  const { error } = await supabase.from("objects").update({ is_active: isActive }).eq("id", objectId);
+  if (error) redirect(`/objects?error=${encodeURIComponent(objectErrorMessage(error.message))}`);
+
+  revalidatePath("/objects");
+  redirect(`/objects?success=${isActive ? "activated" : "deactivated"}`);
+}
+
+export async function deactivateObjectAction(objectId: string) {
+  await setObjectActiveAction(objectId, false);
 }
