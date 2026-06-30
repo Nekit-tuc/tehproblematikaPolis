@@ -5,12 +5,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { TH, THead, TBody, TR, Table } from "@/components/ui/table";
-import { Textarea } from "@/components/ui/textarea";
 import { objectTypeLabels } from "@/lib/labels";
 import { requireRole } from "@/lib/auth/server";
 import { getObjects, getProfiles } from "@/lib/supabase/queries";
-import type { CompanyObject, ObjectType, Profile } from "@/types/domain";
-import { createObjectAction } from "./actions";
+import type { CompanyObject, ObjectType } from "@/types/domain";
+import { CreateObjectForm } from "./create-object-form";
 import { ObjectRow } from "./object-row";
 
 const objectTypes: ObjectType[] = ["store", "warehouse", "production", "office", "other"];
@@ -25,6 +24,22 @@ function getObjectDistrict(object: CompanyObject) {
 
 function getObjectTypeLabel(type: CompanyObject["type"]) {
   return objectTypeLabels[type] ?? type;
+}
+
+function getNextObjectNumber(objects: CompanyObject[]) {
+  const numericNumbers = objects
+    .map((object) => object.object_number)
+    .filter((value): value is string => typeof value === "string" && /^\d+$/.test(value.trim()));
+  if (numericNumbers.length === 0) return "";
+
+  const max = numericNumbers.reduce(
+    (current, value) => {
+      const number = Number.parseInt(value, 10);
+      return number > current.number ? { number, width: value.length } : current;
+    },
+    { number: 0, width: 1 },
+  );
+  return String(max.number + 1).padStart(max.width, "0");
 }
 
 function filterObjects(objects: CompanyObject[], filters: { q?: string; type?: string; status?: string }) {
@@ -53,6 +68,7 @@ export default async function ObjectsPage({ searchParams }: { searchParams: Prom
   });
   const managers = profilesResult.data.filter((item) => item.role === "store_manager" || item.role === "management" || item.role === "tech_manager" || item.role === "admin");
   const canManage = profile.role === "admin";
+  const nextObjectNumber = getNextObjectNumber(objectsResult.data);
 
   return (
     <div className="page-shell space-y-6">
@@ -71,7 +87,7 @@ export default async function ObjectsPage({ searchParams }: { searchParams: Prom
             <CardDescription>Обов'язкові поля: назва, тип, номер, місто/район та адреса.</CardDescription>
           </CardHeader>
           <CardContent>
-            <ObjectForm action={createObjectAction} managers={managers} submitLabel="Створити об'єкт" />
+            <CreateObjectForm managers={managers} nextObjectNumber={nextObjectNumber} />
           </CardContent>
         </Card>
       ) : null}
@@ -130,54 +146,6 @@ export default async function ObjectsPage({ searchParams }: { searchParams: Prom
         </CardContent>
       </Card>
     </div>
-  );
-}
-
-function ObjectForm({
-  action,
-  object,
-  managers,
-  submitLabel,
-}: {
-  action: (formData: FormData) => void | Promise<void>;
-  object?: CompanyObject;
-  managers: Profile[];
-  submitLabel: string;
-}) {
-  return (
-    <form action={action} className="grid gap-4 md:grid-cols-3">
-      <Field label="Назва"><Input name="name" required defaultValue={object?.name ?? ""} placeholder="Магазин Полісся 01" /></Field>
-      <Field label="Тип об'єкта">
-        <Select name="type" required defaultValue={object?.type ?? "store"}>
-          {objectTypes.map((type) => <option key={type} value={type}>{getObjectTypeLabel(type)}</option>)}
-        </Select>
-      </Field>
-      <Field label="Номер об'єкта / магазину"><Input name="object_number" required defaultValue={object ? getObjectNumber(object) : ""} placeholder="001 або WH-01" /></Field>
-      <Field label="Місто"><Input name="city" required defaultValue={object?.city ?? ""} placeholder="Житомир" /></Field>
-      <Field label="Район"><Input name="district" defaultValue={object ? getObjectDistrict(object) : ""} placeholder="Центр" /></Field>
-      <Field label="Адреса"><Input name="address" required defaultValue={object?.address ?? ""} placeholder="вул. Київська, 12" /></Field>
-      <Field label="Аліаси / варіанти написання">
-        <Textarea
-          name="aliases"
-          defaultValue={object?.aliases?.join("\n") ?? ""}
-          placeholder={"Вільський шлях 115\nВільський115\nВільського шляху 115"}
-          className="min-h-24"
-        />
-      </Field>
-      <Field label="Відповідальний керуючий">
-        <Select name="manager_id" defaultValue={object?.manager_id ?? ""}>
-          <option value="">Не призначено</option>
-          {managers.map((manager) => <option key={manager.id} value={manager.id}>{manager.full_name}</option>)}
-        </Select>
-      </Field>
-      <label className="flex items-center gap-2 pt-7 text-sm text-stone-200">
-        <input name="is_active" type="checkbox" defaultChecked={object?.is_active ?? true} className="h-4 w-4 accent-orange-500" />
-        Активний
-      </label>
-      <div className="flex items-end">
-        <Button type="submit">{submitLabel}</Button>
-      </div>
-    </form>
   );
 }
 

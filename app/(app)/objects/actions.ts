@@ -73,6 +73,13 @@ function readObjectPayload(formData: FormData): ObjectPayloadResult {
   };
 }
 
+function objectErrorMessage(message: string) {
+  if (message.includes("objects_object_number_unique_idx") || message.toLowerCase().includes("duplicate key value")) {
+    return "Обʼєкт з таким номером уже існує. Введіть інший номер.";
+  }
+  return "Не вдалося зберегти обʼєкт. Перевірте дані та спробуйте ще раз.";
+}
+
 export async function createObjectAction(formData: FormData) {
   await requireRole(["admin"]);
   const payload = readObjectPayload(formData);
@@ -80,7 +87,7 @@ export async function createObjectAction(formData: FormData) {
 
   const supabase = await createClient();
   const { error } = await supabase.from("objects").insert(payload.data);
-  if (error) redirect(`/objects?error=${encodeURIComponent(error.message)}`);
+  if (error) redirect(`/objects?error=${encodeURIComponent(objectErrorMessage(error.message))}`);
 
   revalidatePath("/objects");
   redirect("/objects?success=created");
@@ -93,7 +100,7 @@ export async function updateObjectAction(objectId: string, formData: FormData) {
 
   const supabase = await createClient();
   const { error } = await supabase.from("objects").update(payload.data).eq("id", objectId);
-  if (error) redirect(`/objects?error=${encodeURIComponent(error.message)}`);
+  if (error) redirect(`/objects?error=${encodeURIComponent(objectErrorMessage(error.message))}`);
 
   revalidatePath("/objects");
   redirect("/objects?success=updated");
