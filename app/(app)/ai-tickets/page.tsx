@@ -228,6 +228,11 @@ function AiTicketCard({
         </div>
 
         <div className="rounded-md border border-border bg-stone-950/30 p-3">
+          <div className="text-xs text-muted-foreground">Опис заявки</div>
+          <p className="mt-2 whitespace-pre-wrap text-sm">{ticket.description}</p>
+        </div>
+
+        <div className="rounded-md border border-border bg-stone-950/30 p-3">
           <div className="text-xs text-muted-foreground">Оригінальне повідомлення</div>
           <p className="mt-2 whitespace-pre-wrap text-sm">{ticket.original_message_text ?? ticket.description}</p>
         </div>
@@ -247,16 +252,16 @@ function AiTicketCard({
 
         <div className="flex flex-wrap gap-2">
           <form action={confirmAiTicketAction.bind(null, ticket.id)}>
-            <Button type="submit">Підтвердити</Button>
+            <Button type="submit">✅ Підтвердити</Button>
           </form>
           <form action={rejectAiTicketAction.bind(null, ticket.id)}>
-            <Button type="submit" variant="destructive">Відхилити</Button>
+            <Button type="submit" variant="destructive">❌ Відхилити</Button>
           </form>
           <Button asChild variant="outline"><Link href={`/tickets/${ticket.id}`}>Відкрити картку</Link></Button>
         </div>
 
         <details className="rounded-md border border-border bg-stone-950/20 p-3">
-          <summary className="cursor-pointer text-sm font-medium text-orange-200">Редагувати перед підтвердженням</summary>
+          <summary className="cursor-pointer text-sm font-medium text-orange-200">✏️ Редагувати перед підтвердженням</summary>
           <form action={updateAiTicketAction.bind(null, ticket.id)} className="mt-4 grid gap-4 md:grid-cols-2">
             <Field label="Назва">
               <Input name="title" required defaultValue={ticket.title} />

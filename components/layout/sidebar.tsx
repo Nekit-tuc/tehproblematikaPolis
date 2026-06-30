@@ -15,7 +15,7 @@ const nav = [
   { href: "/settings", label: "Налаштування", icon: Settings, roles: ["admin"] },
 ] satisfies Array<{ href: string; label: string; icon: React.ElementType; roles: UserRole[] }>;
 
-export function Sidebar({ profile }: { profile: Profile }) {
+export function Sidebar({ profile, aiTicketsCount = 0 }: { profile: Profile; aiTicketsCount?: number }) {
   const visibleNav = nav.filter((item) => item.roles.includes(profile.role));
 
   return (
@@ -35,7 +35,12 @@ export function Sidebar({ profile }: { profile: Profile }) {
             className={cn("flex items-center gap-3 rounded-md px-3 py-2.5 text-sm text-stone-300 hover:bg-stone-900 hover:text-orange-200")}
           >
             <item.icon className="h-4 w-4" />
-            {item.label}
+            <span className="min-w-0 flex-1">{item.label}</span>
+            {item.href === "/ai-tickets" && aiTicketsCount > 0 ? (
+              <span className="rounded-full border border-orange-700/60 bg-orange-950/60 px-2 py-0.5 text-xs font-semibold text-orange-200">
+                {aiTicketsCount}
+              </span>
+            ) : null}
           </Link>
         ))}
       </nav>

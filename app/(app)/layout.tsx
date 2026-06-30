@@ -1,14 +1,28 @@
 import { Sidebar } from "@/components/layout/sidebar";
 import { Topbar } from "@/components/layout/topbar";
 import { requireAuth } from "@/lib/auth/server";
+import { hasSupabaseEnv } from "@/lib/supabase/env";
+import { createClient } from "@/lib/supabase/server";
+
+async function getAiTicketsCount(role: string) {
+  if (!["admin", "management", "tech_manager"].includes(role) || !hasSupabaseEnv()) return 0;
+  const supabase = await createClient();
+  const { count } = await supabase
+    .from("tickets")
+    .select("id", { count: "exact", head: true })
+    .eq("status", "pending_review")
+    .eq("source", "telegram_group");
+  return count ?? 0;
+}
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const { profile } = await requireAuth();
+  const aiTicketsCount = await getAiTicketsCount(profile.role);
 
   return (
     <div className="min-h-screen bg-background">
       <div className="flex">
-        <Sidebar profile={profile} />
+        <Sidebar profile={profile} aiTicketsCount={aiTicketsCount} />
         <main className="min-w-0 flex-1">
           <Topbar profile={profile} />
           {children}
