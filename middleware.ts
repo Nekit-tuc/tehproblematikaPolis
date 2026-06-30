@@ -9,6 +9,8 @@ const protectedPrefixes = [
   "/objects",
   "/users",
   "/reports",
+  "/ai-test",
+  "/ai-tickets",
   "/settings",
 ];
 

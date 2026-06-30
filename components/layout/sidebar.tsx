@@ -7,6 +7,7 @@ import type { Profile, UserRole } from "@/types/domain";
 const nav = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, roles: ["admin", "management", "tech_manager", "worker", "store_manager"] },
   { href: "/tickets", label: "Заявки", icon: ClipboardList, roles: ["admin", "management", "tech_manager", "worker", "store_manager"] },
+  { href: "/ai-tickets", label: "AI-заявки", icon: Bot, roles: ["admin", "management", "tech_manager"] },
   { href: "/objects", label: "Об'єкти", icon: Building2, roles: ["admin", "management", "tech_manager"] },
   { href: "/users", label: "Користувачі", icon: Users, roles: ["admin", "management"] },
   { href: "/reports", label: "Excel-звіти", icon: FileSpreadsheet, roles: ["admin", "management", "tech_manager"] },
