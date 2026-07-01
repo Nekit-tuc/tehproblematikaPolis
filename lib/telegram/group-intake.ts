@@ -3,6 +3,7 @@ import { buildPendingReviewTicketDraft } from "@/lib/ai/ticket-builder";
 import { matchStore, normalizeStoreText, type StoreMatchResult } from "@/lib/stores/match-store";
 import { loadMatcherObjectsFromSupabase } from "@/lib/stores/object-source";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { generateTicketNumber, isDuplicateTicketNumberError, TICKET_NUMBER_RETRY_LIMIT } from "@/lib/tickets/numbering";
 import type { AiWorkItem } from "@/types/ai";
 import type { Category, CompanyObject, Profile } from "@/types/domain";
 import type { TelegramMessage } from "./client";
@@ -82,20 +83,6 @@ function findCategory(categories: Category[], categoryName: string | null) {
   return categories.find((category) => normalize(category.name) === normalize(categoryName)) ?? categories.find((category) => normalize(category.name).includes(normalize(categoryName)) || normalize(categoryName).includes(normalize(category.name))) ?? fallback;
 }
 
-async function nextTicketNumber(supabase: ReturnType<typeof createAdminClient>) {
-  const year = new Date().getFullYear();
-  const prefix = `PSD-${year}-`;
-  const { data } = await supabase
-    .from("tickets")
-    .select("number")
-    .like("number", `${prefix}%`)
-    .order("number", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  const current = typeof data?.number === "string" ? Number.parseInt(data.number.replace(prefix, ""), 10) : 0;
-  return `${prefix}${String(Number.isFinite(current) ? current + 1 : 1).padStart(4, "0")}`;
-}
-
 async function requesterForTelegramUser(supabase: ReturnType<typeof createAdminClient>, telegramId: string | null) {
   if (telegramId) {
     const { data } = await supabase.from("profiles").select("*").eq("telegram_id", telegramId).eq("is_active", true).maybeSingle();
@@ -138,30 +125,45 @@ async function createPendingTicket({
   localStoreMatch: StoreMatchResult;
   source: "telegram_group" | "telegram_private_test";
 }) {
-  const number = await nextTicketNumber(supabase);
-  const { data: ticket, error } = await supabase
-    .from("tickets")
-    .insert(buildPendingReviewTicketDraft({
-      number,
-      workItem,
-      object,
-      category,
-      requester,
-      message,
-      sourceGroupId,
-      originalText,
-      analysis,
-      localStoreMatch,
-      telegramUserName: telegramUserName(message),
-      source,
-    }))
-    .select("id, number")
-    .single();
+  let ticket: { id: string; number: string } | null = null;
+  for (let attempt = 1; attempt <= TICKET_NUMBER_RETRY_LIMIT; attempt += 1) {
+    const number = await generateTicketNumber(supabase);
+    console.info("[telegram-group-intake] generated ticket number", { number, retryCount: attempt - 1, source });
+    const { data, error } = await supabase
+      .from("tickets")
+      .insert(buildPendingReviewTicketDraft({
+        number,
+        workItem,
+        object,
+        category,
+        requester,
+        message,
+        sourceGroupId,
+        originalText,
+        analysis,
+        localStoreMatch,
+        telegramUserName: telegramUserName(message),
+        source,
+      }))
+      .select("id, number")
+      .single();
 
-  if (error || !ticket) {
-    console.error("[telegram-group-intake] ticket insert failed", error?.message);
+    if (!error && data) {
+      ticket = data as { id: string; number: string };
+      console.info("[telegram-group-intake] ticket insert succeeded", { ticketId: ticket.id, number: ticket.number, retryCount: attempt - 1 });
+      break;
+    }
+
+    if (isDuplicateTicketNumberError(error) && attempt < TICKET_NUMBER_RETRY_LIMIT) {
+      console.warn("[telegram-group-intake] duplicate ticket number; retrying", { number, retryCount: attempt });
+      continue;
+    }
+
+    console.error("[telegram-group-intake] ticket insert failed", { message: error?.message, retryCount: attempt - 1 });
     return null;
   }
+
+  if (!ticket) return null;
 
   await supabase.from("ticket_history").insert({
     ticket_id: ticket.id,

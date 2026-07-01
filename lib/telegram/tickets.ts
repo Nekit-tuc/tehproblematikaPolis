@@ -1,6 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { PHOTO_BUCKET } from "@/lib/photos";
 import { priorityLabels } from "@/lib/labels";
+import { generateTicketNumber, isDuplicateTicketNumberError, TICKET_NUMBER_RETRY_LIMIT } from "@/lib/tickets/numbering";
 import type { Category, CompanyObject, Profile, TicketPriority, TicketWithRelations } from "@/types/domain";
 import { downloadTelegramFile, sendTelegramMessage } from "./client";
 import type { TelegramTicketPayload } from "./session";
@@ -9,15 +10,6 @@ const DEFAULT_PRIORITY: TicketPriority = "medium";
 
 function appUrl() {
   return process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ?? "http://localhost:3000";
-}
-
-async function nextTicketNumber() {
-  const supabase = createAdminClient();
-  const year = new Date().getFullYear();
-  const prefix = `PSD-${year}-`;
-  const { count, error } = await supabase.from("tickets").select("id", { count: "exact", head: true }).like("number", `${prefix}%`);
-  if (error) throw error;
-  return `${prefix}${String((count ?? 0) + 1).padStart(3, "0")}`;
 }
 
 export async function findTelegramProfile(telegramId: string) {
@@ -121,23 +113,41 @@ export async function createTicketFromTelegram(profile: Profile, payload: Telegr
   }
 
   const supabase = createAdminClient();
-  const number = await nextTicketNumber();
   const title = payload.description.length > 80 ? `${payload.description.slice(0, 77)}...` : payload.description;
-  const { data: ticket, error } = await supabase
-    .from("tickets")
-    .insert({
-      number,
-      title,
-      description: payload.description,
-      status: "new",
-      priority: DEFAULT_PRIORITY,
-      object_id: payload.object_id,
-      category_id: payload.category_id,
-      created_by: profile.id,
-    })
-    .select("*, object:objects(*), category:categories(*), creator:profiles!tickets_created_by_fkey(*)")
-    .single();
-  if (error) throw error;
+  let ticket: TicketWithRelations | null = null;
+  let number = "";
+  let lastError: { message?: string; code?: string } | null = null;
+  for (let attempt = 1; attempt <= TICKET_NUMBER_RETRY_LIMIT; attempt += 1) {
+    number = await generateTicketNumber(supabase);
+    console.info("[telegram-ticket] generated ticket number", { number, retryCount: attempt - 1 });
+    const { data, error } = await supabase
+      .from("tickets")
+      .insert({
+        number,
+        title,
+        description: payload.description,
+        status: "new",
+        priority: DEFAULT_PRIORITY,
+        object_id: payload.object_id,
+        category_id: payload.category_id,
+        created_by: profile.id,
+      })
+      .select("*, object:objects(*), category:categories(*), creator:profiles!tickets_created_by_fkey(*)")
+      .single();
+
+    if (!error && data) {
+      ticket = data as TicketWithRelations;
+      console.info("[telegram-ticket] ticket insert succeeded", { ticketId: ticket.id, number, retryCount: attempt - 1 });
+      break;
+    }
+    lastError = error;
+    if (isDuplicateTicketNumberError(error) && attempt < TICKET_NUMBER_RETRY_LIMIT) {
+      console.warn("[telegram-ticket] duplicate ticket number; retrying", { number, retryCount: attempt });
+      continue;
+    }
+    break;
+  }
+  if (!ticket) throw lastError ?? new Error("Ticket insert failed");
 
   const { error: historyError } = await supabase.from("ticket_history").insert({
     ticket_id: ticket.id,
@@ -150,8 +160,8 @@ export async function createTicketFromTelegram(profile: Profile, payload: Telegr
   const photoIds = payload.photo_file_ids ?? [];
   if (photoIds.length > 0) await uploadTelegramPhotos(ticket.id, profile.id, photoIds);
 
-  await notifyAdminsAboutTicket(ticket as TicketWithRelations);
-  return ticket as TicketWithRelations;
+  await notifyAdminsAboutTicket(ticket);
+  return ticket;
 }
 
 export async function notifyAdminsAboutTicket(ticket: TicketWithRelations) {

@@ -7,6 +7,7 @@ import { hasSupabaseEnv } from "@/lib/supabase/env";
 import { getCurrentProfile } from "@/lib/auth/server";
 import { canCreateTicket } from "@/lib/auth/permissions";
 import { getFiles, uploadTicketPhotos, validatePhotos } from "@/lib/photos";
+import { generateTicketNumber, isDuplicateTicketNumberError, TICKET_NUMBER_RETRY_LIMIT } from "@/lib/tickets/numbering";
 import type { TicketPriority, TicketStatus } from "@/types/domain";
 
 const ticketPriorities: TicketPriority[] = ["low", "medium", "high", "critical"];
@@ -14,14 +15,6 @@ const ticketPriorities: TicketPriority[] = ["low", "medium", "high", "critical"]
 function value(formData: FormData, key: string) {
   const raw = formData.get(key);
   return typeof raw === "string" ? raw.trim() : "";
-}
-
-async function nextTicketNumber() {
-  const supabase = await createClient();
-  const year = new Date().getFullYear();
-  const prefix = `PSD-${year}-`;
-  const { count } = await supabase.from("tickets").select("id", { count: "exact", head: true }).like("number", `${prefix}%`);
-  return `${prefix}${String((count ?? 0) + 1).padStart(3, "0")}`;
 }
 
 export async function createTicketAction(formData: FormData) {
@@ -61,26 +54,44 @@ export async function createTicketAction(formData: FormData) {
   if (objectError || !selectedObject || !selectedObject.is_active) redirect("/tickets/new?error=object-missing");
   if (categoryError || !selectedCategory || !selectedCategory.is_active) redirect("/tickets/new?error=category-missing");
 
-  const number = await nextTicketNumber();
   const initialStatus: TicketStatus = "new";
-  const { data: ticket, error } = await supabase
-    .from("tickets")
-    .insert({
-      number,
-      title,
-      description,
-      status: initialStatus,
-      object_id: objectId,
-      category_id: categoryId,
-      priority,
-      created_by: auth.user.id,
-      assigned_to: assignedTo || null,
-      due_at: dueAt ? new Date(dueAt).toISOString() : null,
-    })
-    .select("id")
-    .single();
+  let ticket: { id: string } | null = null;
+  let number = "";
+  let lastError: { message?: string; code?: string } | null = null;
+  for (let attempt = 1; attempt <= TICKET_NUMBER_RETRY_LIMIT; attempt += 1) {
+    number = await generateTicketNumber(supabase);
+    console.info("[tickets-new] generated ticket number", { number, retryCount: attempt - 1 });
+    const { data, error } = await supabase
+      .from("tickets")
+      .insert({
+        number,
+        title,
+        description,
+        status: initialStatus,
+        object_id: objectId,
+        category_id: categoryId,
+        priority,
+        created_by: auth.user.id,
+        assigned_to: assignedTo || null,
+        due_at: dueAt ? new Date(dueAt).toISOString() : null,
+      })
+      .select("id")
+      .single();
 
-  if (error || !ticket) redirect(`/tickets/new?error=${encodeURIComponent(error?.message ?? "insert")}`);
+    if (!error && data) {
+      ticket = data as { id: string };
+      console.info("[tickets-new] ticket insert succeeded", { ticketId: ticket.id, number, retryCount: attempt - 1 });
+      break;
+    }
+    lastError = error;
+    if (isDuplicateTicketNumberError(error) && attempt < TICKET_NUMBER_RETRY_LIMIT) {
+      console.warn("[tickets-new] duplicate ticket number; retrying", { number, retryCount: attempt });
+      continue;
+    }
+    break;
+  }
+
+  if (!ticket) redirect(`/tickets/new?error=${encodeURIComponent(lastError?.message ?? "insert")}`);
 
   const { error: historyError } = await supabase.from("ticket_history").insert({
     ticket_id: ticket.id,
