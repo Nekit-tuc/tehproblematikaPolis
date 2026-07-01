@@ -212,6 +212,19 @@ export async function handleTelegramGroupMessage(message: TelegramMessage): Prom
     supabase.from("categories").select("*").eq("is_active", true),
   ]);
   const localStoreMatch = matchStore(text, objectSource.records);
+  console.info("[telegram-group-intake] local store match", {
+    status: localStoreMatch.status,
+    bestMatch: localStoreMatch.bestMatch?.name ?? null,
+    confidence: localStoreMatch.confidence,
+    candidates: localStoreMatch.candidates.slice(0, 3).map((candidate) => ({
+      name: candidate.store.name,
+      score: candidate.score,
+      matchedBy: candidate.matchedBy,
+      matchedAlias: candidate.matchedAlias ?? null,
+      matchedTokens: candidate.matchedTokens,
+      missingTokens: candidate.missingTokens,
+    })),
+  });
   const analysis = await analyzeTelegramGroupMessage({ text, localStoreMatch });
   if (!analysis.isTicketMessage) return { handled: true, created: false, reason: "not_ticket" };
   if (!analysis.objectId) return { handled: true, created: false, reason: "store_not_found" };

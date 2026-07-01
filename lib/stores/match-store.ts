@@ -8,7 +8,7 @@ export type StoreObjectRecord = StoreAddress | (CompanyObject & { aliases?: stri
 export type StoreMatchBy =
   | "name"
   | "address"
-  | "alias"
+  | "manual_alias"
   | "generated_alias"
   | "city_address"
   | "district_address"
@@ -22,6 +22,7 @@ export type StoreMatchCandidate = {
   store: StoreAddress;
   score: number;
   matchedBy: StoreMatchBy;
+  matchedAlias?: string | null;
   matchedTokens: string[];
   missingTokens: string[];
 };
@@ -195,8 +196,8 @@ function candidateValues(record: StoreObjectRecord) {
     { value: `${record.city} ${record.address}`, matchedBy: "city_address" as const, base: 94 },
     { value: `${record.district ?? ""} ${record.address}`, matchedBy: "district_address" as const, base: 92 },
     ...(number ? [{ value: number, matchedBy: "object_number" as const, base: 62 }] : []),
-    ...aliases.map((alias) => ({ value: alias, matchedBy: "alias" as const, base: 94 })),
-    ...generated.map((alias) => ({ value: alias, matchedBy: "generated_alias" as const, base: 93 })),
+    ...aliases.map((alias) => ({ value: alias, matchedBy: "manual_alias" as const, base: 100 })),
+    ...generated.map((alias) => ({ value: alias, matchedBy: "generated_alias" as const, base: 92 })),
   ].filter((candidate) => candidate.value.trim().length > 0);
 }
 
@@ -221,11 +222,12 @@ function tokenOverlap(textTokens: Set<string>, candidateTokens: string[]) {
   return { ratio: matchedTokens.length / important.length, matchedTokens: unique(matchedTokens), missingTokens: unique(missingTokens) };
 }
 
-function buildCandidate(record: StoreObjectRecord, score: number, matchedBy: StoreMatchBy, matchedTokens: string[], missingTokens: string[]): StoreMatchCandidate {
+function buildCandidate(record: StoreObjectRecord, score: number, matchedBy: StoreMatchBy, matchedTokens: string[], missingTokens: string[], matchedAlias: string | null = null): StoreMatchCandidate {
   return {
     store: toStoreAddress(record),
     score: Math.max(0, Math.min(100, Math.round(score))),
     matchedBy,
+    matchedAlias,
     matchedTokens: unique(matchedTokens),
     missingTokens: unique(missingTokens),
   };
@@ -249,14 +251,15 @@ function scoreRecord(text: string, record: StoreObjectRecord): StoreMatchCandida
     const normalizedCandidate = normalizeStoreText(candidate.value);
     const compactCandidate = compact(candidate.value);
     const overlap = tokenOverlap(textTokens, candidateTokens);
+    const matchedAlias = candidate.matchedBy === "manual_alias" || candidate.matchedBy === "generated_alias" ? candidate.value : null;
 
     if (normalizedCandidate && normalizedText.includes(normalizedCandidate)) {
-      best = betterCandidate(best, buildCandidate(record, candidate.base, candidate.matchedBy, candidateTokens, []));
+      best = betterCandidate(best, buildCandidate(record, candidate.base, candidate.matchedBy, candidateTokens, [], matchedAlias));
       continue;
     }
 
     if (compactCandidate && compactText.includes(compactCandidate)) {
-      best = betterCandidate(best, buildCandidate(record, Math.max(candidate.base, 95), "compact", candidateTokens, []));
+      best = betterCandidate(best, buildCandidate(record, Math.max(candidate.base, 95), candidate.matchedBy === "manual_alias" ? "manual_alias" : candidate.matchedBy === "generated_alias" ? "generated_alias" : "compact", candidateTokens, [], matchedAlias));
       continue;
     }
 
@@ -265,7 +268,7 @@ function scoreRecord(text: string, record: StoreObjectRecord): StoreMatchCandida
       const matchedNumber = overlap.matchedTokens.some((token) => /\d/.test(token));
       const numberPenalty = hasNumber && !matchedNumber ? 22 : 0;
       const objectNumberPenalty = candidate.matchedBy === "object_number" ? 18 : 0;
-      best = betterCandidate(best, buildCandidate(record, candidate.base * overlap.ratio - numberPenalty - objectNumberPenalty, candidate.matchedBy, overlap.matchedTokens, overlap.missingTokens));
+      best = betterCandidate(best, buildCandidate(record, candidate.base * overlap.ratio - numberPenalty - objectNumberPenalty, candidate.matchedBy, overlap.matchedTokens, overlap.missingTokens, matchedAlias));
     }
   }
 
@@ -299,7 +302,17 @@ function buildResult(candidates: StoreMatchCandidate[]): StoreMatchResult {
   }
   const gap = second ? best.score - second.score : 100;
   const closeCandidates = sorted.filter((candidate) => best.score - candidate.score <= 7);
-  if (closeCandidates.length > 1 && best.score < 95) {
+  const duplicateManualAliasMatches =
+    best.matchedBy === "manual_alias" && best.matchedAlias
+      ? sorted.filter((candidate) => candidate.matchedBy === "manual_alias" && normalizeStoreText(candidate.matchedAlias ?? "") === normalizeStoreText(best.matchedAlias ?? "") && candidate.score >= 95)
+      : [];
+  if (duplicateManualAliasMatches.length > 1) {
+    return { status: "ambiguous", bestMatch: null, candidates: duplicateManualAliasMatches.slice(0, 5), confidence: best.score / 100, reason: "Object Matcher v2 знайшов однаковий manual alias у кількох об'єктів." };
+  }
+  if (best.matchedBy === "manual_alias" && best.score >= 95) {
+    return { status: best.score >= 100 ? "exact" : "high_confidence", bestMatch: best.store, candidates: topFive, confidence: best.score / 100, reason: "Object Matcher v2 знайшов унікальний manual alias об'єкта." };
+  }
+  if (closeCandidates.length > 1) {
     return { status: "ambiguous", bestMatch: null, candidates: closeCandidates.slice(0, 5), confidence: best.score / 100, reason: "Object Matcher v2 знайшов кілька близьких кандидатів." };
   }
   if (best.score >= 95 && gap >= 5) {
