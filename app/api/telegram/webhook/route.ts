@@ -13,6 +13,22 @@ function logWebhookEvent(event: string, metadata: Record<string, unknown> = {}) 
   console.info("[telegram-webhook]", event, metadata);
 }
 
+function allowedPrivateTestUserIds() {
+  return new Set(
+    (process.env.TELEGRAM_TEST_USER_IDS ?? "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean),
+  );
+}
+
+function resultLabel(result: { handled: boolean; created?: boolean; reason?: string }) {
+  if (result.created) return "created tickets";
+  if (!result.handled) return "ignored";
+  if (["private_user_not_allowed", "private_or_non_group_message", "bot_message", "empty_message", "command_ignored", "not_ticket"].includes(result.reason ?? "")) return "ignored";
+  return "processed";
+}
+
 export async function POST(request: NextRequest) {
   const expectedSecret = process.env.TELEGRAM_WEBHOOK_SECRET?.trim();
   const actualSecret = request.nextUrl.searchParams.get("secret")?.trim() ?? "";
@@ -34,18 +50,25 @@ export async function POST(request: NextRequest) {
 
   try {
     const update = (await request.json()) as TelegramUpdate;
+    const chatType = update.message?.chat.type ?? update.callback_query?.message?.chat.type ?? null;
+    const userId = update.message?.from?.id ?? update.callback_query?.from.id ?? null;
+    const allowedPrivateTestUser = chatType === "private" && userId ? allowedPrivateTestUserIds().has(String(userId)) : false;
     logWebhookEvent("received", {
       method: request.method,
       updateId: update.update_id,
-      chatType: update.message?.chat.type ?? update.callback_query?.message?.chat.type ?? null,
+      chatType,
+      userId: userId ? String(userId) : null,
+      allowedPrivateTestUser,
       messageTextPreview: textPreview(update.message?.text ?? update.callback_query?.message?.text),
     });
     const result = await handleTelegramUpdate(update);
     logWebhookEvent("processed", {
       method: request.method,
       updateId: update.update_id,
-      chatType: update.message?.chat.type ?? update.callback_query?.message?.chat.type ?? null,
-      result: "created" in result && result.created ? "created tickets" : result.handled ? "processed" : "ignored",
+      chatType,
+      userId: userId ? String(userId) : null,
+      allowedPrivateTestUser,
+      result: resultLabel(result),
       reason: "reason" in result ? result.reason : null,
       ticketCount: "ticketIds" in result ? result.ticketIds.length : 0,
     });

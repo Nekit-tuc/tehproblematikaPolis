@@ -12,8 +12,26 @@ type IntakeResult =
   | { handled: true; created: false; reason: string }
   | { handled: true; created: true; ticketIds: string[]; numbers: string[] };
 
+function allowedPrivateTestUserIds() {
+  return new Set(
+    (process.env.TELEGRAM_TEST_USER_IDS ?? "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean),
+  );
+}
+
 function isGroupMessage(message: TelegramMessage) {
   return message.chat.type === "group" || message.chat.type === "supergroup";
+}
+
+function isPrivateMessage(message: TelegramMessage) {
+  return message.chat.type === "private";
+}
+
+function isAllowedPrivateTestUser(message: TelegramMessage) {
+  const userId = message.from?.id ? String(message.from.id) : "";
+  return Boolean(userId && allowedPrivateTestUserIds().has(userId));
 }
 
 function telegramUserName(message: TelegramMessage) {
@@ -106,6 +124,7 @@ async function createPendingTicket({
   originalText,
   analysis,
   localStoreMatch,
+  source,
 }: {
   supabase: ReturnType<typeof createAdminClient>;
   workItem: AiWorkItem;
@@ -117,6 +136,7 @@ async function createPendingTicket({
   originalText: string;
   analysis: Awaited<ReturnType<typeof analyzeTelegramGroupMessage>>;
   localStoreMatch: StoreMatchResult;
+  source: "telegram_group" | "telegram_private_test";
 }) {
   const number = await nextTicketNumber(supabase);
   const { data: ticket, error } = await supabase
@@ -133,6 +153,7 @@ async function createPendingTicket({
       analysis,
       localStoreMatch,
       telegramUserName: telegramUserName(message),
+      source,
     }))
     .select("id, number")
     .single();
@@ -145,9 +166,11 @@ async function createPendingTicket({
   await supabase.from("ticket_history").insert({
     ticket_id: ticket.id,
     actor_id: requester.id,
-    action: "AI створив заявку з Telegram-групи на підтвердження",
+    action: source === "telegram_private_test"
+      ? "AI створив тестову заявку з приватного Telegram-чату на підтвердження"
+      : "AI створив заявку з Telegram-групи на підтвердження",
     metadata: {
-      source: "telegram_group",
+      source,
       telegram_chat_id: String(message.chat.id),
       telegram_message_id: String(message.message_id),
       telegram_source_group_id: sourceGroupId,
@@ -166,12 +189,20 @@ async function createPendingTicket({
 }
 
 export async function handleTelegramGroupMessage(message: TelegramMessage): Promise<IntakeResult> {
-  if (!isGroupMessage(message)) return { handled: false, reason: "private_or_non_group_message" };
+  const chatType = message.chat.type ?? "unknown";
+  const userId = message.from?.id ? String(message.from.id) : null;
+  const allowedPrivateTestUser = isPrivateMessage(message) ? isAllowedPrivateTestUser(message) : false;
+  console.info("[telegram-group-intake] incoming", { chatType, userId, allowedPrivateTestUser });
+
+  if (!isGroupMessage(message) && !allowedPrivateTestUser) {
+    return { handled: true, created: false, reason: isPrivateMessage(message) ? "private_user_not_allowed" : "private_or_non_group_message" };
+  }
   if (message.from?.is_bot) return { handled: true, created: false, reason: "bot_message" };
 
   const text = message.text?.trim() ?? "";
   if (!text) return { handled: true, created: false, reason: "empty_message" };
   if (text.startsWith("/")) return { handled: true, created: false, reason: "command_ignored" };
+  const source = allowedPrivateTestUser ? "telegram_private_test" : "telegram_group";
 
   const supabase = createAdminClient();
   const [objectSource, { data: categories }] = await Promise.all([
@@ -197,7 +228,7 @@ export async function handleTelegramGroupMessage(message: TelegramMessage): Prom
   const requester = await requesterForTelegramUser(supabase, telegramUserId);
   if (!requester) return { handled: true, created: false, reason: "requester_profile_not_found" };
 
-  const sourceGroupId = `${message.chat.id}_${message.message_id}`;
+  const sourceGroupId = allowedPrivateTestUser ? `private_${message.chat.id}_${message.message_id}` : `${message.chat.id}_${message.message_id}`;
   const created = [];
   for (const workItem of eligibleWorkItems) {
     const category = findCategory((categories ?? []) as Category[], workItem.category);
@@ -217,6 +248,7 @@ export async function handleTelegramGroupMessage(message: TelegramMessage): Prom
       originalText: text,
       analysis,
       localStoreMatch,
+      source,
     });
     if (ticket) created.push(ticket);
   }

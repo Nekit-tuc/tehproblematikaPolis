@@ -88,7 +88,7 @@ export default async function AiTicketsPage({ searchParams }: { searchParams: Pr
       .from("tickets")
       .select(ticketSelect)
       .eq("status", "pending_review")
-      .eq("source", "telegram_group")
+      .in("source", ["telegram_group", "telegram_private_test"])
       .order("created_at", { ascending: false }),
     supabase.from("objects").select("*").order("name"),
     supabase.from("categories").select("*").order("name"),
@@ -211,6 +211,7 @@ function AiTicketCard({
           <div className="flex flex-wrap gap-2">
             <Badge tone={confidenceTone(ticket.ai_confidence)}>{confidenceLabel(ticket.ai_confidence)}</Badge>
             <Badge tone="gray">{priorityLabels[ticket.priority]}</Badge>
+            {ticket.source === "telegram_private_test" ? <Badge tone="orange">Приватний тест</Badge> : null}
             {ticket.telegram_source_group_id ? <Badge tone="gray">Частина групового повідомлення</Badge> : null}
           </div>
         </div>

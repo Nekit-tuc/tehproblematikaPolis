@@ -11,7 +11,7 @@ async function getAiTicketsCount(role: string) {
     .from("tickets")
     .select("id", { count: "exact", head: true })
     .eq("status", "pending_review")
-    .eq("source", "telegram_group");
+    .in("source", ["telegram_group", "telegram_private_test"]);
   return count ?? 0;
 }
 

@@ -15,6 +15,7 @@ type BuildTicketDraftInput = {
   analysis: AiGroupMessageAnalysis;
   localStoreMatch: StoreMatchResult;
   telegramUserName: string | null;
+  source?: "telegram_group" | "telegram_private_test";
 };
 
 export function buildPendingReviewTicketDraft({
@@ -29,6 +30,7 @@ export function buildPendingReviewTicketDraft({
   analysis,
   localStoreMatch,
   telegramUserName,
+  source = "telegram_group",
 }: BuildTicketDraftInput) {
   const telegramUserId = message.from?.id ? String(message.from.id) : null;
   return {
@@ -40,7 +42,7 @@ export function buildPendingReviewTicketDraft({
     object_id: object.id,
     category_id: category.id,
     created_by: requester.id,
-    source: "telegram_group",
+    source,
     telegram_chat_id: String(message.chat.id),
     telegram_message_id: String(message.message_id),
     telegram_source_group_id: sourceGroupId,

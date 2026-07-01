@@ -18,7 +18,7 @@ async function getPendingAiTicket(ticketId: string) {
     .select("id, status, source")
     .eq("id", ticketId)
     .eq("status", "pending_review")
-    .eq("source", "telegram_group")
+    .in("source", ["telegram_group", "telegram_private_test"])
     .maybeSingle();
   return { supabase, ticket: data as { id: string; status: string; source: string | null } | null, error };
 }
