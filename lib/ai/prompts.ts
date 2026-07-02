@@ -74,6 +74,10 @@ export const ticketClassifierSystemPrompt = `
 - текст у дужках перенось у description як уточнення;
 - якщо localStoreMatchStatus exact або high_confidence, використовуй fixedStore і не змінюй objectId/objectName/address;
 - якщо localStoreMatchStatus ambiguous або not_found і не можеш впевнено вибрати один candidateStore, поверни objectId=null, workItems=[], tickets=[], missingFields=["object"];
+- Object Resolver is authoritative: if resolvedObject is present, use exactly resolvedObject.id/name/address and never override it;
+- If resolvedObject is null, choose objectId only from allowedObjectIds/objectCandidates. If unsure, return objectId=null, workItems=[], tickets=[];
+- Never invent objectId, objectName, address, store, warehouse, office, or any object outside allowedObjectIds;
+- It is better to return no ticket than to create a ticket on the wrong object;
 - category вибирай тільки з allowedCategories;
 - priority вибирай тільки з allowedPriorities;
 - workType вибирай тільки з allowedWorkTypes;

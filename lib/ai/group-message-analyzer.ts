@@ -1,4 +1,5 @@
 import { getStoreCandidatesForAi, isReliableStoreMatch, matchStore, type StoreMatchResult } from "@/lib/stores/match-store";
+import type { ObjectResolverCandidate, ObjectResolverResult } from "@/lib/ai/object-resolver";
 import type { AiGroupMessageAnalysis, AiPriority } from "@/types/ai";
 import { getOpenAiClient, getOpenAiModel, hasOpenAiApiKey } from "./openai-client";
 import { serviceDeskCategories, serviceDeskDepartments, serviceDeskPriorities, serviceDeskWorkTypes, ticketClassifierSystemPrompt } from "./prompts";
@@ -8,6 +9,7 @@ import { extractWorkItems, looksLikeWorkMessage } from "./work-item-extractor";
 export type AnalyzeTelegramGroupMessageInput = {
   text: string;
   localStoreMatch?: StoreMatchResult | null;
+  objectResolver?: ObjectResolverResult | null;
   categories?: readonly string[];
   priorities?: readonly AiPriority[];
   recommendedDepartments?: readonly string[];
@@ -111,6 +113,17 @@ function fallbackAnalyze(input: AnalyzeTelegramGroupMessageInput, localStoreMatc
       confidence,
       workItems,
       missingFields,
+      openAiSelectedObjectId: null,
+      objectOverrideIgnored: false,
+      finalObjectId: localStoreMatch.bestMatch.id,
+      objectResolver: input.objectResolver
+        ? {
+            status: input.objectResolver.status,
+            source: input.objectResolver.source,
+            confidence: input.objectResolver.confidence,
+            reason: input.objectResolver.reason,
+          }
+        : undefined,
       reason: workItems.length > 0 ? "Повідомлення розібрано локальним AI v2 fallback parser у Work Items." : "Не вдалося виділити окремі роботи.",
     }),
     mode: "fallback",
@@ -132,7 +145,23 @@ function storeForAi(match: StoreMatchResult) {
   };
 }
 
-function candidatesForAi(match: StoreMatchResult, text: string) {
+function candidatesForAi(match: StoreMatchResult, text: string, resolver?: ObjectResolverResult | null) {
+  if (resolver?.candidates.length) {
+    return resolver.candidates.slice(0, 5).map((candidate) => ({
+      objectId: candidate.id,
+      objectName: candidate.name,
+      address: candidate.address,
+      objectNumber: candidate.objectNumber,
+      city: candidate.city,
+      district: candidate.district,
+      aliases: candidate.aliases,
+      score: candidate.score,
+      matchedBy: candidate.matchedBy,
+      matchedAlias: candidate.matchedAlias,
+      matchedTokens: candidate.matchedTokens,
+      missingTokens: candidate.missingTokens,
+    }));
+  }
   const candidates = match.candidates.length > 0 ? match.candidates : getStoreCandidatesForAi(text);
   return candidates.slice(0, 5).map((candidate) => ({
     objectId: candidate.store.id,
@@ -143,6 +172,7 @@ function candidatesForAi(match: StoreMatchResult, text: string) {
     aliases: candidate.store.aliases,
     score: candidate.score,
     matchedBy: candidate.matchedBy,
+    matchedAlias: candidate.matchedAlias ?? null,
     matchedTokens: candidate.matchedTokens,
     missingTokens: candidate.missingTokens,
   }));
@@ -151,19 +181,34 @@ function candidatesForAi(match: StoreMatchResult, text: string) {
 function buildPrompt({
   text,
   localStoreMatch,
+  objectResolver,
   categories,
   priorities,
   departments,
 }: {
   text: string;
   localStoreMatch: StoreMatchResult;
+  objectResolver?: ObjectResolverResult | null;
   categories: readonly string[];
   priorities: readonly AiPriority[];
   departments: readonly string[];
 }) {
   const reliable = isReliableStoreMatch(localStoreMatch);
+  const resolvedObject = objectResolver?.status === "resolved" ? objectResolver.bestMatch : storeForAi(localStoreMatch);
+  const objectCandidates = candidatesForAi(localStoreMatch, text, objectResolver);
+  const allowedObjectIds = objectResolver?.allowedObjectIds ?? objectCandidates.map((candidate) => candidate.objectId);
   return JSON.stringify({
     originalMessageText: text,
+    objectResolver: objectResolver
+      ? {
+          status: objectResolver.status,
+          source: objectResolver.source,
+          confidence: objectResolver.confidence,
+          reason: objectResolver.reason,
+          bestMatch: objectResolver.bestMatch,
+          allowedObjectIds,
+        }
+      : null,
     localStoreMatch: {
       status: localStoreMatch.status,
       confidence: localStoreMatch.confidence,
@@ -178,12 +223,16 @@ function buildPrompt({
             aliases: localStoreMatch.bestMatch.aliases,
           }
         : null,
-      candidates: candidatesForAi(localStoreMatch, text),
+      candidates: objectCandidates,
     },
-    fixedStore: storeForAi(localStoreMatch),
-    objectSelectionPolicy: reliable
-      ? "localStoreMatch is exact/high_confidence. You must use fixedStore and must not change objectId/objectName/address."
-      : "localStoreMatch is ambiguous/not_found. You may choose exactly one object only from localStoreMatch.candidates. If unsure, return objectId=null and workItems=[].",
+    resolvedObject,
+    fixedStore: resolvedObject,
+    objectCandidates,
+    allowedObjectIds,
+    objectSelectionPolicy:
+      objectResolver?.status === "resolved" || reliable
+        ? "resolvedObject is already selected by local Object Resolver. Use only resolvedObject. Do not change objectId/objectName/address."
+        : "No local object is resolved. Choose only from allowedObjectIds/objectCandidates. If unsure, return objectId=null, workItems=[], tickets=[], missingFields includes object. Never invent objects.",
     allowedCategories: categories,
     allowedPriorities: priorities,
     allowedWorkTypes: serviceDeskWorkTypes,
@@ -215,26 +264,95 @@ function buildPrompt({
   });
 }
 
-function enforceObjectPolicy(analysis: AiGroupMessageAnalysis, localStoreMatch: StoreMatchResult): AiGroupMessageAnalysis {
+function resolverCandidateToStore(candidate: ObjectResolverCandidate) {
+  return {
+    id: candidate.id,
+    name: candidate.name,
+    address: candidate.address,
+  };
+}
+
+function enforceObjectPolicy(analysis: AiGroupMessageAnalysis, localStoreMatch: StoreMatchResult, objectResolver?: ObjectResolverResult | null): AiGroupMessageAnalysis {
   if (!analysis.isTicketMessage) return withTicketAlias(analysis);
 
+  if (objectResolver?.status === "resolved" && objectResolver.bestMatch) {
+    const openAiSelectedObjectId = analysis.objectId;
+    const objectOverrideIgnored = Boolean(openAiSelectedObjectId && openAiSelectedObjectId !== objectResolver.bestMatch.id);
+    if (objectOverrideIgnored) {
+      console.warn("[ai-analyzer] OpenAI object override ignored", {
+        selectedObjectId: openAiSelectedObjectId,
+        forcedObjectId: objectResolver.bestMatch.id,
+        forcedObjectName: objectResolver.bestMatch.name,
+      });
+    }
+
+    return withTicketAlias({
+      ...analysis,
+      objectId: objectResolver.bestMatch.id,
+      objectName: objectResolver.bestMatch.name,
+      address: objectResolver.bestMatch.address,
+      openAiSelectedObjectId,
+      objectOverrideIgnored,
+      finalObjectId: objectResolver.bestMatch.id,
+      objectResolver: {
+        status: objectResolver.status,
+        source: objectResolver.source,
+        confidence: objectResolver.confidence,
+        reason: objectResolver.reason,
+      },
+      missingFields: analysis.missingFields.filter((field) => field !== "object"),
+    });
+  }
+
   if (isReliableStoreMatch(localStoreMatch) && localStoreMatch.bestMatch) {
+    const openAiSelectedObjectId = analysis.objectId;
+    const objectOverrideIgnored = Boolean(openAiSelectedObjectId && openAiSelectedObjectId !== localStoreMatch.bestMatch.id);
+    if (objectOverrideIgnored) {
+      console.warn("[ai-analyzer] OpenAI object override ignored", {
+        selectedObjectId: openAiSelectedObjectId,
+        forcedObjectId: localStoreMatch.bestMatch.id,
+        forcedObjectName: localStoreMatch.bestMatch.name,
+      });
+    }
+
     return withTicketAlias({
       ...analysis,
       objectId: localStoreMatch.bestMatch.id,
       objectName: localStoreMatch.bestMatch.name,
       address: localStoreMatch.bestMatch.address,
+      openAiSelectedObjectId,
+      objectOverrideIgnored,
+      finalObjectId: localStoreMatch.bestMatch.id,
       missingFields: analysis.missingFields.filter((field) => field !== "object"),
     });
   }
 
-  const chosen = localStoreMatch.candidates.find((candidate) => candidate.store.id === analysis.objectId)?.store;
+  const resolverCandidate =
+    objectResolver && analysis.objectId && objectResolver.allowedObjectIds.includes(analysis.objectId)
+      ? objectResolver.candidates.find((candidate) => candidate.id === analysis.objectId)
+      : undefined;
+  const chosen = resolverCandidate
+    ? resolverCandidateToStore(resolverCandidate)
+    : objectResolver
+      ? null
+      : localStoreMatch.candidates.find((candidate) => candidate.store.id === analysis.objectId)?.store;
   if (!chosen || analysis.confidence < 0.7) return safeObjectMissing("Не вдалося впевнено визначити об'єкт.");
   return withTicketAlias({
     ...analysis,
     objectId: chosen.id,
     objectName: chosen.name,
     address: chosen.address,
+    openAiSelectedObjectId: analysis.objectId,
+    objectOverrideIgnored: false,
+    finalObjectId: chosen.id,
+    objectResolver: objectResolver
+      ? {
+          status: "resolved",
+          source: "ai_candidate_choice",
+          confidence: objectResolver.confidence,
+          reason: objectResolver.reason,
+        }
+      : undefined,
     missingFields: analysis.missingFields.filter((field) => field !== "object"),
   });
 }
@@ -277,7 +395,7 @@ async function analyzeWithOpenAi(input: AnalyzeTelegramGroupMessageInput, localS
     throw new OpenAiAnalyzerError("invalid_json", `OpenAI returned invalid JSON: ${rawContentSnippet(content)}`, rawContentSnippet(content));
   }
   return {
-    analysis: enforceObjectPolicy(parsed.analysis, localStoreMatch),
+    analysis: enforceObjectPolicy(parsed.analysis, localStoreMatch, input.objectResolver),
     validationError: parsed.validationError,
   };
 }
@@ -299,7 +417,7 @@ async function createOpenAiCompletion({
 }) {
   const messages = [
     { role: "system" as const, content: ticketClassifierSystemPrompt },
-    { role: "user" as const, content: buildPrompt({ text: input.text, localStoreMatch, categories, priorities, departments }) },
+    { role: "user" as const, content: buildPrompt({ text: input.text, localStoreMatch, objectResolver: input.objectResolver, categories, priorities, departments }) },
   ];
 
   try {

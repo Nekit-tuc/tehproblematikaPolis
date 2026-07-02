@@ -1,6 +1,7 @@
 import { analyzeTelegramGroupMessage } from "@/lib/ai/group-message-analyzer";
+import { findResolvedCompanyObject, resolveObjectFromMessage, type ObjectResolverResult } from "@/lib/ai/object-resolver";
 import { buildPendingReviewTicketDraft } from "@/lib/ai/ticket-builder";
-import { matchStore, normalizeStoreText, type StoreMatchResult } from "@/lib/stores/match-store";
+import { normalizeStoreText, type StoreMatchResult } from "@/lib/stores/match-store";
 import { loadMatcherObjectsFromSupabase } from "@/lib/stores/object-source";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { generateTicketNumber, isDuplicateTicketNumberError, TICKET_NUMBER_RETRY_LIMIT } from "@/lib/tickets/numbering";
@@ -46,37 +47,6 @@ function normalize(value: string | null | undefined) {
   return normalizeStoreText(value ?? "");
 }
 
-function objectScore(object: CompanyObject, aliases: string[]) {
-  const haystack = normalize(`${object.name} ${object.address} ${object.city} ${object.district ?? ""} ${object.object_number ?? ""}`);
-  return aliases.reduce((score, alias) => {
-    const normalizedAlias = normalize(alias);
-    if (!normalizedAlias) return score;
-    if (haystack.includes(normalizedAlias) || normalizedAlias.includes(haystack)) return Math.max(score, 2);
-    const aliasTokens = normalizedAlias.split(" ").filter((token) => token.length > 2);
-    const matched = aliasTokens.filter((token) => haystack.includes(token)).length;
-    return Math.max(score, matched);
-  }, 0);
-}
-
-async function findObject(objects: CompanyObject[], analysisObjectId: string, localStoreMatch: StoreMatchResult) {
-  const direct = objects.find((object) => object.id === analysisObjectId);
-  if (direct) return direct;
-
-  const matchedStore =
-    localStoreMatch.bestMatch?.id === analysisObjectId
-      ? localStoreMatch.bestMatch
-      : localStoreMatch.candidates.find((candidate) => candidate.store.id === analysisObjectId)?.store;
-  if (!matchedStore) return null;
-
-  const aliases = [matchedStore.name, matchedStore.address, matchedStore.city, matchedStore.district, matchedStore.id, ...matchedStore.aliases];
-  const scored = objects
-    .filter((object) => object.type === matchedStore.objectType)
-    .map((object) => ({ object, score: objectScore(object, aliases) }))
-    .filter((item) => item.score > 0)
-    .sort((a, b) => b.score - a.score);
-  return scored[0]?.object ?? null;
-}
-
 function findCategory(categories: Category[], categoryName: string | null) {
   const fallback = categories.find((category) => normalize(category.name) === normalize("Інше")) ?? categories[0] ?? null;
   if (!categoryName) return fallback;
@@ -111,6 +81,7 @@ async function createPendingTicket({
   originalText,
   analysis,
   localStoreMatch,
+  objectResolver,
   source,
 }: {
   supabase: ReturnType<typeof createAdminClient>;
@@ -123,6 +94,7 @@ async function createPendingTicket({
   originalText: string;
   analysis: Awaited<ReturnType<typeof analyzeTelegramGroupMessage>>;
   localStoreMatch: StoreMatchResult;
+  objectResolver: ObjectResolverResult;
   source: "telegram_group" | "telegram_private_test";
 }) {
   let ticket: { id: string; number: string } | null = null;
@@ -142,6 +114,7 @@ async function createPendingTicket({
         originalText,
         analysis,
         localStoreMatch,
+        objectResolver,
         telegramUserName: telegramUserName(message),
         source,
       }))
@@ -182,6 +155,12 @@ async function createPendingTicket({
         confidence: localStoreMatch.confidence,
         bestMatch: localStoreMatch.bestMatch?.id ?? null,
       },
+      object_resolver: {
+        status: objectResolver.status,
+        source: objectResolver.source,
+        confidence: objectResolver.confidence,
+        bestMatch: objectResolver.bestMatch?.id ?? null,
+      },
       object_source: "supabase_objects",
       recommended_department: workItem.recommendedDepartment,
     },
@@ -211,7 +190,8 @@ export async function handleTelegramGroupMessage(message: TelegramMessage): Prom
     loadMatcherObjectsFromSupabase(supabase),
     supabase.from("categories").select("*").eq("is_active", true),
   ]);
-  const localStoreMatch = matchStore(text, objectSource.records);
+  const objectResolver = resolveObjectFromMessage(text, objectSource.records);
+  const localStoreMatch = objectResolver.localStoreMatch;
   console.info("[telegram-group-intake] local store match", {
     status: localStoreMatch.status,
     bestMatch: localStoreMatch.bestMatch?.name ?? null,
@@ -225,7 +205,23 @@ export async function handleTelegramGroupMessage(message: TelegramMessage): Prom
       missingTokens: candidate.missingTokens,
     })),
   });
-  const analysis = await analyzeTelegramGroupMessage({ text, localStoreMatch });
+  console.info("[telegram-group-intake] object resolver", {
+    status: objectResolver.status,
+    source: objectResolver.source,
+    bestMatch: objectResolver.bestMatch?.name ?? null,
+    confidence: objectResolver.confidence,
+    candidates: objectResolver.candidates.slice(0, 3).map((candidate) => ({
+      id: candidate.id,
+      name: candidate.name,
+      score: candidate.score,
+      matchedBy: candidate.matchedBy,
+      matchedAlias: candidate.matchedAlias,
+      matchedTokens: candidate.matchedTokens,
+      missingTokens: candidate.missingTokens,
+    })),
+    reason: objectResolver.reason,
+  });
+  const analysis = await analyzeTelegramGroupMessage({ text, localStoreMatch, objectResolver });
   if (!analysis.isTicketMessage) return { handled: true, created: false, reason: "not_ticket" };
   if (!analysis.objectId) return { handled: true, created: false, reason: "store_not_found" };
   if (analysis.confidence < 0.6) return { handled: true, created: false, reason: "low_confidence" };
@@ -236,7 +232,17 @@ export async function handleTelegramGroupMessage(message: TelegramMessage): Prom
   if (eligibleWorkItems.length === 0) return { handled: true, created: false, reason: "no_confident_work_items" };
 
   const objects = objectSource.source === "supabase_objects" ? (objectSource.records as CompanyObject[]) : [];
-  const object = await findObject(objects, analysis.objectId, localStoreMatch);
+  const object = findResolvedCompanyObject(objects, objectResolver, analysis.objectId);
+  console.info("[telegram-group-intake] final object", {
+    objectResolverStatus: objectResolver.status,
+    objectResolverSource: objectResolver.source,
+    openAiSelectedObjectId: analysis.openAiSelectedObjectId ?? analysis.objectId,
+    objectOverrideIgnored: analysis.objectOverrideIgnored ?? false,
+    finalObjectId: object?.id ?? null,
+    finalObjectName: object?.name ?? null,
+    ticketCount: eligibleWorkItems.length,
+    reason: analysis.reason,
+  });
   if (!object) return { handled: true, created: false, reason: "database_object_not_found" };
 
   const telegramUserId = message.from?.id ? String(message.from.id) : null;
@@ -263,6 +269,7 @@ export async function handleTelegramGroupMessage(message: TelegramMessage): Prom
       originalText: text,
       analysis,
       localStoreMatch,
+      objectResolver,
       source,
     });
     if (ticket) created.push(ticket);

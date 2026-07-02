@@ -1,5 +1,6 @@
 import type { AiGroupMessageAnalysis, AiWorkItem } from "@/types/ai";
 import type { Category, CompanyObject, Profile, TicketPriority } from "@/types/domain";
+import type { ObjectResolverResult } from "@/lib/ai/object-resolver";
 import type { StoreMatchResult } from "@/lib/stores/match-store";
 import type { TelegramMessage } from "@/lib/telegram/client";
 
@@ -14,6 +15,7 @@ type BuildTicketDraftInput = {
   originalText: string;
   analysis: AiGroupMessageAnalysis;
   localStoreMatch: StoreMatchResult;
+  objectResolver?: ObjectResolverResult;
   telegramUserName: string | null;
   source?: "telegram_group" | "telegram_private_test";
 };
@@ -29,6 +31,7 @@ export function buildPendingReviewTicketDraft({
   originalText,
   analysis,
   localStoreMatch,
+  objectResolver,
   telegramUserName,
   source = "telegram_group",
 }: BuildTicketDraftInput) {
@@ -50,7 +53,7 @@ export function buildPendingReviewTicketDraft({
     telegram_user_name: telegramUserName,
     original_message_text: originalText,
     ai_confidence: workItem.confidence,
-    ai_raw_result: { localStoreMatch, analysis, workItem },
+    ai_raw_result: { localStoreMatch, objectResolver, analysis, workItem },
     recommended_department: workItem.recommendedDepartment,
   };
 }

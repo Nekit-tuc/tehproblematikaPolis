@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
+import type { ObjectResolverResult } from "@/lib/ai/object-resolver";
 import type { StoreMatchResult } from "@/lib/stores/match-store";
 import type { AiGroupMessageAnalysis } from "@/types/ai";
 
@@ -17,6 +18,7 @@ type ApiResponse = {
   data?: AiGroupMessageAnalysis;
   analysis?: AiGroupMessageAnalysis;
   localStoreMatch?: StoreMatchResult;
+  objectResolver?: ObjectResolverResult;
   objectSource?: { source: "supabase_objects" | "static_store_addresses"; count: number; error: string | null };
   aiMode?: "openai" | "fallback";
   mode?: "openai" | "fallback";
@@ -29,6 +31,7 @@ type ApiResponse = {
 
 type TestResult = {
   localStoreMatch: StoreMatchResult;
+  objectResolver?: ObjectResolverResult;
   analysis: AiGroupMessageAnalysis;
   raw: ApiResponse;
 };
@@ -64,7 +67,7 @@ export function AiTestClient() {
         if (!response.ok || !payload.ok || !analysis || !payload.localStoreMatch) {
           throw new Error(payload.error ?? "Не вдалося виконати аналіз.");
         }
-        setResult({ localStoreMatch: payload.localStoreMatch, analysis, raw: payload });
+        setResult({ localStoreMatch: payload.localStoreMatch, objectResolver: payload.objectResolver, analysis, raw: payload });
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : "Не вдалося виконати аналіз.");
       }
@@ -144,6 +147,7 @@ export function AiTestClient() {
                             <div>
                             <div className="font-medium">{candidate.store.name}</div>
                             <div className="text-xs text-muted-foreground">{candidate.store.address}</div>
+                            {candidate.matchedAlias ? <div className="mt-1 text-xs text-muted-foreground">Alias: {candidate.matchedAlias}</div> : null}
                             </div>
                             <div className="flex items-center gap-2">
                               <Badge tone="gray">{candidate.matchedBy}</Badge>
@@ -161,6 +165,44 @@ export function AiTestClient() {
                 ) : null}
               </CardContent>
             </Card>
+
+            {result.objectResolver ? (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Object Resolver</CardTitle>
+                  <CardDescription>{result.objectResolver.reason}</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid gap-3 md:grid-cols-3">
+                    <Info label="Status" value={result.objectResolver.status} />
+                    <Info label="Source" value={result.objectResolver.source} />
+                    <Info label="Confidence" value={percent(result.objectResolver.confidence)} />
+                    <Info label="Best match" value={result.objectResolver.bestMatch?.name ?? "-"} />
+                    <Info label="Final object" value={result.analysis.objectName ?? "-"} />
+                    <Info label="OpenAI selected" value={result.analysis.openAiSelectedObjectId ?? result.analysis.objectId ?? "-"} />
+                    <Info label="Override ignored" value={result.analysis.objectOverrideIgnored ? "true" : "false"} />
+                    <Info label="Allowed IDs" value={result.objectResolver.allowedObjectIds.join(", ") || "-"} />
+                  </div>
+                  <div className="grid gap-2">
+                    {result.objectResolver.candidates.map((candidate) => (
+                      <div key={`resolver-${candidate.id}`} className="rounded-md border border-border bg-stone-950/30 p-3 text-sm">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div>
+                            <div className="font-medium">{candidate.name}</div>
+                            <div className="text-xs text-muted-foreground">{candidate.address}</div>
+                            {candidate.matchedAlias ? <div className="mt-1 text-xs text-muted-foreground">Alias: {candidate.matchedAlias}</div> : null}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Badge tone="gray">{candidate.matchedBy}</Badge>
+                            <Badge tone={candidate.score >= 85 ? "green" : candidate.score >= 50 ? "orange" : "gray"}>{candidate.score}</Badge>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            ) : null}
 
             <Card>
               <CardHeader>

@@ -126,6 +126,22 @@ function compact(value: string) {
   return tokenizeStoreText(value).join("");
 }
 
+function isNumericOnlyTokens(tokens: string[]) {
+  return tokens.length === 1 && /^\d+[a-zа-яіїєґ]?$/.test(tokens[0]);
+}
+
+function hasStreetAndNumber(tokens: string[]) {
+  return tokens.some((token) => !/\d/.test(token) && token.length > 2) && tokens.some((token) => /\d/.test(token));
+}
+
+function isPreciseAddressCandidate(candidate: StoreMatchCandidate) {
+  return (
+    candidate.score >= 95 &&
+    ["name", "address", "city_address", "district_address", "street_number", "generated_alias"].includes(candidate.matchedBy) &&
+    hasStreetAndNumber(candidate.matchedTokens)
+  );
+}
+
 function getStoreType(record: StoreObjectRecord): ObjectType {
   if ("objectType" in record && record.objectType) return record.objectType;
   if ("type" in record && record.type) return record.type;
@@ -160,7 +176,6 @@ function generatedAliases(record: StoreObjectRecord) {
     record.address,
     `${record.city} ${record.address}`,
     `${record.district ?? ""} ${record.address}`,
-    number ?? "",
     house && phrase ? `${phrase} ${house}` : "",
     house && phrase ? `${phrase},${house}` : "",
     house && first ? `${first}${house}` : "",
@@ -191,11 +206,11 @@ function candidateValues(record: StoreObjectRecord) {
   const generated = generatedAliases(record);
   const number = objectNumber(record);
   return [
-    { value: record.name, matchedBy: "name" as const, base: 95 },
-    { value: record.address, matchedBy: "address" as const, base: 95 },
-    { value: `${record.city} ${record.address}`, matchedBy: "city_address" as const, base: 94 },
-    { value: `${record.district ?? ""} ${record.address}`, matchedBy: "district_address" as const, base: 92 },
-    ...(number ? [{ value: number, matchedBy: "object_number" as const, base: 62 }] : []),
+    { value: record.name, matchedBy: "name" as const, base: 96 },
+    { value: record.address, matchedBy: "address" as const, base: 98 },
+    { value: `${record.city} ${record.address}`, matchedBy: "city_address" as const, base: 97 },
+    { value: `${record.district ?? ""} ${record.address}`, matchedBy: "district_address" as const, base: 96 },
+    ...(number ? [{ value: number, matchedBy: "object_number" as const, base: 20 }] : []),
     ...aliases.map((alias) => ({ value: alias, matchedBy: "manual_alias" as const, base: 100 })),
     ...generated.map((alias) => ({ value: alias, matchedBy: "generated_alias" as const, base: 92 })),
   ].filter((candidate) => candidate.value.trim().length > 0);
@@ -252,14 +267,29 @@ function scoreRecord(text: string, record: StoreObjectRecord): StoreMatchCandida
     const compactCandidate = compact(candidate.value);
     const overlap = tokenOverlap(textTokens, candidateTokens);
     const matchedAlias = candidate.matchedBy === "manual_alias" || candidate.matchedBy === "generated_alias" ? candidate.value : null;
+    const numericOnly = isNumericOnlyTokens(candidateTokens);
+    const preciseStreetNumber = hasStreetAndNumber(candidateTokens);
+    const exactScore =
+      numericOnly
+        ? Math.min(candidate.base, 20)
+        : candidate.matchedBy === "manual_alias"
+          ? preciseStreetNumber
+            ? 100
+            : 90
+          : candidate.matchedBy === "generated_alias"
+            ? preciseStreetNumber
+              ? Math.max(candidate.base, 95)
+              : 82
+            : candidate.base;
 
     if (normalizedCandidate && normalizedText.includes(normalizedCandidate)) {
-      best = betterCandidate(best, buildCandidate(record, candidate.base, candidate.matchedBy, candidateTokens, [], matchedAlias));
+      best = betterCandidate(best, buildCandidate(record, exactScore, candidate.matchedBy, candidateTokens, [], matchedAlias));
       continue;
     }
 
     if (compactCandidate && compactText.includes(compactCandidate)) {
-      best = betterCandidate(best, buildCandidate(record, Math.max(candidate.base, 95), candidate.matchedBy === "manual_alias" ? "manual_alias" : candidate.matchedBy === "generated_alias" ? "generated_alias" : "compact", candidateTokens, [], matchedAlias));
+      const compactScore = numericOnly ? 20 : Math.max(exactScore, preciseStreetNumber ? 95 : 82);
+      best = betterCandidate(best, buildCandidate(record, compactScore, candidate.matchedBy === "manual_alias" ? "manual_alias" : candidate.matchedBy === "generated_alias" ? "generated_alias" : "compact", candidateTokens, [], matchedAlias));
       continue;
     }
 
@@ -268,7 +298,9 @@ function scoreRecord(text: string, record: StoreObjectRecord): StoreMatchCandida
       const matchedNumber = overlap.matchedTokens.some((token) => /\d/.test(token));
       const numberPenalty = hasNumber && !matchedNumber ? 22 : 0;
       const objectNumberPenalty = candidate.matchedBy === "object_number" ? 18 : 0;
-      best = betterCandidate(best, buildCandidate(record, candidate.base * overlap.ratio - numberPenalty - objectNumberPenalty, candidate.matchedBy, overlap.matchedTokens, overlap.missingTokens, matchedAlias));
+      const numericOnlyPenalty = numericOnly ? 80 : 0;
+      const broadAliasPenalty = candidate.matchedBy === "manual_alias" && !preciseStreetNumber ? 18 : 0;
+      best = betterCandidate(best, buildCandidate(record, candidate.base * overlap.ratio - numberPenalty - objectNumberPenalty - numericOnlyPenalty - broadAliasPenalty, candidate.matchedBy, overlap.matchedTokens, overlap.missingTokens, matchedAlias));
     }
   }
 
@@ -304,10 +336,13 @@ function buildResult(candidates: StoreMatchCandidate[]): StoreMatchResult {
   const closeCandidates = sorted.filter((candidate) => best.score - candidate.score <= 7);
   const duplicateManualAliasMatches =
     best.matchedBy === "manual_alias" && best.matchedAlias
-      ? sorted.filter((candidate) => candidate.matchedBy === "manual_alias" && normalizeStoreText(candidate.matchedAlias ?? "") === normalizeStoreText(best.matchedAlias ?? "") && candidate.score >= 95)
+      ? sorted.filter((candidate) => candidate.matchedBy === "manual_alias" && normalizeStoreText(candidate.matchedAlias ?? "") === normalizeStoreText(best.matchedAlias ?? "") && candidate.score >= 85)
       : [];
   if (duplicateManualAliasMatches.length > 1) {
     return { status: "ambiguous", bestMatch: null, candidates: duplicateManualAliasMatches.slice(0, 5), confidence: best.score / 100, reason: "Object Matcher v2 знайшов однаковий manual alias у кількох об'єктів." };
+  }
+  if (isPreciseAddressCandidate(best)) {
+    return { status: best.score >= 98 ? "exact" : "high_confidence", bestMatch: best.store, candidates: topFive, confidence: best.score / 100, reason: "Object Matcher v2 знайшов точний збіг вулиці та номера." };
   }
   if (best.matchedBy === "manual_alias" && best.score >= 95) {
     return { status: best.score >= 100 ? "exact" : "high_confidence", bestMatch: best.store, candidates: topFive, confidence: best.score / 100, reason: "Object Matcher v2 знайшов унікальний manual alias об'єкта." };

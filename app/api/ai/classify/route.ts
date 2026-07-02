@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { analyzeTelegramGroupMessageWithMeta } from "@/lib/ai/group-message-analyzer";
 import { getOpenAiModel } from "@/lib/ai/openai-client";
-import { matchStore } from "@/lib/stores/match-store";
+import { resolveObjectFromMessage } from "@/lib/ai/object-resolver";
 import { loadMatcherObjectsFromSupabase } from "@/lib/stores/object-source";
 import { createClient } from "@/lib/supabase/server";
 
@@ -18,12 +18,14 @@ export async function POST(request: Request) {
 
     const supabase = await createClient();
     const objectSource = await loadMatcherObjectsFromSupabase(supabase);
-    const localStoreMatch = matchStore(text, objectSource.records);
-    const result = await analyzeTelegramGroupMessageWithMeta({ text, localStoreMatch });
+    const objectResolver = resolveObjectFromMessage(text, objectSource.records);
+    const localStoreMatch = objectResolver.localStoreMatch;
+    const result = await analyzeTelegramGroupMessageWithMeta({ text, localStoreMatch, objectResolver });
     return NextResponse.json({
       ok: true,
       data: result.analysis,
       localStoreMatch,
+      objectResolver,
       objectSource: {
         source: objectSource.source,
         count: objectSource.count,

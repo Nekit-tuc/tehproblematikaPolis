@@ -54,6 +54,15 @@ function confidenceBucket(value: number | null | undefined) {
   return "low";
 }
 
+function resolverConfidence(ticket: TicketWithRelations) {
+  const raw = ticket.ai_raw_result;
+  if (!raw || typeof raw !== "object") return null;
+  const resolver = (raw as { objectResolver?: unknown }).objectResolver;
+  if (!resolver || typeof resolver !== "object") return null;
+  const confidence = (resolver as { confidence?: unknown }).confidence;
+  return typeof confidence === "number" ? confidence : null;
+}
+
 function filterTickets(tickets: TicketWithRelations[], params: SearchParams) {
   const query = params.q?.trim().toLowerCase();
   return tickets.filter((ticket) => {
@@ -198,6 +207,7 @@ function AiTicketCard({
   profiles: Profile[];
 }) {
   const siblingTickets = related.filter((item) => item.id !== ticket.id);
+  const objectResolverConfidence = resolverConfidence(ticket);
   return (
     <Card>
       <CardHeader>
@@ -210,6 +220,7 @@ function AiTicketCard({
           </div>
           <div className="flex flex-wrap gap-2">
             <Badge tone={confidenceTone(ticket.ai_confidence)}>{confidenceLabel(ticket.ai_confidence)}</Badge>
+            {objectResolverConfidence !== null ? <Badge tone={confidenceTone(objectResolverConfidence)}>Object {confidenceLabel(objectResolverConfidence)}</Badge> : null}
             <Badge tone="gray">{priorityLabels[ticket.priority]}</Badge>
             {ticket.source === "telegram_private_test" ? <Badge tone="orange">Приватний тест</Badge> : null}
             {ticket.telegram_source_group_id ? <Badge tone="gray">Частина групового повідомлення</Badge> : null}

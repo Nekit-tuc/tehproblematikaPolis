@@ -35,6 +35,10 @@ export type AiWorkItemAnalysis = {
   tickets: AiWorkItem[];
   missingFields: string[];
   reason: string;
+  objectResolver?: Record<string, unknown>;
+  openAiSelectedObjectId?: string | null;
+  objectOverrideIgnored?: boolean;
+  finalObjectId?: string | null;
 };
 
 export type AiParsedTicket = AiWorkItem;
