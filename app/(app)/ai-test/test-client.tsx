@@ -77,8 +77,8 @@ export function AiTestClient() {
   const workItems = result?.analysis.workItems.length ? result.analysis.workItems : result?.analysis.tickets ?? [];
 
   return (
-    <div className="grid gap-6">
-      <Card>
+    <div className="grid min-w-0 gap-4 md:gap-6">
+      <Card className="max-w-full rounded-3xl border-white/10 bg-white/[0.04] md:rounded-lg">
         <CardHeader>
           <CardTitle>Текст повідомлення з Telegram-групи</CardTitle>
           <CardDescription>Форма тільки тестує AI v2 аналіз. Заявки не створюються.</CardDescription>
@@ -91,25 +91,42 @@ export function AiTestClient() {
             className="min-h-56"
           />
           {error ? <Alert title="Помилка">{error}</Alert> : null}
-          <div className="flex flex-wrap gap-2">
-            <Button type="button" onClick={analyze} disabled={isPending}>
+          <div className="grid gap-2 sm:flex sm:flex-wrap">
+            <Button type="button" onClick={analyze} disabled={isPending} className="min-h-11 rounded-2xl md:min-h-0 md:rounded-md">
               {isPending ? "Аналіз..." : "Аналізувати"}
             </Button>
-            <Button type="button" variant="outline" onClick={() => setText(exampleText)}>
+            <Button type="button" variant="outline" onClick={() => setText(exampleText)} className="min-h-11 rounded-2xl md:min-h-0 md:rounded-md">
               Заповнити прикладом
             </Button>
           </div>
         </CardContent>
       </Card>
 
-      <div className="space-y-6">
+      <div className="min-w-0 space-y-4 md:space-y-6">
         {!result ? (
-          <Card>
+          <Card className="rounded-3xl border-white/10 bg-white/[0.04] md:rounded-lg">
             <CardContent className="pt-5 text-sm text-muted-foreground">Результат аналізу з'явиться тут.</CardContent>
           </Card>
         ) : (
           <>
-            <Card>
+            <Card className="rounded-3xl border-white/10 bg-white/[0.04] md:hidden">
+              <CardHeader className="p-4">
+                <CardTitle className="text-base">Результат аналізу</CardTitle>
+                <CardDescription className="break-words text-xs">{result.analysis.reason}</CardDescription>
+              </CardHeader>
+              <CardContent className="grid gap-2 p-4 pt-0">
+                <Info label="Об'єкт" value={result.analysis.objectName ?? "-"} />
+                <Info label="Адреса" value={result.analysis.address ?? "-"} />
+                <div className="grid grid-cols-2 gap-2">
+                  <Info label="Confidence" value={percent(result.analysis.confidence)} />
+                  <Info label="Resolver" value={result.objectResolver?.status ?? result.localStoreMatch.status} />
+                </div>
+                <Info label="Work Items" value={String(workItems.length)} />
+                <Info label="AI mode" value={result.raw.aiMode ?? result.raw.mode ?? "-"} />
+              </CardContent>
+            </Card>
+
+            <Card className="hidden md:block">
               <CardHeader>
                 <CardTitle>OpenAI diagnostics</CardTitle>
                 <CardDescription>Server-side ENV check for Vercel. API key value is never returned.</CardDescription>
@@ -126,7 +143,7 @@ export function AiTestClient() {
               </CardContent>
             </Card>
 
-            <Card>
+            <Card className="hidden md:block">
               <CardHeader>
                 <CardTitle>Local Object Matcher</CardTitle>
                 <CardDescription>{result.localStoreMatch.reason}</CardDescription>
@@ -142,12 +159,12 @@ export function AiTestClient() {
                     <div className="text-sm font-medium">Кандидати</div>
                     <div className="grid gap-2">
                       {result.localStoreMatch.candidates.map((candidate) => (
-                        <div key={candidate.store.id} className="grid gap-3 rounded-md border border-border bg-stone-950/30 p-3 text-sm">
+                        <div key={candidate.store.id} className="grid min-w-0 gap-3 rounded-md border border-border bg-stone-950/30 p-3 text-sm">
                           <div className="flex flex-wrap items-center justify-between gap-2">
-                            <div>
-                            <div className="font-medium">{candidate.store.name}</div>
-                            <div className="text-xs text-muted-foreground">{candidate.store.address}</div>
-                            {candidate.matchedAlias ? <div className="mt-1 text-xs text-muted-foreground">Alias: {candidate.matchedAlias}</div> : null}
+                            <div className="min-w-0">
+                            <div className="break-words font-medium">{candidate.store.name}</div>
+                            <div className="break-words text-xs text-muted-foreground">{candidate.store.address}</div>
+                            {candidate.matchedAlias ? <div className="mt-1 break-words text-xs text-muted-foreground">Alias: {candidate.matchedAlias}</div> : null}
                             </div>
                             <div className="flex items-center gap-2">
                               <Badge tone="gray">{candidate.matchedBy}</Badge>
@@ -167,7 +184,7 @@ export function AiTestClient() {
             </Card>
 
             {result.objectResolver ? (
-              <Card>
+              <Card className="hidden md:block">
                 <CardHeader>
                   <CardTitle>Object Resolver</CardTitle>
                   <CardDescription>{result.objectResolver.reason}</CardDescription>
@@ -185,12 +202,12 @@ export function AiTestClient() {
                   </div>
                   <div className="grid gap-2">
                     {result.objectResolver.candidates.map((candidate) => (
-                      <div key={`resolver-${candidate.id}`} className="rounded-md border border-border bg-stone-950/30 p-3 text-sm">
+                      <div key={`resolver-${candidate.id}`} className="min-w-0 rounded-md border border-border bg-stone-950/30 p-3 text-sm">
                         <div className="flex flex-wrap items-center justify-between gap-2">
-                          <div>
-                            <div className="font-medium">{candidate.name}</div>
-                            <div className="text-xs text-muted-foreground">{candidate.address}</div>
-                            {candidate.matchedAlias ? <div className="mt-1 text-xs text-muted-foreground">Alias: {candidate.matchedAlias}</div> : null}
+                          <div className="min-w-0">
+                            <div className="break-words font-medium">{candidate.name}</div>
+                            <div className="break-words text-xs text-muted-foreground">{candidate.address}</div>
+                            {candidate.matchedAlias ? <div className="mt-1 break-words text-xs text-muted-foreground">Alias: {candidate.matchedAlias}</div> : null}
                           </div>
                           <div className="flex items-center gap-2">
                             <Badge tone="gray">{candidate.matchedBy}</Badge>
@@ -204,7 +221,7 @@ export function AiTestClient() {
               </Card>
             ) : null}
 
-            <Card>
+            <Card className="hidden md:block">
               <CardHeader>
                 <CardTitle>AI v2 analysis</CardTitle>
                 <CardDescription>{result.analysis.reason}</CardDescription>
@@ -224,17 +241,17 @@ export function AiTestClient() {
             </Card>
 
             {workItems.length > 0 ? (
-              <div className="grid gap-4">
+              <div className="grid min-w-0 gap-3 md:gap-4">
                 {workItems.map((item, index) => (
-                  <Card key={`${item.title}-${index}`}>
-                    <CardHeader>
+                  <Card key={`${item.title}-${index}`} className="max-w-full rounded-3xl border-white/10 bg-white/[0.04] md:rounded-lg">
+                    <CardHeader className="p-4 md:p-6">
                       <div className="flex flex-wrap items-center justify-between gap-3">
-                        <CardTitle>{item.title}</CardTitle>
+                        <CardTitle className="break-words text-base md:text-xl">{item.title}</CardTitle>
                         <Badge tone={item.priority === "critical" ? "red" : item.priority === "high" ? "orange" : "gray"}>{item.priority}</Badge>
                       </div>
-                      <CardDescription>{item.description}</CardDescription>
+                      <CardDescription className="break-words text-sm">{item.description}</CardDescription>
                     </CardHeader>
-                    <CardContent className="grid gap-3 md:grid-cols-3">
+                    <CardContent className="grid gap-2 p-4 pt-0 md:grid-cols-3 md:gap-3 md:p-6 md:pt-0">
                       <Info label="Категорія" value={item.category} />
                       <Info label="Тип роботи" value={item.workType} />
                       <Info label="Підрозділ" value={item.recommendedDepartment ?? "-"} />
@@ -248,17 +265,24 @@ export function AiTestClient() {
               </div>
             ) : null}
 
-            <Card>
-              <CardHeader>
-                <CardTitle>JSON</CardTitle>
-                <CardDescription>Повна відповідь `/api/ai/classify`.</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <pre className="max-h-[520px] overflow-auto rounded-md border border-border bg-stone-950/60 p-4 text-xs leading-5 text-stone-200">
-                  {JSON.stringify(result.raw, null, 2)}
-                </pre>
-              </CardContent>
-            </Card>
+            <details className="rounded-3xl border border-white/10 bg-white/[0.04] p-4 md:hidden">
+              <summary className="cursor-pointer list-none text-sm font-semibold text-orange-200">Технічні деталі</summary>
+              <div className="mt-4 grid min-w-0 gap-3">
+                <Info label="OpenAI configured" value={result.raw.openaiConfigured ? "true" : "false"} />
+                <Info label="Model" value={result.raw.model ?? "-"} />
+                <Info label="Fallback reason" value={result.raw.fallbackReason ?? "-"} />
+                <Info label="Object source" value={`${result.raw.objectSource?.source ?? "-"} (${result.raw.objectSource?.count ?? "-"})`} />
+                <Info label="Best match" value={result.localStoreMatch.bestMatch?.name ?? "-"} />
+                <Info label="Allowed IDs" value={result.objectResolver?.allowedObjectIds.join(", ") || "-"} />
+              </div>
+            </details>
+
+            <details className="rounded-3xl border border-white/10 bg-white/[0.04] p-4">
+              <summary className="cursor-pointer list-none text-sm font-semibold text-orange-200">Показати JSON</summary>
+              <pre className="mt-4 max-h-[520px] max-w-full overflow-x-auto overflow-y-auto whitespace-pre-wrap break-words rounded-2xl border border-border bg-stone-950/60 p-3 text-xs leading-5 text-stone-200 md:p-4">
+                {JSON.stringify(result.raw, null, 2)}
+              </pre>
+            </details>
           </>
         )}
       </div>
@@ -268,9 +292,9 @@ export function AiTestClient() {
 
 function Info({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-border bg-stone-950/30 p-3">
+    <div className="min-w-0 max-w-full rounded-2xl border border-border bg-stone-950/30 p-3 md:rounded-lg">
       <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-1 break-words text-sm font-medium">{value}</div>
+      <div className="mt-1 max-w-full break-words text-sm font-medium">{value}</div>
     </div>
   );
 }

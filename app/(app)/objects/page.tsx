@@ -92,7 +92,19 @@ export default async function ObjectsPage({ searchParams }: { searchParams: Prom
       {params.success === "deactivated" ? <Alert title="Об'єкт деактивовано">Об'єкт приховано з активного довідника без видалення заявок.</Alert> : null}
 
       {canManage ? (
-        <Card className="rounded-3xl border-white/10 bg-white/[0.04] md:rounded-lg">
+        <details className="mobile-card p-4 md:hidden">
+          <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between rounded-2xl bg-orange-500 px-4 text-sm font-semibold text-stone-950">
+            Додати в базу новий об'єкт
+            <span className="text-lg leading-none">+</span>
+          </summary>
+          <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 p-3">
+            <CreateObjectForm managers={managers} nextObjectNumber={nextObjectNumber} districts={districts} />
+          </div>
+        </details>
+      ) : null}
+
+      {canManage ? (
+        <Card className="hidden rounded-3xl border-white/10 bg-white/[0.04] md:block md:rounded-lg">
           <CardHeader>
             <CardTitle>Новий об'єкт</CardTitle>
             <CardDescription>Обов'язкові поля: назва, тип, номер, місто/район та адреса.</CardDescription>
