@@ -1,4 +1,5 @@
 import { BriefcaseBusiness, Pencil, PowerOff } from "lucide-react";
+import Link from "next/link";
 import type React from "react";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -78,6 +79,9 @@ export default async function WorkersPage({
                   ) : worker.categories?.map((category) => <Badge key={category.id}>{category.name}</Badge>)}
                 </div>
                 {worker.notes ? <p className="break-words text-sm text-muted-foreground">{worker.notes}</p> : null}
+                <Button asChild variant="outline">
+                  <Link href={`/workers/${worker.id}`}>Переглянути заявки</Link>
+                </Button>
                 <details className="rounded-lg border border-border bg-stone-950/30 p-3">
                   <summary className="cursor-pointer list-none text-sm font-medium text-orange-200">
                     <span className="inline-flex items-center gap-2"><Pencil className="h-4 w-4" />Редагувати</span>

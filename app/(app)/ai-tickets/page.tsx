@@ -10,9 +10,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { priorityLabels } from "@/lib/labels";
 import { requireRole } from "@/lib/auth/server";
 import { createClient } from "@/lib/supabase/server";
+import { getActiveWorkers } from "@/lib/supabase/worker-queries";
 import { formatDate } from "@/lib/utils";
-import type { Category, CompanyObject, Profile, TicketPriority, TicketWithRelations } from "@/types/domain";
-import { confirmAiTicketAction, rejectAiTicketAction, updateAiTicketAction } from "./actions";
+import type { Category, CompanyObject, Profile, TicketPriority, TicketWithRelations, WorkerWithCategories } from "@/types/domain";
+import { assignWorkerToAiTicketAction, confirmAiTicketAction, rejectAiTicketAction, updateAiTicketAction } from "./actions";
 
 const priorities: TicketPriority[] = ["low", "medium", "high", "critical"];
 
@@ -92,7 +93,7 @@ export default async function AiTicketsPage({ searchParams }: { searchParams: Pr
   await requireRole(["admin", "management", "tech_manager"]);
   const params = await searchParams;
   const supabase = await createClient();
-  const [{ data: ticketsData, error }, { data: objectsData }, { data: categoriesData }, { data: profilesData }] = await Promise.all([
+  const [{ data: ticketsData, error }, { data: objectsData }, { data: categoriesData }, { data: profilesData }, workersResult] = await Promise.all([
     supabase
       .from("tickets")
       .select(ticketSelect)
@@ -102,12 +103,15 @@ export default async function AiTicketsPage({ searchParams }: { searchParams: Pr
     supabase.from("objects").select("*").order("name"),
     supabase.from("categories").select("*").order("name"),
     supabase.from("profiles").select("*").eq("is_active", true).order("full_name"),
+    getActiveWorkers(),
   ]);
 
   const tickets = (ticketsData ?? []) as TicketWithRelations[];
   const objects = (objectsData ?? []) as CompanyObject[];
   const categories = (categoriesData ?? []) as Category[];
   const profiles = (profilesData ?? []) as Profile[];
+  const workers = workersResult.data;
+  const workersById = new Map(workers.map((worker) => [worker.id, worker]));
   const visibleTickets = filterTickets(tickets, params);
   const relatedGroups = groupTickets(tickets);
 
@@ -118,11 +122,12 @@ export default async function AiTicketsPage({ searchParams }: { searchParams: Pr
         <p className="subtle">Перевірка заявок, які Telegram AI-бот створив зі статусом очікування підтвердження.</p>
       </div>
 
-      {error ? <Alert title="Не вдалося завантажити AI-заявки">{error.message}</Alert> : null}
+      {error || workersResult.error ? <Alert title="Не вдалося завантажити AI-заявки">{error?.message ?? workersResult.error}</Alert> : null}
       {params.error ? <Alert title="Помилка">{decodeURIComponent(params.error)}</Alert> : null}
       {params.success === "confirmed" ? <Alert title="Заявку підтверджено">Статус змінено на нову заявку.</Alert> : null}
       {params.success === "rejected" ? <Alert title="Заявку відхилено">Статус змінено на відхилену.</Alert> : null}
       {params.success === "updated" ? <Alert title="Заявку оновлено">Правки збережено, заявка лишилась на перевірці.</Alert> : null}
+      {params.success === "worker_assigned" ? <Alert title="Виконавця призначено">Прив'язку виконавця до AI-заявки збережено.</Alert> : null}
 
       <div className="flex gap-2 overflow-x-auto pb-1 md:hidden">
         <Link href="/ai-tickets" className="rounded-full bg-orange-500 px-4 py-2 text-sm font-semibold text-stone-950">Очікують</Link>
@@ -241,6 +246,8 @@ export default async function AiTicketsPage({ searchParams }: { searchParams: Pr
               objects={objects}
               categories={categories}
               profiles={profiles}
+              workers={workers}
+              assignedWorker={ticket.assignee_worker_id ? workersById.get(ticket.assignee_worker_id) ?? null : null}
             />
           ))}
         </div>
@@ -255,12 +262,16 @@ function AiTicketCard({
   objects,
   categories,
   profiles,
+  workers,
+  assignedWorker,
 }: {
   ticket: TicketWithRelations;
   related: TicketWithRelations[];
   objects: CompanyObject[];
   categories: Category[];
   profiles: Profile[];
+  workers: WorkerWithCategories[];
+  assignedWorker: WorkerWithCategories | null;
 }) {
   const siblingTickets = related.filter((item) => item.id !== ticket.id);
   const objectResolverConfidence = resolverConfidence(ticket);
@@ -290,10 +301,12 @@ function AiTicketCard({
           <Info label="Категорія" value={ticket.category?.name ?? "-"} />
           <Info label="Підрозділ" value={ticket.recommended_department ?? "-"} />
           <Info label="Telegram автор" value={ticket.telegram_user_name ?? ticket.telegram_user_id ?? "-"} />
-          <Info label="Виконавець" value={ticket.assignee?.full_name ?? "Не призначено"} />
+          <Info label="Виконавець" value={assignedWorker?.name ?? (ticket.assignee_worker_id ? "Виконавець не знайдений" : "Не призначено")} />
           <Info label="Номер" value={ticket.number} />
           <Info label="Group ID" value={ticket.telegram_source_group_id ?? "-"} />
         </div>
+
+        <WorkerAssignPanel ticket={ticket} workers={workers} assignedWorker={assignedWorker} />
 
         <div className="rounded-2xl border border-border bg-stone-950/30 p-2.5 md:rounded-md md:p-3">
           <div className="text-xs text-muted-foreground">Опис заявки</div>
@@ -380,6 +393,51 @@ function AiTicketCard({
         </details>
       </CardContent>
     </Card>
+  );
+}
+
+function WorkerAssignPanel({
+  ticket,
+  workers,
+  assignedWorker,
+}: {
+  ticket: TicketWithRelations;
+  workers: WorkerWithCategories[];
+  assignedWorker: WorkerWithCategories | null;
+}) {
+  const recommendedWorkers = workers.filter((worker) => worker.categories?.some((category) => category.id === ticket.category_id));
+  const recommendedIds = new Set(recommendedWorkers.map((worker) => worker.id));
+  const sortedWorkers = [...recommendedWorkers, ...workers.filter((worker) => !recommendedIds.has(worker.id))];
+
+  return (
+    <div className="rounded-2xl border border-orange-900/50 bg-orange-950/10 p-2.5 md:rounded-md md:p-3">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <div className="text-sm font-medium text-orange-100">Виконавець</div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {assignedWorker ? `Призначено: ${assignedWorker.name}` : ticket.assignee_worker_id ? "Виконавець не знайдений" : "Ще не призначено"}
+          </p>
+        </div>
+        {assignedWorker?.telegram_username ? <Badge>@{assignedWorker.telegram_username}</Badge> : null}
+      </div>
+      <form action={assignWorkerToAiTicketAction.bind(null, ticket.id)} className="mt-3 grid gap-2 md:grid-cols-[1fr_auto]">
+        <select
+          name="worker_id"
+          required
+          defaultValue={assignedWorker?.id ?? recommendedWorkers[0]?.id ?? ""}
+          className="h-11 w-full rounded-2xl border border-input bg-stone-950/30 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring md:h-10 md:rounded-md"
+        >
+          <option value="">Оберіть виконавця</option>
+          {sortedWorkers.map((worker) => (
+            <option key={worker.id} value={worker.id}>
+              {worker.name}{recommendedIds.has(worker.id) ? " · рекомендовано" : ""}
+            </option>
+          ))}
+        </select>
+        <Button type="submit" variant="outline" className="min-h-11 rounded-2xl md:min-h-0 md:rounded-md">Зберегти</Button>
+      </form>
+      <p className="mt-2 text-xs text-muted-foreground">Telegram не надсилається автоматично.</p>
+    </div>
   );
 }
 

@@ -109,3 +109,53 @@ export async function updateAiTicketAction(ticketId: string, formData: FormData)
   revalidatePath(`/tickets/${ticketId}`);
   redirect("/ai-tickets?success=updated");
 }
+
+export async function assignWorkerToAiTicketAction(ticketId: string, formData: FormData) {
+  const { user } = await requireRole(["admin", "management", "tech_manager"]);
+  const workerId = text(formData, "worker_id");
+  if (!workerId) redirect(`/ai-tickets?error=${encodeURIComponent("Оберіть виконавця.")}`);
+
+  const supabase = await createClient();
+  const [{ data: ticket, error: ticketError }, { data: worker, error: workerError }] = await Promise.all([
+    supabase
+      .from("tickets")
+      .select("id, status, source")
+      .eq("id", ticketId)
+      .maybeSingle(),
+    supabase
+      .from("workers")
+      .select("id, name, is_active")
+      .eq("id", workerId)
+      .eq("is_active", true)
+      .maybeSingle(),
+  ]);
+
+  if (ticketError || !ticket) redirect(`/ai-tickets?error=${encodeURIComponent("AI-заявку не знайдено.")}`);
+  if (!["telegram_group", "telegram_private_test"].includes(ticket.source ?? "")) {
+    redirect(`/ai-tickets?error=${encodeURIComponent("Це не AI-заявка Telegram.")}`);
+  }
+  if (workerError || !worker) redirect(`/ai-tickets?error=${encodeURIComponent("Активного виконавця не знайдено.")}`);
+
+  const now = new Date().toISOString();
+  const { error: updateError } = await supabase
+    .from("tickets")
+    .update({
+      assignee_worker_id: worker.id,
+      assigned_at: now,
+      updated_at: now,
+    })
+    .eq("id", ticketId);
+  if (updateError) redirect(`/ai-tickets?error=${encodeURIComponent(updateError.message)}`);
+
+  await addHistory(ticketId, user.id, `Призначено виконавця: ${worker.name}`, {
+    source: "ai_tickets",
+    worker_id: worker.id,
+    worker_name: worker.name,
+  });
+
+  revalidatePath("/ai-tickets");
+  revalidatePath("/tickets");
+  revalidatePath("/workers");
+  revalidatePath(`/tickets/${ticketId}`);
+  redirect("/ai-tickets?success=worker_assigned");
+}

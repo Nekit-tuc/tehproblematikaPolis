@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { hasSupabaseEnv, missingSupabaseMessage } from "@/lib/supabase/env";
-import type { Category, Worker, WorkerStats, WorkerWithCategories } from "@/types/domain";
+import type { Category, TicketWithRelations, Worker, WorkerStats, WorkerWithCategories } from "@/types/domain";
 import type { QueryResult } from "./queries";
 
 function emptyWithError<T>(data: T): QueryResult<T> {
@@ -87,4 +87,24 @@ export async function getWorkerStats(): Promise<QueryResult<WorkerStats[]>> {
   });
 
   return { data: stats, error: null };
+}
+
+const workerTicketSelect = `
+  *,
+  object:objects(*),
+  category:categories(*),
+  creator:profiles!tickets_created_by_fkey(*),
+  assignee:profiles!tickets_assigned_to_fkey(*)
+`;
+
+export async function getTicketsByWorkerId(workerId: string): Promise<QueryResult<TicketWithRelations[]>> {
+  if (!hasSupabaseEnv()) return emptyWithError([]);
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("tickets")
+    .select(workerTicketSelect)
+    .eq("assignee_worker_id", workerId)
+    .order("created_at", { ascending: false });
+
+  return { data: (data ?? []) as TicketWithRelations[], error: error?.message ?? null };
 }
