@@ -45,25 +45,25 @@ export default async function NewTicketPage({ searchParams }: { searchParams: Pr
       {!hasObjects && canShowAdminHints ? (
         <Alert title="Немає активних об'єктів">Додайте хоча б один активний об'єкт у довіднику об'єктів.</Alert>
       ) : null}
-      <Card>
+      <Card className="rounded-3xl border-white/10 bg-white/[0.04] md:rounded-lg">
         <CardHeader><CardTitle>Деталі заявки</CardTitle></CardHeader>
         <CardContent>
           <form action={createTicketAction} className="grid gap-4 md:grid-cols-2">
             <Field label="Назва"><Input name="title" required placeholder="Наприклад: не працює кондиціонер" /></Field>
             <Field label="Категорія">
-              <select name="category_id" required className="h-10 w-full rounded-md border border-input bg-stone-950/30 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring">
+              <select name="category_id" required className="h-11 w-full rounded-2xl border border-input bg-stone-950/30 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring md:h-10 md:rounded-md">
                 <option value="">Оберіть категорію</option>
                 {categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
               </select>
             </Field>
             <Field label="Об'єкт">
-              <select name="object_id" required className="h-10 w-full rounded-md border border-input bg-stone-950/30 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring">
+              <select name="object_id" required className="h-11 w-full rounded-2xl border border-input bg-stone-950/30 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring md:h-10 md:rounded-md">
                 <option value="">Оберіть об'єкт</option>
                 {activeObjects.map((object) => <option key={object.id} value={object.id}>{object.name}</option>)}
               </select>
             </Field>
             <Field label="Пріоритет">
-              <select name="priority" required defaultValue="medium" className="h-10 w-full rounded-md border border-input bg-stone-950/30 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring">
+              <select name="priority" required defaultValue="medium" className="h-11 w-full rounded-2xl border border-input bg-stone-950/30 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring md:h-10 md:rounded-md">
                 <option value="low">Низький</option>
                 <option value="medium">Середній</option>
                 <option value="high">Високий</option>
@@ -71,7 +71,7 @@ export default async function NewTicketPage({ searchParams }: { searchParams: Pr
               </select>
             </Field>
             <Field label="Виконавець">
-              <select name="assigned_to" className="h-10 w-full rounded-md border border-input bg-stone-950/30 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring">
+              <select name="assigned_to" className="h-11 w-full rounded-2xl border border-input bg-stone-950/30 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring md:h-10 md:rounded-md">
                 <option value="">Не призначено</option>
                 {profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.full_name}</option>)}
               </select>
@@ -80,15 +80,15 @@ export default async function NewTicketPage({ searchParams }: { searchParams: Pr
             <div className="md:col-span-2">
               <Field label="Опис"><Textarea name="description" required placeholder="Що сталося, де саме, які симптоми." /></Field>
             </div>
-            <div className="md:col-span-2">
+            <div className="rounded-3xl border border-dashed border-orange-700/50 bg-orange-950/10 p-4 md:col-span-2">
               <Field label="Фото проблеми">
                 <Input name="before_photos" type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" multiple />
                 <p className="text-xs text-muted-foreground">До 5 фото, jpg/jpeg/png/webp, максимум 8 MB кожне. Тип фото: ДО.</p>
               </Field>
             </div>
-            <div className="md:col-span-2 flex justify-end gap-2">
-              <Button variant="outline" type="reset">Очистити</Button>
-              <Button type="submit" disabled={!canSubmit}>Створити заявку</Button>
+            <div className="sticky bottom-24 z-20 -mx-1 grid gap-2 rounded-3xl border border-white/10 bg-[#090909]/90 p-2 backdrop-blur md:static md:col-span-2 md:flex md:justify-end md:border-0 md:bg-transparent md:p-0">
+              <Button variant="outline" type="reset" className="min-h-11 rounded-2xl md:min-h-0 md:rounded-md">Очистити</Button>
+              <Button type="submit" disabled={!canSubmit} className="min-h-11 rounded-2xl md:min-h-0 md:rounded-md">Створити заявку</Button>
             </div>
           </form>
         </CardContent>

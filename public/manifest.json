@@ -1,0 +1,12 @@
+{
+  "name": "Polissya Service Desk",
+  "short_name": "Polissya SD",
+  "description": "Внутрішня система керування технічними заявками",
+  "start_url": "/dashboard",
+  "display": "standalone",
+  "background_color": "#090909",
+  "theme_color": "#090909",
+  "orientation": "portrait",
+  "categories": ["business", "productivity"],
+  "icons": []
+}

@@ -1,4 +1,5 @@
 import { Sidebar } from "@/components/layout/sidebar";
+import { MobileShell } from "@/components/layout/mobile-shell";
 import { Topbar } from "@/components/layout/topbar";
 import { requireAuth } from "@/lib/auth/server";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
@@ -21,7 +22,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="flex">
+      <MobileShell profile={profile} aiTicketsCount={aiTicketsCount}>
+        {children}
+      </MobileShell>
+      <div className="hidden md:flex">
         <Sidebar profile={profile} aiTicketsCount={aiTicketsCount} />
         <main className="min-w-0 flex-1">
           <Topbar profile={profile} />
