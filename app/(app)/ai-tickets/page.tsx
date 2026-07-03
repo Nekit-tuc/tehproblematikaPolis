@@ -123,6 +123,8 @@ export default async function AiTicketsPage({ searchParams }: { searchParams: Pr
       {error || workersResult.error ? <Alert title="Не вдалося завантажити AI-заявки">{error?.message ?? workersResult.error}</Alert> : null}
       {params.error ? <Alert title="Помилка">{decodeURIComponent(params.error)}</Alert> : null}
       {params.success === "confirmed" ? <Alert title="Заявку підтверджено">Статус змінено на нову заявку.</Alert> : null}
+      {params.success === "confirmed_sent" ? <Alert title="AI-заявку підтверджено">AI-заявку підтверджено, виконавця призначено, Telegram надіслано.</Alert> : null}
+      {params.success === "confirmed_no_worker" ? <Alert title="AI-заявку підтверджено">AI-заявку підтверджено, але виконавця не знайдено.</Alert> : null}
       {params.success === "rejected" ? <Alert title="Заявку відхилено">Статус змінено на відхилену.</Alert> : null}
       {params.success === "updated" ? <Alert title="Заявку оновлено">Правки збережено, заявка лишилась на перевірці.</Alert> : null}
       {params.success === "worker_assigned" ? <Alert title="Виконавця призначено">Прив'язку виконавця до AI-заявки збережено.</Alert> : null}

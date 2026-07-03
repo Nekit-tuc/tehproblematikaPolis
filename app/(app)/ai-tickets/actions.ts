@@ -4,6 +4,8 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireRole } from "@/lib/auth/server";
 import { createClient } from "@/lib/supabase/server";
+import { findRecommendedWorkerForTicket } from "@/lib/supabase/worker-queries";
+import { sendTicketToWorker } from "@/lib/telegram/worker-notifications";
 import type { TicketPriority } from "@/types/domain";
 
 function text(formData: FormData, key: string) {
@@ -15,12 +17,16 @@ async function getPendingAiTicket(ticketId: string) {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("tickets")
-    .select("id, status, source")
+    .select("id, status, source, category_id, assignee_worker_id")
     .eq("id", ticketId)
     .eq("status", "pending_review")
     .in("source", ["telegram_group", "telegram_private_test"])
     .maybeSingle();
-  return { supabase, ticket: data as { id: string; status: string; source: string | null } | null, error };
+  return {
+    supabase,
+    ticket: data as { id: string; status: string; source: string | null; category_id: string; assignee_worker_id: string | null } | null,
+    error,
+  };
 }
 
 async function addHistory(ticketId: string, actorId: string, action: string, metadata: Record<string, unknown>) {
@@ -38,17 +44,78 @@ export async function confirmAiTicketAction(ticketId: string) {
   const { supabase, ticket, error } = await getPendingAiTicket(ticketId);
   if (error || !ticket) redirect(`/ai-tickets?error=${encodeURIComponent("AI-заявку не знайдено або її вже опрацьовано.")}`);
 
+  const existingWorkerResult = ticket.assignee_worker_id
+    ? await supabase.from("workers").select("id, name, telegram_id").eq("id", ticket.assignee_worker_id).maybeSingle()
+    : { data: null, error: null };
+
+  if (existingWorkerResult.error) redirect(`/ai-tickets?error=${encodeURIComponent(existingWorkerResult.error.message)}`);
+
+  const recommendedWorkerResult = existingWorkerResult.data
+    ? { data: existingWorkerResult.data, error: null }
+    : await findRecommendedWorkerForTicket(ticket);
+
+  if (recommendedWorkerResult.error) redirect(`/ai-tickets?error=${encodeURIComponent(recommendedWorkerResult.error)}`);
+
+  const worker = recommendedWorkerResult.data;
+  const autoAssigned = !ticket.assignee_worker_id;
+  const now = new Date().toISOString();
+
+  if (!worker) {
+    const { error: updateError } = await supabase
+      .from("tickets")
+      .update({ status: "new", updated_at: now })
+      .eq("id", ticketId);
+    if (updateError) redirect(`/ai-tickets?error=${encodeURIComponent(updateError.message)}`);
+
+    await addHistory(ticketId, user.id, "AI-заявку підтверджено без виконавця", {
+      from: "pending_review",
+      to: "new",
+      reason: "no_available_worker",
+      source: "ai_tickets",
+    });
+    revalidatePath("/ai-tickets");
+    revalidatePath("/tickets");
+    revalidatePath("/dashboard");
+    revalidatePath(`/tickets/${ticketId}`);
+    redirect("/ai-tickets?success=confirmed_no_worker");
+  }
+
   const { error: updateError } = await supabase
     .from("tickets")
-    .update({ status: "new", updated_at: new Date().toISOString() })
+    .update({
+      status: "assigned",
+      assignee_worker_id: worker.id,
+      assigned_at: now,
+      updated_at: now,
+    })
     .eq("id", ticketId);
   if (updateError) redirect(`/ai-tickets?error=${encodeURIComponent(updateError.message)}`);
 
-  await addHistory(ticketId, user.id, "AI-заявку підтверджено", { from: "pending_review", to: "new", source: "ai_tickets" });
+  await addHistory(ticketId, user.id, "AI-заявку підтверджено та призначено виконавця", {
+    from: "pending_review",
+    to: "assigned",
+    worker_id: worker.id,
+    worker_name: worker.name,
+    auto_assigned: autoAssigned,
+    source: "ai_tickets",
+  });
+
+  const telegramResult = await sendTicketToWorker(ticketId, worker.id, user.id);
   revalidatePath("/ai-tickets");
   revalidatePath("/tickets");
+  revalidatePath("/workers");
+  revalidatePath(`/workers/${worker.id}`);
+  revalidatePath(`/tickets/${ticketId}`);
   revalidatePath("/dashboard");
-  redirect("/ai-tickets?success=confirmed");
+  if (telegramResult.ok) redirect("/ai-tickets?success=confirmed_sent");
+
+  await addHistory(ticketId, user.id, "Не вдалося автоматично надіслати заявку виконавцю в Telegram", {
+    source: "ai_tickets",
+    worker_id: worker.id,
+    worker_name: worker.name,
+    error: telegramResult.error,
+  });
+  redirect(`/ai-tickets?error=${encodeURIComponent(`Заявку підтверджено і призначено, але Telegram не надіслано: ${telegramResult.error}`)}`);
 }
 
 export async function rejectAiTicketAction(ticketId: string) {
