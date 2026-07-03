@@ -47,8 +47,7 @@ const ticketSelect = `
   object:objects(*),
   category:categories(*),
   creator:profiles!tickets_created_by_fkey(*),
-  assignee:profiles!tickets_assigned_to_fkey(*),
-  worker:workers!tickets_assignee_worker_id_fkey(*)
+  assignee:profiles!tickets_assigned_to_fkey(*)
 `;
 
 export async function getTickets(): Promise<QueryResult<TicketWithRelations[]>> {

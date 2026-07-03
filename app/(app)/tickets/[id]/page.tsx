@@ -11,10 +11,10 @@ import { canAddTicketPhoto, canConfirmTicket, canEditTicket } from "@/lib/auth/p
 import { requireAuth } from "@/lib/auth/server";
 import { photoTypeLabels } from "@/lib/photos";
 import { getRelatedTicketsBySourceGroup, getTicket, getTicketComments, getTicketHistory, getTicketPhotos } from "@/lib/supabase/queries";
-import { getActiveWorkers, getWorkersByCategory } from "@/lib/supabase/worker-queries";
+import { getActiveWorkers, getWorkerById, getWorkersByCategory } from "@/lib/supabase/worker-queries";
 import { priorityLabels, statusLabels } from "@/lib/labels";
 import { formatDate } from "@/lib/utils";
-import type { PhotoType, TicketPhotoWithUrl, TicketStatus, Worker, WorkerWithCategories } from "@/types/domain";
+import type { PhotoType, TicketPhotoWithUrl, TicketStatus, TicketWithRelations, Worker, WorkerWithCategories } from "@/types/domain";
 import {
   addTicketCommentAction,
   assignWorkerAction,
@@ -47,10 +47,46 @@ export default async function TicketDetailsPage({
   ]);
   const ticket = ticketResult.data;
   if (!ticket && !ticketResult.error) notFound();
-  const relatedResult = ticket?.telegram_source_group_id ? await getRelatedTicketsBySourceGroup(ticket.telegram_source_group_id, ticket.id) : { data: [], error: null };
-  const workersResult = ticket ? await getActiveWorkers() : { data: [] as WorkerWithCategories[], error: null };
-  const recommendedWorkersResult = ticket?.category_id ? await getWorkersByCategory(ticket.category_id) : { data: [] as WorkerWithCategories[], error: null };
-  const error = ticketResult.error ?? commentsResult.error ?? historyResult.error ?? photosResult.error ?? relatedResult.error ?? workersResult.error ?? recommendedWorkersResult.error;
+  let relatedResult = { data: [] as TicketWithRelations[], error: null as string | null };
+  let workersResult = { data: [] as WorkerWithCategories[], error: null as string | null };
+  let recommendedWorkersResult = { data: [] as WorkerWithCategories[], error: null as string | null };
+  let assignedWorker: Worker | WorkerWithCategories | null = null;
+
+  if (ticket) {
+    try {
+      relatedResult = ticket.telegram_source_group_id
+        ? await getRelatedTicketsBySourceGroup(ticket.telegram_source_group_id, ticket.id)
+        : { data: [], error: null };
+    } catch (loadError) {
+      console.error("[ticket-detail] load failed", { scope: "related_tickets", error: loadError });
+    }
+
+    try {
+      workersResult = await getActiveWorkers();
+      if (workersResult.error) console.error("[ticket-detail] load failed", { scope: "workers", error: workersResult.error });
+    } catch (loadError) {
+      console.error("[ticket-detail] load failed", { scope: "workers", error: loadError });
+    }
+
+    try {
+      recommendedWorkersResult = ticket.category_id ? await getWorkersByCategory(ticket.category_id) : { data: [], error: null };
+      if (recommendedWorkersResult.error) console.error("[ticket-detail] load failed", { scope: "recommended_workers", error: recommendedWorkersResult.error });
+    } catch (loadError) {
+      console.error("[ticket-detail] load failed", { scope: "recommended_workers", error: loadError });
+    }
+
+    if (ticket.assignee_worker_id) {
+      try {
+        const workerResult = await getWorkerById(ticket.assignee_worker_id);
+        if (workerResult.error) console.error("[ticket-detail] load failed", { scope: "assigned_worker", error: workerResult.error });
+        assignedWorker = workerResult.data;
+      } catch (loadError) {
+        console.error("[ticket-detail] load failed", { scope: "assigned_worker", error: loadError });
+      }
+    }
+  }
+
+  const error = ticketResult.error ?? commentsResult.error ?? historyResult.error ?? photosResult.error ?? relatedResult.error;
 
   return (
     <div className="page-shell space-y-6">
@@ -119,7 +155,7 @@ export default async function TicketDetailsPage({
               {canConfirmTicket(profile) ? (
                 <WorkerAssignmentCard
                   ticketId={ticket.id}
-                  currentWorker={ticket.worker ?? null}
+                  currentWorker={assignedWorker}
                   workers={workersResult.data}
                   recommendedWorkers={recommendedWorkersResult.data}
                   status={ticket.status}
