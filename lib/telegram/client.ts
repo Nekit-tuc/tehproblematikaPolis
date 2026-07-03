@@ -1,4 +1,4 @@
-type InlineButton = { text: string; callback_data: string };
+type InlineButton = { text: string; callback_data?: string; url?: string };
 
 export type TelegramUser = {
   id: number;

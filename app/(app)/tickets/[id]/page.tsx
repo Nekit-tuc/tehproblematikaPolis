@@ -1,4 +1,4 @@
-import { Camera, Clock, MessageSquare } from "lucide-react";
+import { BriefcaseBusiness, Camera, Clock, MessageSquare, Send } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Alert } from "@/components/ui/alert";
@@ -11,10 +11,21 @@ import { canAddTicketPhoto, canConfirmTicket, canEditTicket } from "@/lib/auth/p
 import { requireAuth } from "@/lib/auth/server";
 import { photoTypeLabels } from "@/lib/photos";
 import { getRelatedTicketsBySourceGroup, getTicket, getTicketComments, getTicketHistory, getTicketPhotos } from "@/lib/supabase/queries";
+import { getActiveWorkers, getWorkersByCategory } from "@/lib/supabase/worker-queries";
 import { priorityLabels, statusLabels } from "@/lib/labels";
 import { formatDate } from "@/lib/utils";
-import type { PhotoType, TicketPhotoWithUrl, TicketStatus } from "@/types/domain";
-import { addTicketCommentAction, confirmTicketAction, rejectTicketAction, updateTicketStatusAction, uploadTicketPhotosAction } from "./actions";
+import type { PhotoType, TicketPhotoWithUrl, TicketStatus, Worker, WorkerWithCategories } from "@/types/domain";
+import {
+  addTicketCommentAction,
+  assignWorkerAction,
+  confirmTicketAction,
+  confirmWorkerCompletionAction,
+  rejectTicketAction,
+  returnWorkerCompletionAction,
+  sendTicketToWorkerAction,
+  updateTicketStatusAction,
+  uploadTicketPhotosAction,
+} from "./actions";
 
 const photoGroups: PhotoType[] = ["before", "progress", "after"];
 
@@ -37,7 +48,9 @@ export default async function TicketDetailsPage({
   const ticket = ticketResult.data;
   if (!ticket && !ticketResult.error) notFound();
   const relatedResult = ticket?.telegram_source_group_id ? await getRelatedTicketsBySourceGroup(ticket.telegram_source_group_id, ticket.id) : { data: [], error: null };
-  const error = ticketResult.error ?? commentsResult.error ?? historyResult.error ?? photosResult.error ?? relatedResult.error;
+  const workersResult = ticket ? await getActiveWorkers() : { data: [] as WorkerWithCategories[], error: null };
+  const recommendedWorkersResult = ticket?.category_id ? await getWorkersByCategory(ticket.category_id) : { data: [] as WorkerWithCategories[], error: null };
+  const error = ticketResult.error ?? commentsResult.error ?? historyResult.error ?? photosResult.error ?? relatedResult.error ?? workersResult.error ?? recommendedWorkersResult.error;
 
   return (
     <div className="page-shell space-y-6">
@@ -94,7 +107,7 @@ export default async function TicketDetailsPage({
                   </CardHeader>
                   <CardContent>
                     <form action={updateTicketStatusAction.bind(null, ticket.id)} className="flex flex-wrap gap-2">
-                      {(["new", "in_progress", "waiting", "done", "cancelled"] as TicketStatus[]).map((status) => (
+                      {(["new", "assigned", "in_progress", "waiting", "waiting_admin_confirmation", "done", "cancelled"] as TicketStatus[]).map((status) => (
                         <Button key={status} type="submit" name="status" value={status} variant={ticket.status === status ? "default" : "outline"}>
                           {statusLabels[status]}
                         </Button>
@@ -102,6 +115,18 @@ export default async function TicketDetailsPage({
                     </form>
                   </CardContent>
                 </Card>
+              ) : null}
+              {canConfirmTicket(profile) ? (
+                <WorkerAssignmentCard
+                  ticketId={ticket.id}
+                  currentWorker={ticket.worker ?? null}
+                  workers={workersResult.data}
+                  recommendedWorkers={recommendedWorkersResult.data}
+                  status={ticket.status}
+                  assignedAt={ticket.assigned_at}
+                  sentAt={ticket.sent_to_worker_at}
+                  completedAt={ticket.worker_completed_at}
+                />
               ) : null}
               {relatedResult.data.length > 0 ? (
                 <Card>
@@ -183,6 +208,92 @@ export default async function TicketDetailsPage({
 
 function Info({ label, value }: { label: string; value: string }) {
   return <div className="rounded-lg border border-border bg-stone-950/30 p-3"><div className="text-xs text-muted-foreground">{label}</div><div className="mt-1 text-sm font-medium">{value}</div></div>;
+}
+
+function WorkerAssignmentCard({
+  ticketId,
+  currentWorker,
+  workers,
+  recommendedWorkers,
+  status,
+  assignedAt,
+  sentAt,
+  completedAt,
+}: {
+  ticketId: string;
+  currentWorker: Worker | WorkerWithCategories | null;
+  workers: WorkerWithCategories[];
+  recommendedWorkers: WorkerWithCategories[];
+  status: TicketStatus;
+  assignedAt?: string | null;
+  sentAt?: string | null;
+  completedAt?: string | null;
+}) {
+  const recommendedIds = new Set(recommendedWorkers.map((worker) => worker.id));
+  const sortedWorkers = [
+    ...recommendedWorkers,
+    ...workers.filter((worker) => !recommendedIds.has(worker.id)),
+  ];
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2"><BriefcaseBusiness className="h-4 w-4" />Виконавець</CardTitle>
+        <CardDescription>Призначення майстра, надсилання заявки в Telegram і підтвердження виконання.</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid gap-3 md:grid-cols-3">
+          <Info label="Поточний виконавець" value={currentWorker?.name ?? "Не призначено"} />
+          <Info label="Призначено" value={formatDate(assignedAt)} />
+          <Info label="Надіслано в Telegram" value={formatDate(sentAt)} />
+        </div>
+
+        <form action={assignWorkerAction.bind(null, ticketId)} className="grid gap-3 md:grid-cols-[1fr_auto]">
+          <select
+            name="workerId"
+            required
+            defaultValue={currentWorker?.id ?? recommendedWorkers[0]?.id ?? ""}
+            className="h-10 w-full rounded-md border border-input bg-stone-950/30 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+          >
+            <option value="">Оберіть виконавця</option>
+            {sortedWorkers.map((worker) => (
+              <option key={worker.id} value={worker.id}>
+                {worker.name}{recommendedIds.has(worker.id) ? " · рекомендовано" : ""}
+              </option>
+            ))}
+          </select>
+          <Button type="submit">Призначити</Button>
+        </form>
+
+        {currentWorker ? (
+          <form action={sendTicketToWorkerAction.bind(null, ticketId)}>
+            <input type="hidden" name="workerId" value={currentWorker.id} />
+            <Button type="submit" variant="outline"><Send className="h-4 w-4" />Надіслати в Telegram</Button>
+          </form>
+        ) : null}
+
+        {status === "waiting_admin_confirmation" ? (
+          <div className="rounded-lg border border-orange-800/60 bg-orange-950/20 p-4">
+            <p className="text-sm font-medium text-orange-100">Виконавець позначив заявку виконаною.</p>
+            <p className="mt-1 text-xs text-muted-foreground">Час відмітки: {formatDate(completedAt)}</p>
+            <div className="mt-4 grid gap-4 md:grid-cols-2">
+              <form action={confirmWorkerCompletionAction.bind(null, ticketId)} className="space-y-3">
+                <select name="rating" defaultValue="5" className="h-10 w-full rounded-md border border-input bg-stone-950/30 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring">
+                  {[5, 4, 3, 2, 1].map((rating) => <option key={rating} value={rating}>{rating} / 5</option>)}
+                </select>
+                <Textarea name="feedback" placeholder="Коментар адміністратора, якщо потрібно" />
+                <Button type="submit">Підтвердити виконання</Button>
+              </form>
+              <form action={returnWorkerCompletionAction.bind(null, ticketId)} className="space-y-3">
+                <Textarea name="feedback" required placeholder="Що потрібно доробити?" />
+                <Button type="submit" variant="outline">Повернути виконавцю</Button>
+              </form>
+            </div>
+          </div>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
 }
 
 function PhotoGroup({

@@ -9,6 +9,7 @@ import { requireRole } from "@/lib/auth/server";
 import { filterTickets, type ReportFilters } from "@/lib/reports/analytics";
 import { objectTypeLabels, priorityLabels, statusLabels } from "@/lib/labels";
 import { getCategories, getObjects, getProfiles, getTickets } from "@/lib/supabase/queries";
+import { getWorkerStats } from "@/lib/supabase/worker-queries";
 import type { TicketPriority, TicketStatus } from "@/types/domain";
 
 function filtersFromSearch(searchParams: Record<string, string | undefined>): ReportFilters {
@@ -35,13 +36,14 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
   await requireRole(["admin", "management", "tech_manager"]);
   const params = await searchParams;
   const filters = filtersFromSearch(params);
-  const [ticketsResult, objectsResult, profilesResult, categoriesResult] = await Promise.all([
+  const [ticketsResult, objectsResult, profilesResult, categoriesResult, workerStatsResult] = await Promise.all([
     getTickets(),
     getObjects(),
     getProfiles(),
     getCategories(),
+    getWorkerStats(),
   ]);
-  const error = ticketsResult.error ?? objectsResult.error ?? profilesResult.error ?? categoriesResult.error;
+  const error = ticketsResult.error ?? objectsResult.error ?? profilesResult.error ?? categoriesResult.error ?? workerStatsResult.error;
   const filteredTickets = filterTickets(ticketsResult.data, filters);
   const exportHref = `/reports/export${queryString(filters) ? `?${queryString(filters)}` : ""}`;
   const reports = [
@@ -120,6 +122,25 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
           </Card>
         ))}
       </div>
+      <Card>
+        <CardHeader>
+          <CardTitle>Звіти по виконавцях</CardTitle>
+          <CardDescription>Огляд призначень, виконання і заявок, що очікують підтвердження адміністратора.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {workerStatsResult.data.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Виконавців поки немає.</p>
+          ) : workerStatsResult.data.map((item) => (
+            <div key={item.worker.id} className="grid gap-2 rounded-lg border border-border bg-stone-950/30 p-3 text-sm md:grid-cols-5">
+              <div className="font-medium text-stone-100">{item.worker.name}</div>
+              <div>Всього: {item.total}</div>
+              <div>Активні: {item.active}</div>
+              <div>Виконано: {item.done}</div>
+              <div>Оцінка: {item.averageRating ? item.averageRating.toFixed(1) : "-"}</div>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
     </div>
   );
 }

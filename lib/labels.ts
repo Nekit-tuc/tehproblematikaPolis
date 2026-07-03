@@ -11,8 +11,10 @@ export const roleLabels: Record<UserRole, string> = {
 export const statusLabels: Record<TicketStatus, string> = {
   pending_review: "Очікує підтвердження",
   new: "Нова",
+  assigned: "Призначена",
   in_progress: "В роботі",
   waiting: "Очікує",
+  waiting_admin_confirmation: "Очікує підтвердження виконання",
   done: "Виконана",
   cancelled: "Скасована",
   rejected: "Відхилена",

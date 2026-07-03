@@ -5,17 +5,22 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { TD, TH, THead, TBody, TR, Table } from "@/components/ui/table";
 import { getObjects, getTickets } from "@/lib/supabase/queries";
+import { getWorkerStats } from "@/lib/supabase/worker-queries";
 import { priorityLabels, statusLabels } from "@/lib/labels";
 
 export default async function DashboardPage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
   const params = await searchParams;
-  const [ticketsResult, objectsResult] = await Promise.all([getTickets(), getObjects()]);
+  const [ticketsResult, objectsResult, workerStatsResult] = await Promise.all([getTickets(), getObjects(), getWorkerStats()]);
   const tickets = ticketsResult.data;
   const objects = objectsResult.data;
   const active = tickets.filter((ticket) => ticket.status !== "done" && ticket.status !== "cancelled");
   const critical = tickets.filter((ticket) => ticket.priority === "critical").length;
   const doneThisWeek = tickets.filter((ticket) => ticket.status === "done").length;
-  const error = ticketsResult.error ?? objectsResult.error;
+  const error = ticketsResult.error ?? objectsResult.error ?? workerStatsResult.error;
+  const topWorkers = workerStatsResult.data
+    .filter((item) => item.total > 0)
+    .sort((a, b) => b.done - a.done || b.total - a.total)
+    .slice(0, 5);
 
   return (
     <div className="page-shell space-y-6">
@@ -59,6 +64,25 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
               </TBody>
             </Table>
           )}
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle>Топ виконавців</CardTitle>
+          <CardDescription>Коротка статистика по призначених і виконаних заявках.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {topWorkers.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Статистика виконавців ще порожня.</p>
+          ) : topWorkers.map((item) => (
+            <div key={item.worker.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-stone-950/30 p-3 text-sm">
+              <div>
+                <div className="font-medium text-stone-100">{item.worker.name}</div>
+                <div className="text-xs text-muted-foreground">Активні: {item.active} · На підтвердженні: {item.waitingConfirmation}</div>
+              </div>
+              <Badge tone="green">Виконано: {item.done}</Badge>
+            </div>
+          ))}
         </CardContent>
       </Card>
     </div>

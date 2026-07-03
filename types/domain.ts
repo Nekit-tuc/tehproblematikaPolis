@@ -1,6 +1,15 @@
 export type UserRole = "admin" | "management" | "tech_manager" | "worker" | "store_manager";
 export type ObjectType = "store" | "warehouse" | "production" | "office" | "other";
-export type TicketStatus = "pending_review" | "new" | "in_progress" | "waiting" | "done" | "cancelled" | "rejected";
+export type TicketStatus =
+  | "pending_review"
+  | "new"
+  | "assigned"
+  | "in_progress"
+  | "waiting"
+  | "waiting_admin_confirmation"
+  | "done"
+  | "cancelled"
+  | "rejected";
 export type TicketPriority = "low" | "medium" | "high" | "critical";
 export type PhotoType = "before" | "progress" | "after";
 
@@ -40,6 +49,39 @@ export interface Category {
   created_at: string;
 }
 
+export interface Worker {
+  id: string;
+  name: string;
+  phone?: string | null;
+  telegram_username?: string | null;
+  telegram_id?: string | null;
+  is_active: boolean;
+  notes?: string | null;
+  created_at: string;
+  updated_at?: string | null;
+}
+
+export interface WorkerCategory {
+  id: string;
+  worker_id: string;
+  category_id: string;
+  created_at: string;
+}
+
+export interface WorkerWithCategories extends Worker {
+  worker_categories?: Array<WorkerCategory & { category?: Category | null }> | null;
+  categories?: Category[];
+}
+
+export interface WorkerStats {
+  worker: Worker;
+  total: number;
+  active: number;
+  done: number;
+  waitingConfirmation: number;
+  averageRating: number | null;
+}
+
 export interface Ticket {
   id: string;
   number: string;
@@ -51,8 +93,15 @@ export interface Ticket {
   category_id: string;
   created_by: string;
   assigned_to?: string | null;
+  assignee_worker_id?: string | null;
   due_at?: string | null;
   completed_at?: string | null;
+  assigned_at?: string | null;
+  sent_to_worker_at?: string | null;
+  worker_completed_at?: string | null;
+  admin_confirmed_at?: string | null;
+  admin_rating?: number | null;
+  admin_feedback?: string | null;
   source?: string | null;
   telegram_chat_id?: string | null;
   telegram_message_id?: string | null;
@@ -103,6 +152,7 @@ export interface TicketWithRelations extends Ticket {
   category?: Category | null;
   creator?: Profile | null;
   assignee?: Profile | null;
+  worker?: Worker | null;
 }
 
 export interface TicketCommentWithAuthor extends TicketComment {
