@@ -80,7 +80,7 @@ export default async function WorkersPage({
                 </div>
                 {worker.notes ? <p className="break-words text-sm text-muted-foreground">{worker.notes}</p> : null}
                 <Button asChild variant="outline">
-                  <Link href={`/workers/${worker.id}`}>Переглянути заявки</Link>
+                  <Link href={`/workers/${worker.id}`}>Заявки виконавця</Link>
                 </Button>
                 <details className="rounded-lg border border-border bg-stone-950/30 p-3">
                   <summary className="cursor-pointer list-none text-sm font-medium text-orange-200">

@@ -80,7 +80,6 @@ export async function updateAiTicketAction(ticketId: string, formData: FormData)
   const categoryId = text(formData, "category_id");
   const priority = text(formData, "priority") as TicketPriority;
   const recommendedDepartment = text(formData, "recommended_department");
-  const assignedTo = text(formData, "assigned_to");
 
   if (!title || !description || !objectId || !categoryId || !priority) {
     redirect(`/ai-tickets?error=${encodeURIComponent("Заповніть назву, опис, обʼєкт, категорію та пріоритет.")}`);
@@ -95,7 +94,6 @@ export async function updateAiTicketAction(ticketId: string, formData: FormData)
       category_id: categoryId,
       priority,
       recommended_department: recommendedDepartment || null,
-      assigned_to: assignedTo || null,
       updated_at: new Date().toISOString(),
     })
     .eq("id", ticketId);
@@ -156,6 +154,7 @@ export async function assignWorkerToAiTicketAction(ticketId: string, formData: F
   revalidatePath("/ai-tickets");
   revalidatePath("/tickets");
   revalidatePath("/workers");
+  revalidatePath(`/workers/${worker.id}`);
   revalidatePath(`/tickets/${ticketId}`);
   redirect("/ai-tickets?success=worker_assigned");
 }

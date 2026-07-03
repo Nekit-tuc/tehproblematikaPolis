@@ -12,7 +12,7 @@ import { requireRole } from "@/lib/auth/server";
 import { createClient } from "@/lib/supabase/server";
 import { getActiveWorkers } from "@/lib/supabase/worker-queries";
 import { formatDate } from "@/lib/utils";
-import type { Category, CompanyObject, Profile, TicketPriority, TicketWithRelations, WorkerWithCategories } from "@/types/domain";
+import type { Category, CompanyObject, TicketPriority, TicketWithRelations, WorkerWithCategories } from "@/types/domain";
 import { assignWorkerToAiTicketAction, confirmAiTicketAction, rejectAiTicketAction, updateAiTicketAction } from "./actions";
 
 const priorities: TicketPriority[] = ["low", "medium", "high", "critical"];
@@ -93,7 +93,7 @@ export default async function AiTicketsPage({ searchParams }: { searchParams: Pr
   await requireRole(["admin", "management", "tech_manager"]);
   const params = await searchParams;
   const supabase = await createClient();
-  const [{ data: ticketsData, error }, { data: objectsData }, { data: categoriesData }, { data: profilesData }, workersResult] = await Promise.all([
+  const [{ data: ticketsData, error }, { data: objectsData }, { data: categoriesData }, workersResult] = await Promise.all([
     supabase
       .from("tickets")
       .select(ticketSelect)
@@ -102,14 +102,12 @@ export default async function AiTicketsPage({ searchParams }: { searchParams: Pr
       .order("created_at", { ascending: false }),
     supabase.from("objects").select("*").order("name"),
     supabase.from("categories").select("*").order("name"),
-    supabase.from("profiles").select("*").eq("is_active", true).order("full_name"),
     getActiveWorkers(),
   ]);
 
   const tickets = (ticketsData ?? []) as TicketWithRelations[];
   const objects = (objectsData ?? []) as CompanyObject[];
   const categories = (categoriesData ?? []) as Category[];
-  const profiles = (profilesData ?? []) as Profile[];
   const workers = workersResult.data;
   const workersById = new Map(workers.map((worker) => [worker.id, worker]));
   const visibleTickets = filterTickets(tickets, params);
@@ -245,7 +243,6 @@ export default async function AiTicketsPage({ searchParams }: { searchParams: Pr
               related={ticket.telegram_source_group_id ? relatedGroups[ticket.telegram_source_group_id] ?? [] : []}
               objects={objects}
               categories={categories}
-              profiles={profiles}
               workers={workers}
               assignedWorker={ticket.assignee_worker_id ? workersById.get(ticket.assignee_worker_id) ?? null : null}
             />
@@ -261,7 +258,6 @@ function AiTicketCard({
   related,
   objects,
   categories,
-  profiles,
   workers,
   assignedWorker,
 }: {
@@ -269,7 +265,6 @@ function AiTicketCard({
   related: TicketWithRelations[];
   objects: CompanyObject[];
   categories: Category[];
-  profiles: Profile[];
   workers: WorkerWithCategories[];
   assignedWorker: WorkerWithCategories | null;
 }) {
@@ -301,7 +296,7 @@ function AiTicketCard({
           <Info label="Категорія" value={ticket.category?.name ?? "-"} />
           <Info label="Підрозділ" value={ticket.recommended_department ?? "-"} />
           <Info label="Telegram автор" value={ticket.telegram_user_name ?? ticket.telegram_user_id ?? "-"} />
-          <Info label="Виконавець" value={assignedWorker?.name ?? (ticket.assignee_worker_id ? "Виконавець не знайдений" : "Не призначено")} />
+          <Info label="Закріплено" value={assignedWorker?.name ?? (ticket.assignee_worker_id ? "Виконавець не знайдений" : "Не призначено")} />
           <Info label="Номер" value={ticket.number} />
           <Info label="Group ID" value={ticket.telegram_source_group_id ?? "-"} />
         </div>
@@ -365,12 +360,6 @@ function AiTicketCard({
             <Field label="Рекомендований підрозділ">
               <Input name="recommended_department" defaultValue={ticket.recommended_department ?? ""} />
             </Field>
-            <Field label="Виконавець">
-              <Select name="assigned_to" defaultValue={ticket.assigned_to ?? ""}>
-                <option value="">Не призначено</option>
-                {profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.full_name}</option>)}
-              </Select>
-            </Field>
             <div className="md:col-span-2">
               <Field label="Опис">
                 <Textarea name="description" required defaultValue={ticket.description} className="min-h-32" />
@@ -413,9 +402,9 @@ function WorkerAssignPanel({
     <div className="rounded-2xl border border-orange-900/50 bg-orange-950/10 p-2.5 md:rounded-md md:p-3">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
-          <div className="text-sm font-medium text-orange-100">Виконавець</div>
+          <div className="text-sm font-medium text-orange-100">Виконавці</div>
           <p className="mt-1 text-xs text-muted-foreground">
-            {assignedWorker ? `Призначено: ${assignedWorker.name}` : ticket.assignee_worker_id ? "Виконавець не знайдений" : "Ще не призначено"}
+            {assignedWorker ? `Закріплено: ${assignedWorker.name}` : ticket.assignee_worker_id ? "Виконавець не знайдений" : "Ще не призначено"}
           </p>
         </div>
         {assignedWorker?.telegram_username ? <Badge>@{assignedWorker.telegram_username}</Badge> : null}
@@ -434,7 +423,7 @@ function WorkerAssignPanel({
             </option>
           ))}
         </select>
-        <Button type="submit" variant="outline" className="min-h-11 rounded-2xl md:min-h-0 md:rounded-md">Зберегти</Button>
+        <Button type="submit" variant="outline" className="min-h-11 rounded-2xl md:min-h-0 md:rounded-md">Зберегти виконавця</Button>
       </form>
       <p className="mt-2 text-xs text-muted-foreground">Telegram не надсилається автоматично.</p>
     </div>

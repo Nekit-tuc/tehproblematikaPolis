@@ -76,7 +76,9 @@ export default async function WorkerTicketsPage({
 
           {tickets.length === 0 ? (
             <Card className="rounded-3xl border-white/10 bg-white/[0.04]">
-              <CardContent className="pt-5 text-sm text-muted-foreground">Заявок у цьому фільтрі немає.</CardContent>
+              <CardContent className="pt-5 text-sm text-muted-foreground">
+                {ticketsResult.data.length === 0 ? "На цьому виконавці ще немає закріплених заявок." : "Заявок у цьому фільтрі немає."}
+              </CardContent>
             </Card>
           ) : (
             <div className="grid gap-3 md:gap-4">
