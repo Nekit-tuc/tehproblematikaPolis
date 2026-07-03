@@ -52,22 +52,22 @@ export default async function TicketDetailsPage({
         <Card><CardContent className="pt-5 text-sm text-muted-foreground">Заявку не знайдено.</CardContent></Card>
       ) : (
         <>
-          <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="mobile-gradient-card p-4 md:border-0 md:bg-transparent md:p-0 md:shadow-none flex flex-wrap items-start justify-between gap-4">
             <div>
               <p className="text-sm text-orange-300">{ticket.number}</p>
               <h1 className="mt-1 text-2xl font-semibold">{ticket.title}</h1>
               <p className="subtle">{ticket.object?.name ?? "-"} · {ticket.object?.city ?? "-"}, {ticket.object?.address ?? "-"}</p>
             </div>
-            <div className="flex flex-wrap justify-end gap-2">
+            <div className="grid w-full gap-2 md:flex md:w-auto md:flex-wrap md:justify-end">
               <Badge tone="orange">{statusLabels[ticket.status]}</Badge>
               <Badge tone={ticket.priority === "critical" ? "red" : "default"}>{priorityLabels[ticket.priority]}</Badge>
               {canConfirmTicket(profile) && ticket.status === "pending_review" ? (
                 <>
                   <form action={confirmTicketAction.bind(null, ticket.id)}>
-                    <Button type="submit">Підтвердити заявку</Button>
+                    <Button type="submit" className="min-h-11 w-full rounded-2xl md:min-h-0 md:w-auto md:rounded-md">Підтвердити заявку</Button>
                   </form>
                   <form action={rejectTicketAction.bind(null, ticket.id)}>
-                    <Button type="submit" variant="destructive">Відхилити заявку</Button>
+                    <Button type="submit" variant="destructive" className="min-h-11 w-full rounded-2xl md:min-h-0 md:w-auto md:rounded-md">Відхилити заявку</Button>
                   </form>
                 </>
               ) : null}
@@ -75,7 +75,7 @@ export default async function TicketDetailsPage({
           </div>
           <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
             <div className="space-y-6">
-              <Card>
+              <Card className="rounded-3xl border-white/10 bg-white/[0.04] md:rounded-lg">
                 <CardHeader><CardTitle>Опис робіт</CardTitle></CardHeader>
                 <CardContent className="space-y-4">
                   <p className="text-sm leading-6 text-stone-300">{ticket.description}</p>
@@ -87,15 +87,15 @@ export default async function TicketDetailsPage({
                 </CardContent>
               </Card>
               {canEditTicket(profile, ticket) ? (
-                <Card>
+                <Card className="rounded-3xl border-white/10 bg-white/[0.04] md:rounded-lg">
                   <CardHeader>
                     <CardTitle>Керування статусом</CardTitle>
                     <CardDescription>Швидка зміна етапу виконання заявки.</CardDescription>
                   </CardHeader>
                   <CardContent>
-                    <form action={updateTicketStatusAction.bind(null, ticket.id)} className="flex flex-wrap gap-2">
+                    <form action={updateTicketStatusAction.bind(null, ticket.id)} className="grid grid-cols-2 gap-2 md:flex md:flex-wrap">
                       {(["new", "in_progress", "waiting", "done", "cancelled"] as TicketStatus[]).map((status) => (
-                        <Button key={status} type="submit" name="status" value={status} variant={ticket.status === status ? "default" : "outline"}>
+                        <Button key={status} type="submit" name="status" value={status} variant={ticket.status === status ? "default" : "outline"} className="min-h-11 rounded-2xl md:min-h-0 md:rounded-md">
                           {statusLabels[status]}
                         </Button>
                       ))}
@@ -104,7 +104,7 @@ export default async function TicketDetailsPage({
                 </Card>
               ) : null}
               {relatedResult.data.length > 0 ? (
-                <Card>
+                <Card className="rounded-3xl border-white/10 bg-white/[0.04] md:rounded-lg">
                   <CardHeader>
                     <CardTitle>Пов'язані заявки з цього повідомлення</CardTitle>
                     <CardDescription>Ці заявки створені з того самого повідомлення Telegram-групи.</CardDescription>
@@ -126,7 +126,7 @@ export default async function TicketDetailsPage({
                   </CardContent>
                 </Card>
               ) : null}
-              <Card>
+              <Card className="rounded-3xl border-white/10 bg-white/[0.04] md:rounded-lg">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2"><Camera className="h-4 w-4" />Фото заявки</CardTitle>
                   <CardDescription>Фото зберігаються в приватному Supabase Storage bucket `ticket-photos`.</CardDescription>
@@ -143,7 +143,7 @@ export default async function TicketDetailsPage({
                   ))}
                 </CardContent>
               </Card>
-              <Card>
+              <Card className="rounded-3xl border-white/10 bg-white/[0.04] md:rounded-lg">
                 <CardHeader><CardTitle className="flex items-center gap-2"><MessageSquare className="h-4 w-4" />Коментарі</CardTitle></CardHeader>
                 <CardContent className="space-y-4">
                   {commentsResult.data.length === 0 ? (
@@ -156,12 +156,12 @@ export default async function TicketDetailsPage({
                   ))}
                   <form action={addTicketCommentAction.bind(null, ticket.id)} className="space-y-3">
                     <Textarea name="body" required placeholder="Додати коментар для команди" />
-                    <Button type="submit">Надіслати</Button>
+                    <Button type="submit" className="min-h-11 rounded-2xl md:min-h-0 md:rounded-md">Надіслати</Button>
                   </form>
                 </CardContent>
               </Card>
             </div>
-            <Card>
+            <Card className="rounded-3xl border-white/10 bg-white/[0.04] md:rounded-lg">
               <CardHeader><CardTitle className="flex items-center gap-2"><Clock className="h-4 w-4" />Історія дій</CardTitle></CardHeader>
               <CardContent className="space-y-4">
                 {historyResult.data.length === 0 ? (

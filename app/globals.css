@@ -37,4 +37,14 @@
   .page-shell { @apply mx-auto w-full max-w-7xl px-5 py-6; }
   .section-title { @apply text-xl font-semibold tracking-normal text-stone-100; }
   .subtle { @apply text-sm text-muted-foreground; }
+  .mobile-card { @apply rounded-3xl border border-white/10 bg-white/[0.04] shadow-lg shadow-black/20; }
+  .mobile-gradient-card { @apply rounded-3xl border border-white/10 bg-gradient-to-br from-white/[0.08] to-white/[0.025] shadow-lg shadow-black/20; }
+  .mobile-input { @apply min-h-11 rounded-2xl; }
+}
+
+@media (max-width: 767px) {
+  html, body { overflow-x: hidden; background: #090909; }
+  .page-shell { width: 100%; max-width: none; padding: 1rem 1rem 7rem; }
+  table { min-width: 720px; }
+  input, select, textarea, button { font-size: 16px; }
 }

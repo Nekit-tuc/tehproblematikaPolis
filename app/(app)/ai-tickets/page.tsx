@@ -124,7 +124,14 @@ export default async function AiTicketsPage({ searchParams }: { searchParams: Pr
       {params.success === "rejected" ? <Alert title="Заявку відхилено">Статус змінено на відхилену.</Alert> : null}
       {params.success === "updated" ? <Alert title="Заявку оновлено">Правки збережено, заявка лишилась на перевірці.</Alert> : null}
 
-      <Card>
+      <div className="flex gap-2 overflow-x-auto pb-1 md:hidden">
+        <Link href="/ai-tickets" className="rounded-full bg-orange-500 px-4 py-2 text-sm font-semibold text-stone-950">Очікують</Link>
+        <span className="rounded-full border border-white/10 bg-white/[0.03] px-4 py-2 text-sm text-stone-400">Всі</span>
+        <span className="rounded-full border border-white/10 bg-white/[0.03] px-4 py-2 text-sm text-stone-400">Підтверджені</span>
+        <span className="rounded-full border border-white/10 bg-white/[0.03] px-4 py-2 text-sm text-stone-400">Відхилені</span>
+      </div>
+
+      <Card className="md:rounded-lg rounded-3xl border-white/10 bg-white/[0.04]">
         <CardHeader>
           <CardTitle>Фільтри</CardTitle>
           <CardDescription>Знайдено: {visibleTickets.length}</CardDescription>
@@ -163,16 +170,16 @@ export default async function AiTicketsPage({ searchParams }: { searchParams: Pr
             <Field label="Дата">
               <Input type="date" name="date" defaultValue={params.date ?? ""} />
             </Field>
-            <div className="flex items-end gap-2 md:col-span-3 xl:col-span-6">
-              <Button type="submit">Застосувати</Button>
-              <Button variant="outline" asChild><Link href="/ai-tickets">Скинути</Link></Button>
+            <div className="flex flex-col gap-2 md:col-span-3 md:flex-row md:items-end xl:col-span-6">
+              <Button type="submit" className="min-h-11 rounded-2xl md:min-h-0 md:rounded-md">Застосувати</Button>
+              <Button variant="outline" asChild className="min-h-11 rounded-2xl md:min-h-0 md:rounded-md"><Link href="/ai-tickets">Скинути</Link></Button>
             </div>
           </form>
         </CardContent>
       </Card>
 
       {visibleTickets.length === 0 ? (
-        <Card>
+        <Card className="rounded-3xl border-white/10 bg-white/[0.04]">
           <CardContent className="pt-6 text-sm text-muted-foreground">AI-заявок на підтвердження немає.</CardContent>
         </Card>
       ) : (
@@ -209,7 +216,7 @@ function AiTicketCard({
   const siblingTickets = related.filter((item) => item.id !== ticket.id);
   const objectResolverConfidence = resolverConfidence(ticket);
   return (
-    <Card>
+    <Card className="rounded-3xl border-white/10 bg-white/[0.04] md:rounded-lg">
       <CardHeader>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -262,17 +269,17 @@ function AiTicketCard({
           </div>
         ) : null}
 
-        <div className="flex flex-wrap gap-2">
+        <div className="grid gap-2 md:flex md:flex-wrap">
           <form action={confirmAiTicketAction.bind(null, ticket.id)}>
-            <Button type="submit">✅ Підтвердити</Button>
+            <Button type="submit" className="min-h-11 w-full rounded-2xl md:min-h-0 md:w-auto md:rounded-md">✅ Підтвердити</Button>
           </form>
           <form action={rejectAiTicketAction.bind(null, ticket.id)}>
-            <Button type="submit" variant="destructive">❌ Відхилити</Button>
+            <Button type="submit" variant="destructive" className="min-h-11 w-full rounded-2xl md:min-h-0 md:w-auto md:rounded-md">❌ Відхилити</Button>
           </form>
-          <Button asChild variant="outline"><Link href={`/tickets/${ticket.id}`}>Відкрити картку</Link></Button>
+          <Button asChild variant="outline" className="min-h-11 w-full rounded-2xl md:min-h-0 md:w-auto md:rounded-md"><Link href={`/tickets/${ticket.id}`}>Відкрити картку</Link></Button>
         </div>
 
-        <details className="rounded-md border border-border bg-stone-950/20 p-3">
+        <details className="rounded-2xl border border-white/10 bg-stone-950/20 p-3 md:rounded-md">
           <summary className="cursor-pointer text-sm font-medium text-orange-200">✏️ Редагувати перед підтвердженням</summary>
           <form action={updateAiTicketAction.bind(null, ticket.id)} className="mt-4 grid gap-4 md:grid-cols-2">
             <Field label="Назва">
