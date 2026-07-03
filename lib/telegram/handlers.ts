@@ -127,6 +127,7 @@ export async function handleTelegramCallback(callback: TelegramCallbackQuery) {
   const telegramId = telegramIdFromCallback(callback);
   const chatId = callback.message?.chat.id;
   if (!chatId || !callback.data) return;
+
   await answerCallbackQuery(callback.id);
 
   const profile = await requireProfile(telegramId, chatId);

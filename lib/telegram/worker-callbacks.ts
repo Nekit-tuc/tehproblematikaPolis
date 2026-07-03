@@ -32,7 +32,7 @@ export async function handleWorkerDoneCallback(callback: TelegramCallbackQuery) 
   const callbackDataLength = Buffer.byteLength(callbackData, "utf8");
   const token = callbackData.startsWith("wd:") ? callbackData.slice(3).trim() : "";
 
-  logWorkerCallback({ handled: true, stage: "received", callbackData, callbackDataLength, token });
+  logWorkerCallback({ handled: true, stage: "received", callbackData, callbackDataLength, token, actionFound: false });
 
   if (!token) {
     await answerCallbackQuery(callback.id, "Некоректна кнопка.");
@@ -49,28 +49,29 @@ export async function handleWorkerDoneCallback(callback: TelegramCallbackQuery) 
   const action = actionRow as WorkerTicketAction | null;
   if (actionError || !action) {
     await answerCallbackQuery(callback.id, "Кнопка недійсна або застаріла.");
-    logWorkerCallback({ handled: true, stage: "action_not_found", callbackData, callbackDataLength, token, error: actionError?.message ?? null });
+    logWorkerCallback({ handled: true, stage: "action_not_found", callbackData, callbackDataLength, token, actionFound: false, error: actionError?.message ?? null });
     return { handled: true, ok: false, reason: "token_not_found" } as const;
   }
 
   const ticketId = action.ticket_id;
   const workerId = action.worker_id;
-  logWorkerCallback({ handled: true, stage: "action_found", token, ticketId, workerId, action: action.action });
+  logWorkerCallback({ handled: true, stage: "action_found", callbackData, callbackDataLength, token, actionFound: true, ticketId, workerId, action: action.action });
 
   if (action.action !== "worker_done") {
     await answerCallbackQuery(callback.id, "Некоректна дія.");
+    logWorkerCallback({ handled: true, stage: "invalid_action", callbackData, callbackDataLength, token, actionFound: true, ticketId, workerId, action: action.action });
     return { handled: true, ok: false, reason: "invalid_action" } as const;
   }
 
   if (action.used_at) {
     await answerCallbackQuery(callback.id, "Ця дія вже була виконана.");
-    logWorkerCallback({ handled: true, stage: "already_used", token, ticketId, workerId });
+    logWorkerCallback({ handled: true, stage: "already_used", callbackData, callbackDataLength, token, actionFound: true, ticketId, workerId });
     return { handled: true, ok: false, reason: "token_already_used" } as const;
   }
 
   if (action.expires_at && new Date(action.expires_at).getTime() < Date.now()) {
     await answerCallbackQuery(callback.id, "Кнопка недійсна або застаріла.");
-    logWorkerCallback({ handled: true, stage: "expired", token, ticketId, workerId });
+    logWorkerCallback({ handled: true, stage: "expired", callbackData, callbackDataLength, token, actionFound: true, ticketId, workerId });
     return { handled: true, ok: false, reason: "token_expired" } as const;
   }
 
@@ -84,31 +85,31 @@ export async function handleWorkerDoneCallback(callback: TelegramCallbackQuery) 
 
   if (ticketError || !ticket) {
     await answerCallbackQuery(callback.id, "Заявку не знайдено.");
-    logWorkerCallback({ handled: true, stage: "ticket_not_found", token, ticketId, workerId, error: ticketError?.message ?? null });
+    logWorkerCallback({ handled: true, stage: "ticket_not_found", callbackData, callbackDataLength, token, actionFound: true, ticketId, workerId, error: ticketError?.message ?? null });
     return { handled: true, ok: false, reason: "ticket_not_found" } as const;
   }
 
   if (workerError || !worker) {
     await answerCallbackQuery(callback.id, "Виконавця не знайдено.");
-    logWorkerCallback({ handled: true, stage: "worker_not_found", token, ticketId, workerId, error: workerError?.message ?? null });
+    logWorkerCallback({ handled: true, stage: "worker_not_found", callbackData, callbackDataLength, token, actionFound: true, ticketId, workerId, error: workerError?.message ?? null });
     return { handled: true, ok: false, reason: "worker_not_found" } as const;
   }
 
   if (ticket.status === "done") {
     await answerCallbackQuery(callback.id, "Заявка вже завершена.");
-    logWorkerCallback({ handled: true, stage: "already_completed", token, ticketId, workerId, previousStatus: ticket.status });
+    logWorkerCallback({ handled: true, stage: "already_completed", callbackData, callbackDataLength, token, actionFound: true, ticketId, workerId, previousStatus: ticket.status, newStatus: ticket.status });
     return { handled: true, ok: false, reason: "ticket_already_completed" } as const;
   }
 
   if (ticket.assignee_worker_id !== workerId) {
     await answerCallbackQuery(callback.id, "Заявка вже не призначена цьому виконавцю.");
-    logWorkerCallback({ handled: true, stage: "assignment_mismatch", token, ticketId, workerId, currentAssigneeWorkerId: ticket.assignee_worker_id });
+    logWorkerCallback({ handled: true, stage: "assignment_mismatch", callbackData, callbackDataLength, token, actionFound: true, ticketId, workerId, previousStatus: ticket.status, currentAssigneeWorkerId: ticket.assignee_worker_id });
     return { handled: true, ok: false, reason: "assignment_mismatch" } as const;
   }
 
   if (worker.telegram_id && String(worker.telegram_id) !== String(callback.from.id)) {
     await answerCallbackQuery(callback.id, "Ця заявка призначена іншому виконавцю.");
-    logWorkerCallback({ handled: true, stage: "telegram_id_mismatch", token, ticketId, workerId, telegramUserId: callback.from.id });
+    logWorkerCallback({ handled: true, stage: "telegram_id_mismatch", callbackData, callbackDataLength, token, actionFound: true, ticketId, workerId, previousStatus: ticket.status, telegramUserId: callback.from.id });
     return { handled: true, ok: false, reason: "telegram_id_mismatch" } as const;
   }
 
@@ -122,7 +123,7 @@ export async function handleWorkerDoneCallback(callback: TelegramCallbackQuery) 
 
   if (updateResult.error) {
     await answerCallbackQuery(callback.id, "Не вдалося оновити заявку.");
-    logWorkerCallback({ handled: false, stage: "ticket_update_failed", token, ticketId, workerId, error: updateResult.error.message });
+    logWorkerCallback({ handled: false, stage: "ticket_update_failed", callbackData, callbackDataLength, token, actionFound: true, ticketId, workerId, previousStatus: ticket.status, newStatus, error: updateResult.error.message });
     return { handled: true, ok: false, reason: updateResult.error.message } as const;
   }
 
@@ -149,6 +150,7 @@ export async function handleWorkerDoneCallback(callback: TelegramCallbackQuery) 
     handled: true,
     stage: "completed",
     token,
+    actionFound: true,
     ticketId,
     workerId,
     previousStatus: ticket.status,
