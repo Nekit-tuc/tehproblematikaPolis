@@ -37,7 +37,7 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
     return result;
   }
   if (update.callback_query) {
-    if (update.callback_query.data?.startsWith("worker_done:")) {
+    if (update.callback_query.data?.startsWith("wd:")) {
       await handleWorkerDoneCallback(update.callback_query);
       return { handled: true, created: false, reason: "worker_done_callback_processed" } as const;
     }

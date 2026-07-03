@@ -1,3 +1,4 @@
+import { randomBytes } from "crypto";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendTelegramMessage } from "@/lib/telegram/client";
 
@@ -5,6 +6,34 @@ type SendResult = { ok: true } | { ok: false; error: string };
 
 function appUrl() {
   return (process.env.NEXT_PUBLIC_APP_URL ?? "").replace(/\/$/, "");
+}
+
+function createActionToken() {
+  return randomBytes(9).toString("base64url");
+}
+
+async function createWorkerDoneToken(ticketId: string, workerId: string) {
+  const supabase = createAdminClient();
+
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const token = createActionToken();
+    const { error } = await supabase.from("worker_ticket_actions").insert({
+      token,
+      ticket_id: ticketId,
+      worker_id: workerId,
+      action: "worker_done",
+      expires_at: new Date(Date.now() + 1000 * 60 * 60 * 24 * 30).toISOString(),
+    });
+
+    if (!error) {
+      console.info("[telegram-worker]", { result: "token_created", ticketId, workerId, tokenLength: token.length });
+      return { token, error: null };
+    }
+
+    if (!error.message.toLowerCase().includes("duplicate")) return { token: null, error: error.message };
+  }
+
+  return { token: null, error: "Не вдалося створити короткий Telegram token." };
 }
 
 export async function sendTicketToWorker(ticketId: string, workerId: string, actorId?: string | null): Promise<SendResult> {
@@ -33,6 +62,10 @@ export async function sendTicketToWorker(ticketId: string, workerId: string, act
     if (error) return { ok: false, error: error.message };
   }
 
+  const tokenResult = await createWorkerDoneToken(ticketId, workerId);
+  if (!tokenResult.token) return { ok: false, error: tokenResult.error ?? "Не вдалося створити Telegram token." };
+
+  const callbackData = `wd:${tokenResult.token}`;
   const url = appUrl() ? `${appUrl()}/tickets/${ticketId}` : undefined;
   const text = [
     `Нова заявка ${ticket.number}`,
@@ -46,12 +79,31 @@ export async function sendTicketToWorker(ticketId: string, workerId: string, act
     ticket.description,
   ].join("\n");
 
-  await sendTelegramMessage(worker.telegram_id, text, [
-    [
-      ...(url ? [{ text: "Відкрити заявку", url }] : []),
-      { text: "Виконав", callback_data: `worker_done:${ticketId}:${workerId}` },
-    ],
-  ]);
+  console.info("[telegram-worker]", {
+    result: "send_attempt",
+    ticketId,
+    workerId,
+    callbackDataLength: Buffer.byteLength(callbackData, "utf8"),
+    tokenCreated: true,
+  });
+
+  try {
+    await sendTelegramMessage(worker.telegram_id, text, [
+      [
+        ...(url ? [{ text: "Відкрити заявку", url }] : []),
+        { text: "Виконав", callback_data: callbackData },
+      ],
+    ]);
+  } catch (error) {
+    console.error("[telegram-worker]", {
+      result: "send_error",
+      ticketId,
+      workerId,
+      callbackDataLength: Buffer.byteLength(callbackData, "utf8"),
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return { ok: false, error: error instanceof Error ? error.message : "Telegram send failed" };
+  }
 
   const now = new Date().toISOString();
   const { error } = await supabase
@@ -65,9 +117,14 @@ export async function sendTicketToWorker(ticketId: string, workerId: string, act
     ticket_id: ticketId,
     actor_id: actorId ?? null,
     action: "Заявку надіслано виконавцю в Telegram",
-    metadata: { worker_id: workerId },
+    metadata: { worker_id: workerId, callback_data_length: Buffer.byteLength(callbackData, "utf8") },
   });
 
-  console.info("[telegram-worker]", { result: "sent", ticketId, workerId });
+  console.info("[telegram-worker]", {
+    result: "send_success",
+    ticketId,
+    workerId,
+    callbackDataLength: Buffer.byteLength(callbackData, "utf8"),
+  });
   return { ok: true };
 }

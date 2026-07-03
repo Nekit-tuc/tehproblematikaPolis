@@ -130,7 +130,7 @@ export default async function TicketDetailsPage({
                   <p className="text-sm leading-6 text-stone-300">{ticket.description}</p>
                   <div className="grid gap-3 md:grid-cols-3">
                     <Info label="Категорія" value={ticket.category?.name ?? "-"} />
-                    <Info label="Виконавець" value={ticket.assignee?.full_name ?? "Не призначено"} />
+                    <Info label="Виконавець" value={workerDisplayName(assignedWorker, ticket.assignee_worker_id)} />
                     <Info label="Термін" value={formatDate(ticket.due_at)} />
                   </div>
                 </CardContent>
@@ -155,6 +155,7 @@ export default async function TicketDetailsPage({
               {canConfirmTicket(profile) ? (
                 <WorkerAssignmentCard
                   ticketId={ticket.id}
+                  assignedWorkerId={ticket.assignee_worker_id}
                   currentWorker={assignedWorker}
                   workers={workersResult.data}
                   recommendedWorkers={recommendedWorkersResult.data}
@@ -246,8 +247,18 @@ function Info({ label, value }: { label: string; value: string }) {
   return <div className="rounded-lg border border-border bg-stone-950/30 p-3"><div className="text-xs text-muted-foreground">{label}</div><div className="mt-1 text-sm font-medium">{value}</div></div>;
 }
 
+function workerDisplayName(worker: Worker | WorkerWithCategories | null, workerId?: string | null) {
+  if (worker?.name) return worker.name;
+  return workerId ? "Виконавець не знайдений" : "Не призначено";
+}
+
+function workerCategories(worker: Worker | WorkerWithCategories | null) {
+  return "categories" in (worker ?? {}) ? ((worker as WorkerWithCategories).categories ?? []) : [];
+}
+
 function WorkerAssignmentCard({
   ticketId,
+  assignedWorkerId,
   currentWorker,
   workers,
   recommendedWorkers,
@@ -257,6 +268,7 @@ function WorkerAssignmentCard({
   completedAt,
 }: {
   ticketId: string;
+  assignedWorkerId?: string | null;
   currentWorker: Worker | WorkerWithCategories | null;
   workers: WorkerWithCategories[];
   recommendedWorkers: WorkerWithCategories[];
@@ -266,6 +278,7 @@ function WorkerAssignmentCard({
   completedAt?: string | null;
 }) {
   const recommendedIds = new Set(recommendedWorkers.map((worker) => worker.id));
+  const categories = workerCategories(currentWorker);
   const sortedWorkers = [
     ...recommendedWorkers,
     ...workers.filter((worker) => !recommendedIds.has(worker.id)),
@@ -279,10 +292,24 @@ function WorkerAssignmentCard({
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="grid gap-3 md:grid-cols-3">
-          <Info label="Поточний виконавець" value={currentWorker?.name ?? "Не призначено"} />
+          <Info label="Поточний виконавець" value={workerDisplayName(currentWorker, assignedWorkerId)} />
           <Info label="Призначено" value={formatDate(assignedAt)} />
           <Info label="Надіслано в Telegram" value={formatDate(sentAt)} />
         </div>
+        {currentWorker ? (
+          <div className="rounded-lg border border-border bg-stone-950/30 p-3 text-sm">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge tone={currentWorker.is_active ? "green" : "default"}>{currentWorker.is_active ? "Активний" : "Неактивний"}</Badge>
+              {currentWorker.telegram_username ? <Badge>@{currentWorker.telegram_username}</Badge> : null}
+              {currentWorker.telegram_id ? <Badge>Telegram ID: {currentWorker.telegram_id}</Badge> : null}
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {categories.length > 0 ? categories.map((category) => <Badge key={category.id} tone="orange">{category.name}</Badge>) : (
+                <span className="text-muted-foreground">Категорії виконавця не вказані.</span>
+              )}
+            </div>
+          </div>
+        ) : null}
 
         <form action={assignWorkerAction.bind(null, ticketId)} className="grid gap-3 md:grid-cols-[1fr_auto]">
           <select
