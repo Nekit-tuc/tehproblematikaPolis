@@ -131,7 +131,56 @@ export default async function AiTicketsPage({ searchParams }: { searchParams: Pr
         <span className="rounded-full border border-white/10 bg-white/[0.03] px-4 py-2 text-sm text-stone-400">Відхилені</span>
       </div>
 
-      <Card className="md:rounded-lg rounded-3xl border-white/10 bg-white/[0.04]">
+      <details className="mobile-card p-3 md:hidden">
+        <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between rounded-2xl bg-white/[0.04] px-3 text-sm font-semibold text-orange-200">
+          Фільтри
+          <span className="text-xs text-stone-500">{visibleTickets.length} знайдено</span>
+        </summary>
+        <form className="mt-3 grid gap-3">
+          <Field label="Пошук">
+            <Input name="q" defaultValue={params.q ?? ""} placeholder="Назва, опис, об'єкт" className="min-h-11 rounded-2xl" />
+          </Field>
+          <Field label="Об'єкт">
+            <Select name="object" defaultValue={params.object ?? "all"}>
+              <option value="all">Всі об'єкти</option>
+              {objects.map((object) => <option key={object.id} value={object.id}>{object.name}</option>)}
+            </Select>
+          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Категорія">
+              <Select name="category" defaultValue={params.category ?? "all"}>
+                <option value="all">Всі</option>
+                {categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
+              </Select>
+            </Field>
+            <Field label="Пріоритет">
+              <Select name="priority" defaultValue={params.priority ?? "all"}>
+                <option value="all">Всі</option>
+                {priorities.map((priority) => <option key={priority} value={priority}>{priorityLabels[priority]}</option>)}
+              </Select>
+            </Field>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Confidence">
+              <Select name="confidence" defaultValue={params.confidence ?? "all"}>
+                <option value="all">Всі</option>
+                <option value="low">Низький</option>
+                <option value="medium">Середній</option>
+                <option value="high">Високий</option>
+              </Select>
+            </Field>
+            <Field label="Дата">
+              <Input type="date" name="date" defaultValue={params.date ?? ""} className="min-h-11 rounded-2xl" />
+            </Field>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <Button type="submit" className="min-h-11 rounded-2xl">Застосувати</Button>
+            <Button variant="outline" asChild className="min-h-11 rounded-2xl"><Link href="/ai-tickets">Скинути</Link></Button>
+          </div>
+        </form>
+      </details>
+
+      <Card className="hidden rounded-3xl border-white/10 bg-white/[0.04] md:block md:rounded-lg">
         <CardHeader>
           <CardTitle>Фільтри</CardTitle>
           <CardDescription>Знайдено: {visibleTickets.length}</CardDescription>
@@ -183,7 +232,7 @@ export default async function AiTicketsPage({ searchParams }: { searchParams: Pr
           <CardContent className="pt-6 text-sm text-muted-foreground">AI-заявок на підтвердження немає.</CardContent>
         </Card>
       ) : (
-        <div className="grid gap-4">
+        <div className="grid gap-3 md:gap-4">
           {visibleTickets.map((ticket) => (
             <AiTicketCard
               key={ticket.id}
@@ -217,15 +266,15 @@ function AiTicketCard({
   const objectResolverConfidence = resolverConfidence(ticket);
   return (
     <Card className="rounded-3xl border-white/10 bg-white/[0.04] md:rounded-lg">
-      <CardHeader>
+      <CardHeader className="p-3 md:p-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <CardTitle>{ticket.title}</CardTitle>
-            <CardDescription className="mt-1">
+          <div className="min-w-0 flex-1">
+            <CardTitle className="line-clamp-2 break-words text-base md:text-xl">{ticket.title}</CardTitle>
+            <CardDescription className="mt-1 line-clamp-2 break-words text-xs md:text-sm">
               {ticket.object?.name ?? "Об'єкт не визначено"} · {formatDate(ticket.created_at)}
             </CardDescription>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-1.5 md:gap-2">
             <Badge tone={confidenceTone(ticket.ai_confidence)}>{confidenceLabel(ticket.ai_confidence)}</Badge>
             {objectResolverConfidence !== null ? <Badge tone={confidenceTone(objectResolverConfidence)}>Object {confidenceLabel(objectResolverConfidence)}</Badge> : null}
             <Badge tone="gray">{priorityLabels[ticket.priority]}</Badge>
@@ -234,8 +283,8 @@ function AiTicketCard({
           </div>
         </div>
       </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <CardContent className="space-y-3 p-3 pt-0 md:space-y-4 md:p-6 md:pt-0">
+        <div className="grid gap-2 md:grid-cols-2 md:gap-3 xl:grid-cols-4">
           <Info label="Об'єкт" value={ticket.object?.name ?? "-"} />
           <Info label="Адреса" value={ticket.object?.address ?? "-"} />
           <Info label="Категорія" value={ticket.category?.name ?? "-"} />
@@ -246,14 +295,14 @@ function AiTicketCard({
           <Info label="Group ID" value={ticket.telegram_source_group_id ?? "-"} />
         </div>
 
-        <div className="rounded-md border border-border bg-stone-950/30 p-3">
+        <div className="rounded-2xl border border-border bg-stone-950/30 p-2.5 md:rounded-md md:p-3">
           <div className="text-xs text-muted-foreground">Опис заявки</div>
-          <p className="mt-2 whitespace-pre-wrap text-sm">{ticket.description}</p>
+          <p className="mt-1.5 line-clamp-3 whitespace-normal break-words text-xs text-stone-300 md:text-sm">{ticket.description}</p>
         </div>
 
-        <div className="rounded-md border border-border bg-stone-950/30 p-3">
+        <div className="rounded-2xl border border-border bg-stone-950/30 p-2.5 md:rounded-md md:p-3">
           <div className="text-xs text-muted-foreground">Оригінальне повідомлення</div>
-          <p className="mt-2 whitespace-pre-wrap text-sm">{ticket.original_message_text ?? ticket.description}</p>
+          <p className="mt-1.5 line-clamp-3 whitespace-normal break-words text-xs text-stone-300 md:whitespace-pre-wrap md:text-sm">{ticket.original_message_text ?? ticket.description}</p>
         </div>
 
         {siblingTickets.length > 0 ? (
@@ -279,7 +328,7 @@ function AiTicketCard({
           <Button asChild variant="outline" className="min-h-11 w-full rounded-2xl md:min-h-0 md:w-auto md:rounded-md"><Link href={`/tickets/${ticket.id}`}>Відкрити картку</Link></Button>
         </div>
 
-        <details className="rounded-2xl border border-white/10 bg-stone-950/20 p-3 md:rounded-md">
+        <details className="rounded-2xl border border-white/10 bg-stone-950/20 p-2.5 md:rounded-md md:p-3">
           <summary className="cursor-pointer text-sm font-medium text-orange-200">✏️ Редагувати перед підтвердженням</summary>
           <form action={updateAiTicketAction.bind(null, ticket.id)} className="mt-4 grid gap-4 md:grid-cols-2">
             <Field label="Назва">
@@ -336,9 +385,9 @@ function AiTicketCard({
 
 function Info({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-md border border-border bg-stone-950/30 p-3">
+    <div className="min-w-0 max-w-full rounded-2xl border border-border bg-stone-950/30 p-2.5 md:rounded-md md:p-3">
       <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-1 break-words text-sm font-medium">{value}</div>
+      <div className="mt-1 break-words text-xs font-medium md:text-sm">{value}</div>
     </div>
   );
 }
@@ -354,7 +403,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 function Select({ children, ...props }: React.SelectHTMLAttributes<HTMLSelectElement>) {
   return (
-    <select {...props} className="h-10 w-full rounded-md border border-input bg-stone-950/30 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring">
+    <select {...props} className="h-11 w-full rounded-2xl border border-input bg-stone-950/30 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring md:h-10 md:rounded-md">
       {children}
     </select>
   );

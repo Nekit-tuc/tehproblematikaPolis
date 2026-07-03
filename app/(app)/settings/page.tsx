@@ -28,7 +28,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
       {params.success === "category-created" ? <Alert title="Категорію створено">Нова категорія доступна при створенні заявки.</Alert> : null}
       {params.success === "category-updated" ? <Alert title="Категорію оновлено">Зміни збережено.</Alert> : null}
 
-      <Card>
+      <Card className="rounded-3xl border-white/10 bg-white/[0.04] md:rounded-lg">
         <CardHeader>
           <CardTitle>Параметри системи</CardTitle>
         </CardHeader>
@@ -40,7 +40,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="rounded-3xl border-white/10 bg-white/[0.04] md:rounded-lg">
         <CardHeader>
           <CardTitle>Нова категорія</CardTitle>
           <CardDescription>Категорії використовуються у заявках та звітах.</CardDescription>
@@ -50,7 +50,16 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         </CardContent>
       </Card>
 
-      <Card>
+      <div className="space-y-3 md:hidden">
+        <div className="text-sm text-stone-400">Категорії заявок · {categoriesResult.data.length}</div>
+        {categoriesResult.data.length === 0 ? (
+          <div className="mobile-card p-3 text-sm text-stone-500">Категорій поки немає.</div>
+        ) : (
+          categoriesResult.data.map((category) => <MobileCategoryCard key={category.id} category={category} />)
+        )}
+      </div>
+
+      <Card className="hidden md:block">
         <CardHeader>
           <CardTitle>Категорії заявок</CardTitle>
           <CardDescription>Знайдено: {categoriesResult.data.length}</CardDescription>
@@ -85,8 +94,8 @@ function CategoryRow({ category }: { category: Category }) {
   return (
     <>
       <TR>
-        <TD className="font-medium">{category.name}</TD>
-        <TD>{category.description ?? "-"}</TD>
+        <TD className="min-w-0 break-words font-medium">{category.name}</TD>
+        <TD className="min-w-0 max-w-md whitespace-normal break-words text-sm text-stone-300">{category.description ?? "-"}</TD>
         <TD><Badge tone={category.is_active ? "green" : "gray"}>{category.is_active ? "Активна" : "Неактивна"}</Badge></TD>
         <TD><details className="min-w-32"><summary className="cursor-pointer text-orange-200">Редагувати</summary></details></TD>
       </TR>
@@ -104,25 +113,47 @@ function CategoryRow({ category }: { category: Category }) {
   );
 }
 
+function MobileCategoryCard({ category }: { category: Category }) {
+  return (
+    <div className="mobile-card max-w-full p-3">
+      <div className="flex min-w-0 items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <h2 className="break-words text-sm font-semibold text-stone-100">{category.name}</h2>
+          <p className="mt-1 max-w-full whitespace-normal break-words text-xs leading-5 text-stone-400">{category.description ?? "Без опису"}</p>
+        </div>
+        <Badge tone={category.is_active ? "green" : "gray"}>{category.is_active ? "Активна" : "Неактивна"}</Badge>
+      </div>
+      <details className="mt-3 rounded-2xl border border-white/10 bg-black/20 p-2.5">
+        <summary className="cursor-pointer list-none text-sm font-medium text-orange-200">Редагувати</summary>
+        <div className="mt-3">
+          <CategoryForm action={updateCategoryAction.bind(null, category.id)} category={category} submitLabel="Зберегти" compact />
+        </div>
+      </details>
+    </div>
+  );
+}
+
 function CategoryForm({
   action,
   category,
   submitLabel,
+  compact = false,
 }: {
   action: (formData: FormData) => void | Promise<void>;
   category?: Category;
   submitLabel: string;
+  compact?: boolean;
 }) {
   return (
-    <form action={action} className="grid gap-4 md:grid-cols-[1fr_1.5fr_auto_auto]">
-      <Field label="Назва"><Input name="name" required defaultValue={category?.name ?? ""} placeholder="Електрика" /></Field>
-      <Field label="Опис"><Input name="description" defaultValue={category?.description ?? ""} placeholder="Короткий опис категорії" /></Field>
-      <label className="flex items-center gap-2 pt-7 text-sm text-stone-200">
+    <form action={action} className={compact ? "grid gap-3 text-sm" : "grid gap-4 md:grid-cols-[1fr_1.5fr_auto_auto]"}>
+      <Field label="Назва"><Input name="name" required defaultValue={category?.name ?? ""} placeholder="Електрика" className={compact ? "min-h-10 rounded-2xl text-sm" : ""} /></Field>
+      <Field label="Опис"><Input name="description" defaultValue={category?.description ?? ""} placeholder="Короткий опис категорії" className={compact ? "min-h-10 rounded-2xl text-sm" : ""} /></Field>
+      <label className={`flex items-center gap-2 text-sm text-stone-200 ${compact ? "" : "pt-7"}`}>
         <input name="is_active" type="checkbox" defaultChecked={category?.is_active ?? true} className="h-4 w-4 accent-orange-500" />
         Активна
       </label>
       <div className="flex items-end">
-        <Button type="submit">{submitLabel}</Button>
+        <Button type="submit" className={compact ? "min-h-10 w-full rounded-2xl text-sm" : ""}>{submitLabel}</Button>
       </div>
     </form>
   );

@@ -31,43 +31,43 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         <Alert title="Недостатньо прав">Вашій ролі не відкрито доступ до цього розділу. Якщо доступ потрібен, адміністратор має змінити роль у профілі.</Alert>
       ) : null}
       {error ? <Alert title="Дані Supabase недоступні">{error}</Alert> : null}
-      <div className="space-y-5 md:hidden">
+      <div className="space-y-4 md:hidden">
         <div>
-          <h1 className="text-2xl font-semibold text-stone-50">Вітаємо, Administrator</h1>
+          <h1 className="text-xl font-semibold text-stone-50">Вітаємо, Administrator</h1>
           <p className="mt-1 text-sm text-stone-400">Огляд системи на сьогодні</p>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-2 gap-2.5">
           <MobileMetric title="Нові заявки" value={newTickets} icon={ClipboardList} caption="потребують старту" />
           <MobileMetric title="В роботі" value={inProgress} icon={Wrench} caption="активні задачі" />
           <MobileMetric title="На перевірці" value={pendingReview} icon={Bot} caption="AI-заявки" tone="text-violet-300" />
           <MobileMetric title="Виконано" value={doneThisWeek} icon={CheckCircle2} caption="закриті роботи" tone="text-emerald-300" />
         </div>
 
-        <div className="mobile-gradient-card p-4">
+        <div className="mobile-gradient-card p-3">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <p className="text-sm text-stone-400">AI-аналіз об'єктів</p>
-              <h2 className="mt-1 text-lg font-semibold">Стабільно</h2>
-              <p className="mt-1 text-sm text-stone-400">Object Matcher працює коректно</p>
+              <p className="text-xs text-stone-400">AI-аналіз об'єктів</p>
+              <h2 className="mt-0.5 text-base font-semibold">Стабільно</h2>
+              <p className="mt-0.5 text-xs text-stone-400">Object Matcher працює коректно</p>
             </div>
-            <div className="rounded-2xl bg-orange-500/15 p-3 text-orange-300">
-              <Sparkles className="h-6 w-6" />
+            <div className="rounded-2xl bg-orange-500/15 p-2.5 text-orange-300">
+              <Sparkles className="h-5 w-5" />
             </div>
           </div>
-          <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 p-3 text-sm text-stone-300">
+          <div className="mt-3 rounded-2xl border border-white/10 bg-black/20 p-2.5 text-xs text-stone-300">
             Помилок за сьогодні: <span className="font-semibold text-emerald-300">0</span>
           </div>
         </div>
 
-        <div className="mobile-card p-4">
+        <div className="mobile-card p-3">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="font-semibold">Останні заявки</h2>
             <Link href="/tickets" className="text-sm text-orange-300">Всі</Link>
           </div>
           <div className="space-y-2">
             {tickets.slice(0, 5).map((ticket) => (
-              <Link key={ticket.id} href={`/tickets/${ticket.id}`} className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.03] p-3 active:bg-white/5">
+              <Link key={ticket.id} href={`/tickets/${ticket.id}`} className="flex items-center gap-2.5 rounded-2xl border border-white/10 bg-white/[0.03] p-2.5 active:bg-white/5">
                 <div className="min-w-0 flex-1">
                   <div className="text-xs text-orange-300">{ticket.number}</div>
                   <div className="truncate text-sm font-medium">{ticket.title}</div>
@@ -81,17 +81,17 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           </div>
         </div>
 
-        <Link href="/ai-tickets" className="block rounded-3xl border border-violet-400/20 bg-gradient-to-br from-violet-500/20 to-white/[0.03] p-4 active:bg-white/5">
+        <Link href="/ai-tickets" className="block rounded-3xl border border-violet-400/20 bg-gradient-to-br from-violet-500/20 to-white/[0.03] p-3 active:bg-white/5">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-violet-200">AI-заявки на перевірку</p>
-              <p className="mt-2 text-3xl font-semibold">{pendingReview}</p>
+              <p className="mt-1 text-2xl font-semibold">{pendingReview}</p>
             </div>
-            <span className="rounded-2xl bg-violet-400/15 px-3 py-2 text-sm text-violet-100">Переглянути</span>
+            <span className="rounded-2xl bg-violet-400/15 px-3 py-1.5 text-xs text-violet-100">Переглянути</span>
           </div>
         </Link>
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-2 gap-2.5">
           <QuickAction href="/tickets/new" label="Створити заявку" icon={Plus} />
           <QuickAction href="/ai-test" label="AI-тест" icon={Bot} />
           <QuickAction href="/objects" label="Об'єкти" icon={Clock3} />
@@ -153,22 +153,22 @@ function Metric({ title, value, icon: Icon, tone = "text-orange-300" }: { title:
 
 function MobileMetric({ title, value, icon: Icon, caption, tone = "text-orange-300" }: { title: string; value: number; icon: React.ElementType; caption: string; tone?: string }) {
   return (
-    <div className="mobile-gradient-card p-4">
-      <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-2xl bg-white/[0.06]">
-        <Icon className={`h-5 w-5 ${tone}`} />
+    <div className="mobile-gradient-card p-3">
+      <div className="mb-2.5 flex h-8 w-8 items-center justify-center rounded-xl bg-white/[0.06]">
+        <Icon className={`h-4 w-4 ${tone}`} />
       </div>
-      <p className="text-3xl font-semibold">{value}</p>
-      <p className="mt-1 text-sm font-medium">{title}</p>
-      <p className="mt-1 text-xs text-stone-500">{caption}</p>
+      <p className="text-2xl font-semibold leading-none">{value}</p>
+      <p className="mt-1 text-xs font-medium">{title}</p>
+      <p className="mt-0.5 text-[11px] leading-snug text-stone-500">{caption}</p>
     </div>
   );
 }
 
 function QuickAction({ href, label, icon: Icon }: { href: string; label: string; icon: React.ElementType }) {
   return (
-    <Link href={href} className="mobile-card flex min-h-20 items-center gap-3 p-4 text-sm font-medium active:bg-white/5">
-      <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-orange-500/15 text-orange-300">
-        <Icon className="h-5 w-5" />
+    <Link href={href} className="mobile-card flex min-h-16 items-center gap-2.5 p-3 text-xs font-medium active:bg-white/5">
+      <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-orange-500/15 text-orange-300">
+        <Icon className="h-4 w-4" />
       </span>
       {label}
     </Link>
