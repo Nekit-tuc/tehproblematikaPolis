@@ -18,6 +18,23 @@ function isAllowedPrivateTestUser(userId: number | undefined) {
 }
 
 export async function handleTelegramUpdate(update: TelegramUpdate) {
+  if (update.callback_query) {
+    const callbackData = update.callback_query.data ?? "";
+    if (callbackData.startsWith("wd:")) {
+      console.info("[telegram-worker]", {
+        result: "callback_route",
+        handled: true,
+        callbackData,
+        callbackDataLength: Buffer.byteLength(callbackData, "utf8"),
+      });
+      await handleWorkerDoneCallback(update.callback_query);
+      return { handled: true, created: false, reason: "worker_done_callback" } as const;
+    }
+
+    await handleTelegramCallback(update.callback_query);
+    return { handled: true, created: false, reason: "callback_query_processed" } as const;
+  }
+
   if (update.message) {
     const isPrivate = update.message.chat.type === "private";
     const allowedPrivateTestUser = isAllowedPrivateTestUser(update.message.from?.id);
@@ -36,13 +53,6 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
     if (result.handled && result.created) console.info("[telegram-group-intake] created", result.numbers);
     return result;
   }
-  if (update.callback_query) {
-    if (update.callback_query.data?.startsWith("wd:")) {
-      await handleWorkerDoneCallback(update.callback_query);
-      return { handled: true, created: false, reason: "worker_done_callback_processed" } as const;
-    }
-    await handleTelegramCallback(update.callback_query);
-    return { handled: true, created: false, reason: "callback_query_processed" } as const;
-  }
+
   return { handled: false, created: false, reason: "unsupported_update" } as const;
 }
