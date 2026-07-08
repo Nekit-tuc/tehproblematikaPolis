@@ -4,11 +4,13 @@ import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { ConfirmSubmitButton } from "@/components/tickets/confirm-submit-button";
 import { requireRole } from "@/lib/auth/server";
 import { priorityLabels, statusLabels } from "@/lib/labels";
 import { getTicketsByWorkerId, getWorkerById } from "@/lib/supabase/worker-queries";
 import { formatDate } from "@/lib/utils";
 import type { TicketStatus, TicketWithRelations } from "@/types/domain";
+import { unassignWorkerAction } from "../../tickets/[id]/actions";
 
 type WorkerTicketFilter = "active" | "done" | "all";
 
@@ -27,7 +29,7 @@ export default async function WorkerTicketsPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ view?: WorkerTicketFilter }>;
+  searchParams: Promise<{ view?: WorkerTicketFilter; statusError?: string; statusSuccess?: string }>;
 }) {
   await requireRole(["admin", "management", "tech_manager"]);
   const { id } = await params;
@@ -44,6 +46,8 @@ export default async function WorkerTicketsPage({
   return (
     <div className="page-shell space-y-6">
       {error ? <Alert title="Не вдалося завантажити заявки виконавця">{error}</Alert> : null}
+      {query.statusError ? <Alert title="Дію не виконано">{decodeURIComponent(query.statusError)}</Alert> : null}
+      {query.statusSuccess === "unassigned" ? <Alert title="Виконавця знято">Заявку знято з цього виконавця.</Alert> : null}
       {!worker ? (
         <Card><CardContent className="pt-5 text-sm text-muted-foreground">Виконавця не знайдено.</CardContent></Card>
       ) : (
@@ -82,7 +86,7 @@ export default async function WorkerTicketsPage({
             </Card>
           ) : (
             <div className="grid gap-3 md:gap-4">
-              {tickets.map((ticket) => <WorkerTicketCard key={ticket.id} ticket={ticket} />)}
+              {tickets.map((ticket) => <WorkerTicketCard key={ticket.id} ticket={ticket} workerId={worker.id} />)}
             </div>
           )}
         </>
@@ -103,7 +107,8 @@ function FilterLink({ workerId, view, current, label }: { workerId: string; view
   );
 }
 
-function WorkerTicketCard({ ticket }: { ticket: TicketWithRelations }) {
+function WorkerTicketCard({ ticket, workerId }: { ticket: TicketWithRelations; workerId: string }) {
+  const closed = isClosed(ticket.status);
   return (
     <Card className="rounded-3xl border-white/10 bg-white/[0.04] md:rounded-lg">
       <CardHeader className="p-3 md:p-6">
@@ -128,9 +133,24 @@ function WorkerTicketCard({ ticket }: { ticket: TicketWithRelations }) {
           <Info label="Призначено" value={formatDate(ticket.assigned_at)} />
           <Info label="Об'єкт" value={ticket.object?.name ?? "-"} />
         </div>
-        <Button asChild variant="outline" className="min-h-11 w-full rounded-2xl md:min-h-0 md:w-auto md:rounded-md">
-          <Link href={`/tickets/${ticket.id}`}>Відкрити заявку</Link>
-        </Button>
+        <div className="grid gap-2 md:flex md:flex-wrap">
+          <Button asChild variant="outline" className="min-h-11 w-full rounded-2xl md:min-h-0 md:w-auto md:rounded-md">
+            <Link href={`/tickets/${ticket.id}`}>Відкрити заявку</Link>
+          </Button>
+          {!closed ? (
+            <form action={unassignWorkerAction.bind(null, ticket.id)}>
+              <input type="hidden" name="returnTo" value={`/workers/${workerId}`} />
+              <ConfirmSubmitButton
+                type="submit"
+                variant="destructive"
+                className="min-h-11 w-full rounded-2xl md:min-h-0 md:w-auto md:rounded-md"
+                message="Зняти цю заявку з виконавця?"
+              >
+                Зняти з виконавця
+              </ConfirmSubmitButton>
+            </form>
+          ) : null}
+        </div>
       </CardContent>
     </Card>
   );

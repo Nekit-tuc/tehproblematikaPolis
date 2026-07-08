@@ -1,4 +1,4 @@
-import { BriefcaseBusiness, Camera, Clock, MessageSquare, Send } from "lucide-react";
+import { BriefcaseBusiness, Camera, Clock, MessageSquare, Send, Trash2, UserX } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Alert } from "@/components/ui/alert";
@@ -6,8 +6,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
+import { ConfirmSubmitButton } from "@/components/tickets/confirm-submit-button";
 import { PhotoSubmitButton } from "@/components/tickets/photo-submit-button";
-import { canAddTicketPhoto, canConfirmTicket, canEditTicket } from "@/lib/auth/permissions";
+import { canAddTicketPhoto, canConfirmTicket, canEditTicket, canHardDeleteTicket, canUnassignWorkerFromTicket } from "@/lib/auth/permissions";
 import { requireAuth } from "@/lib/auth/server";
 import { photoTypeLabels } from "@/lib/photos";
 import { getRelatedTicketsBySourceGroup, getTicket, getTicketComments, getTicketHistory, getTicketPhotos } from "@/lib/supabase/queries";
@@ -20,9 +21,11 @@ import {
   assignWorkerAction,
   confirmTicketAction,
   confirmWorkerCompletionAction,
+  hardDeleteTicketAction,
   rejectTicketAction,
   returnWorkerCompletionAction,
   sendTicketToWorkerAction,
+  unassignWorkerAction,
   updateTicketStatusAction,
   uploadTicketPhotosAction,
 } from "./actions";
@@ -163,7 +166,28 @@ export default async function TicketDetailsPage({
                   assignedAt={ticket.assigned_at}
                   sentAt={ticket.sent_to_worker_at}
                   completedAt={ticket.worker_completed_at}
+                  canUnassign={canUnassignWorkerFromTicket(profile)}
                 />
+              ) : null}
+              {canHardDeleteTicket(profile) ? (
+                <Card className="rounded-3xl border-red-900/60 bg-red-950/20 md:rounded-lg">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-red-100"><Trash2 className="h-4 w-4" />Небезпечна дія</CardTitle>
+                    <CardDescription>Повне видалення прибере заявку та пов'язані записи з бази. Цю дію не можна скасувати.</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <form action={hardDeleteTicketAction.bind(null, ticket.id)}>
+                      <ConfirmSubmitButton
+                        type="submit"
+                        variant="destructive"
+                        className="min-h-11 w-full rounded-2xl md:w-auto md:rounded-md"
+                        message="Ви точно хочете повністю видалити заявку з бази? Цю дію не можна скасувати."
+                      >
+                        <Trash2 className="h-4 w-4" />Видалити заявку
+                      </ConfirmSubmitButton>
+                    </form>
+                  </CardContent>
+                </Card>
               ) : null}
               {relatedResult.data.length > 0 ? (
                 <Card className="rounded-3xl border-white/10 bg-white/[0.04] md:rounded-lg">
@@ -266,6 +290,7 @@ function WorkerAssignmentCard({
   assignedAt,
   sentAt,
   completedAt,
+  canUnassign,
 }: {
   ticketId: string;
   assignedWorkerId?: string | null;
@@ -276,6 +301,7 @@ function WorkerAssignmentCard({
   assignedAt?: string | null;
   sentAt?: string | null;
   completedAt?: string | null;
+  canUnassign: boolean;
 }) {
   const recommendedIds = new Set(recommendedWorkers.map((worker) => worker.id));
   const categories = workerCategories(currentWorker);
@@ -329,10 +355,24 @@ function WorkerAssignmentCard({
         </form>
 
         {currentWorker ? (
-          <form action={sendTicketToWorkerAction.bind(null, ticketId)}>
-            <input type="hidden" name="workerId" value={currentWorker.id} />
-            <Button type="submit" variant="outline" className="min-h-11 w-full rounded-2xl md:min-h-0 md:w-auto md:rounded-md"><Send className="h-4 w-4" />Надіслати в Telegram</Button>
-          </form>
+          <div className="grid gap-2 md:flex md:flex-wrap">
+            <form action={sendTicketToWorkerAction.bind(null, ticketId)}>
+              <input type="hidden" name="workerId" value={currentWorker.id} />
+              <Button type="submit" variant="outline" className="min-h-11 w-full rounded-2xl md:min-h-0 md:w-auto md:rounded-md"><Send className="h-4 w-4" />Надіслати в Telegram</Button>
+            </form>
+            {canUnassign ? (
+              <form action={unassignWorkerAction.bind(null, ticketId)}>
+                <ConfirmSubmitButton
+                  type="submit"
+                  variant="destructive"
+                  className="min-h-11 w-full rounded-2xl md:min-h-0 md:w-auto md:rounded-md"
+                  message="Зняти призначеного виконавця з цієї заявки?"
+                >
+                  <UserX className="h-4 w-4" />Зняти виконавця
+                </ConfirmSubmitButton>
+              </form>
+            ) : null}
+          </div>
         ) : null}
 
         {status === "waiting_admin_confirmation" ? (

@@ -58,6 +58,14 @@ export function canManageWorkers(profile: Profile) {
   return profile.role === "admin" || profile.role === "management" || profile.role === "tech_manager";
 }
 
+export function canUnassignWorkerFromTicket(profile: Profile) {
+  return profile.role === "admin" || profile.role === "management" || profile.role === "tech_manager";
+}
+
+export function canHardDeleteTicket(profile: Profile) {
+  return profile.role === "admin";
+}
+
 export function canUseAiTest(profile: Profile) {
   return profile.role === "admin" || profile.role === "management" || profile.role === "tech_manager";
 }

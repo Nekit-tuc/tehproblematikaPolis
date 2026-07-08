@@ -97,6 +97,43 @@ export async function assignTicketToWorker({
   return updateResult;
 }
 
+export async function unassignTicketWorker({
+  ticketId,
+  actorId,
+  fromStatus,
+  workerId,
+}: {
+  ticketId: string;
+  actorId?: string | null;
+  fromStatus?: TicketStatus;
+  workerId?: string | null;
+}) {
+  const supabase = await createClient();
+  const now = new Date().toISOString();
+  const nextStatus: TicketStatus = fromStatus === "assigned" || fromStatus === "waiting_admin_confirmation" ? "new" : (fromStatus ?? "new");
+  const updateResult = await supabase
+    .from("tickets")
+    .update({
+      assignee_worker_id: null,
+      assigned_at: null,
+      sent_to_worker_at: null,
+      worker_completed_at: null,
+      status: nextStatus,
+      updated_at: now,
+    })
+    .eq("id", ticketId);
+  if (updateResult.error) return updateResult;
+
+  await supabase.from("ticket_history").insert({
+    ticket_id: ticketId,
+    actor_id: actorId ?? null,
+    action: "Виконавця знято із заявки",
+    metadata: { worker_id: workerId ?? null, from: fromStatus, to: nextStatus },
+  });
+
+  return updateResult;
+}
+
 export async function markTicketSentToWorker(ticketId: string, workerId: string, actorId?: string | null) {
   const supabase = await createClient();
   const now = new Date().toISOString();

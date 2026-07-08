@@ -30,7 +30,7 @@ function statusTone(status: TicketStatus) {
 export default async function TicketsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string }>;
+  searchParams: Promise<{ status?: string; deleted?: string }>;
 }) {
   const query = await searchParams;
   const { data: tickets, error } = await getTickets();
@@ -47,6 +47,7 @@ export default async function TicketsPage({
         <Button asChild className="hidden md:inline-flex"><Link href="/tickets/new"><Plus className="h-4 w-4" />Нова заявка</Link></Button>
       </div>
       {error ? <Alert title="Не вдалося завантажити заявки">{error}</Alert> : null}
+      {query.deleted === "1" ? <Alert title="Заявку повністю видалено">Заявку та пов'язані записи прибрано з бази.</Alert> : null}
       <div className="space-y-4 md:hidden">
         <details className="mobile-card p-4">
           <summary className="flex cursor-pointer list-none items-center justify-between text-sm font-medium">
