@@ -9,7 +9,7 @@ import { TD, TH, THead, TBody, TR, Table } from "@/components/ui/table";
 import { requireRole } from "@/lib/auth/server";
 import { getAllCategories } from "@/lib/supabase/queries";
 import type { Category } from "@/types/domain";
-import { createCategoryAction, updateCategoryAction } from "./actions";
+import { updateCategoryAction } from "./actions";
 
 export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ error?: string; success?: string }> }) {
   await requireRole(["admin"]);
@@ -25,7 +25,6 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
       </div>
 
       {error ? <Alert title="Помилка налаштувань">{error}</Alert> : null}
-      {params.success === "category-created" ? <Alert title="Категорію створено">Нова категорія доступна при створенні заявки.</Alert> : null}
       {params.success === "category-updated" ? <Alert title="Категорію оновлено">Зміни збережено.</Alert> : null}
 
       <Card className="rounded-3xl border-white/10 bg-white/[0.04] md:rounded-lg">
@@ -42,11 +41,13 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
 
       <Card className="rounded-3xl border-white/10 bg-white/[0.04] md:rounded-lg">
         <CardHeader>
-          <CardTitle>Нова категорія</CardTitle>
-          <CardDescription>Категорії використовуються у заявках та звітах.</CardDescription>
+          <CardTitle>Системні категорії заявок</CardTitle>
+          <CardDescription className="max-w-full whitespace-normal break-words">
+            У системі використовується фіксований довідник із 7 активних категорій. Нові категорії не додаються вручну, щоб не ламати AI-класифікацію, звіти та виконавців.
+          </CardDescription>
         </CardHeader>
-        <CardContent>
-          <CategoryForm action={createCategoryAction} submitLabel="Створити категорію" />
+        <CardContent className="text-sm text-stone-400">
+          Можна уточнювати опис категорій, але назви та активність залишаються системними.
         </CardContent>
       </Card>
 
@@ -146,12 +147,9 @@ function CategoryForm({
 }) {
   return (
     <form action={action} className={compact ? "grid gap-3 text-sm" : "grid gap-4 md:grid-cols-[1fr_1.5fr_auto_auto]"}>
-      <Field label="Назва"><Input name="name" required defaultValue={category?.name ?? ""} placeholder="Електрика" className={compact ? "min-h-10 rounded-2xl text-sm" : ""} /></Field>
+      <Field label="Назва"><Input name="name" required readOnly={Boolean(category)} defaultValue={category?.name ?? ""} placeholder="Електрика" className={compact ? "min-h-10 rounded-2xl text-sm" : ""} /></Field>
       <Field label="Опис"><Input name="description" defaultValue={category?.description ?? ""} placeholder="Короткий опис категорії" className={compact ? "min-h-10 rounded-2xl text-sm" : ""} /></Field>
-      <label className={`flex items-center gap-2 text-sm text-stone-200 ${compact ? "" : "pt-7"}`}>
-        <input name="is_active" type="checkbox" defaultChecked={category?.is_active ?? true} className="h-4 w-4 accent-orange-500" />
-        Активна
-      </label>
+      <div className={`text-sm text-stone-400 ${compact ? "" : "pt-7"}`}>Системна активна категорія</div>
       <div className="flex items-end">
         <Button type="submit" className={compact ? "min-h-10 w-full rounded-2xl text-sm" : ""}>{submitLabel}</Button>
       </div>

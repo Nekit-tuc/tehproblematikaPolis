@@ -1,4 +1,4 @@
-# AI v2 Architecture: Polissya Service Desk
+﻿# AI v2 Architecture: Polissya Service Desk
 
 ## Мета
 
@@ -145,9 +145,9 @@ Work Classifier визначає зміст кожного Work Item.
 {
   "title": "Повісити вогнегасник",
   "description": "Потрібно повісити вогнегасник на об'єкті.",
-  "category": "Пожежна безпека",
+  "category": "Будівельні роботи",
   "workType": "safety",
-  "recommendedDepartment": "Пожежна безпека",
+  "recommendedDepartment": "Будівельні роботи",
   "confidence": 0.91
 }
 ```
@@ -259,10 +259,10 @@ AI не запускає роботи автоматично.
   "workItems": [
     {
       "title": "Повісити вогнегасник",
-      "category": "Пожежна безпека",
+      "category": "Будівельні роботи",
       "workType": "safety",
       "priority": "medium",
-      "recommendedDepartment": "Пожежна безпека"
+      "recommendedDepartment": "Будівельні роботи"
     },
     {
       "title": "Встановити столик або бочку",
@@ -280,10 +280,10 @@ AI не запускає роботи автоматично.
     },
     {
       "title": "Розглянути можливість парковки",
-      "category": "Адміністративне питання",
+      "category": "Будівельні роботи",
       "workType": "administrative",
       "priority": "low",
-      "recommendedDepartment": "Адміністрація"
+      "recommendedDepartment": "Технічний відділ"
     }
   ]
 }
@@ -316,7 +316,7 @@ AI не запускає роботи автоматично.
     {
       "title": "Відремонтувати замок дверей кабінету",
       "description": "Серцевину вже замінили, але двері неможливо закрити на ключ.",
-      "category": "Двері та замки",
+      "category": "Вікна / двері / фурнітура",
       "workType": "repair",
       "priority": "medium"
     },
@@ -349,7 +349,7 @@ AI не запускає роботи автоматично.
     },
     {
       "title": "Замінити замок у шкафчику для покупців",
-      "category": "Двері та замки",
+      "category": "Вікна / двері / фурнітура",
       "workType": "replace",
       "priority": "low"
     },
@@ -403,3 +403,4 @@ type WorkItem = {
 - `tickets[]` порожній.
 
 Це важливо, бо AI має допомагати диспетчеру, але не створювати шум у системі.
+

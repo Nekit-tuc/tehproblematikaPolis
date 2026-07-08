@@ -10,7 +10,9 @@ function emptyWithError<T>(data: T): QueryResult<T> {
 function normalizeWorker(worker: WorkerWithCategories): WorkerWithCategories {
   return {
     ...worker,
-    categories: (worker.worker_categories ?? []).map((item) => item.category).filter(Boolean) as Category[],
+    categories: (worker.worker_categories ?? [])
+      .map((item) => item.category)
+      .filter((category): category is Category => Boolean(category?.is_active)),
   };
 }
 

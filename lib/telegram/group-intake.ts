@@ -5,6 +5,7 @@ import { normalizeStoreText, type StoreMatchResult } from "@/lib/stores/match-st
 import { loadMatcherObjectsFromSupabase } from "@/lib/stores/object-source";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { generateTicketNumber, isDuplicateTicketNumberError, TICKET_NUMBER_RETRY_LIMIT } from "@/lib/tickets/numbering";
+import { defaultTicketCategory } from "@/lib/ai/category-taxonomy";
 import type { AiWorkItem } from "@/types/ai";
 import type { Category, CompanyObject, Profile } from "@/types/domain";
 import type { TelegramMessage } from "./client";
@@ -48,7 +49,7 @@ function normalize(value: string | null | undefined) {
 }
 
 function findCategory(categories: Category[], categoryName: string | null) {
-  const fallback = categories.find((category) => normalize(category.name) === normalize("Інше")) ?? categories[0] ?? null;
+  const fallback = categories.find((category) => normalize(category.name) === normalize(defaultTicketCategory)) ?? categories[0] ?? null;
   if (!categoryName) return fallback;
   return categories.find((category) => normalize(category.name) === normalize(categoryName)) ?? categories.find((category) => normalize(category.name).includes(normalize(categoryName)) || normalize(categoryName).includes(normalize(category.name))) ?? fallback;
 }

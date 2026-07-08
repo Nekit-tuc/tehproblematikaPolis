@@ -369,12 +369,12 @@ function AiTicketCard({
             </div>
             <div className="md:col-span-2 rounded-md border border-border bg-stone-950/30 p-3">
               <div className="text-xs text-muted-foreground">AI-оригінал</div>
-              <p className="mt-2 whitespace-pre-wrap text-sm">{ticket.original_message_text ?? "-"}</p>
+              <p className="mt-2 max-w-full whitespace-pre-wrap break-words text-sm">{ticket.original_message_text ?? "-"}</p>
             </div>
             {ticket.ai_raw_result ? (
               <details className="md:col-span-2 rounded-md border border-border bg-stone-950/30 p-3">
                 <summary className="cursor-pointer text-sm text-orange-200">Показати JSON</summary>
-                <pre className="mt-3 max-h-80 overflow-auto text-xs">{JSON.stringify(ticket.ai_raw_result, null, 2)}</pre>
+                <pre className="mt-3 max-h-80 max-w-full overflow-x-auto overflow-y-auto whitespace-pre-wrap break-words rounded-2xl bg-black/30 p-3 text-xs">{JSON.stringify(ticket.ai_raw_result, null, 2)}</pre>
               </details>
             ) : null}
             <div className="md:col-span-2">

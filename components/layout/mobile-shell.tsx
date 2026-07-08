@@ -18,10 +18,10 @@ export function MobileShell({
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   return (
-    <div className="min-h-screen bg-[#090909] text-stone-100 md:hidden">
+    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-[#090909] text-stone-100 md:hidden">
       <MobileTopbar onMenuClick={() => setDrawerOpen(true)} />
       <MobileDrawer profile={profile} open={drawerOpen} onClose={() => setDrawerOpen(false)} aiTicketsCount={aiTicketsCount} />
-      <main className="pb-28">{children}</main>
+      <main className="w-full max-w-full overflow-x-hidden pb-28">{children}</main>
       <MobileBottomNav profile={profile} aiTicketsCount={aiTicketsCount} />
     </div>
   );

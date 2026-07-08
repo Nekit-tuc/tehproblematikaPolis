@@ -43,8 +43,8 @@
 }
 
 @media (max-width: 767px) {
-  html, body { overflow-x: hidden; background: #090909; }
+  html, body { width: 100%; max-width: 100%; overflow-x: hidden; background: #090909; }
+  body { min-width: 0; }
   .page-shell { width: 100%; max-width: none; padding: 1rem 1rem 7rem; }
-  table { min-width: 720px; }
   input, select, textarea, button { font-size: 16px; }
 }

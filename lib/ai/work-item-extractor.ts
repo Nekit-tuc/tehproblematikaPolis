@@ -1,4 +1,5 @@
 import type { AiWorkItem } from "@/types/ai";
+import { defaultTicketCategory } from "./category-taxonomy";
 import { classifyWorkItem } from "./work-classifier";
 
 const ACTION_WORDS = [
@@ -165,7 +166,7 @@ export function extractWorkItems(text: string, objectHints: string[] = []): AiWo
       workType: classification.workType,
       priority: classification.priority,
       recommendedDepartment: classification.recommendedDepartment,
-      confidence: Math.min(0.96, 0.72 + (classification.category !== "Інше" ? 0.08 : 0) + (classification.workType !== "other" ? 0.08 : 0)),
+      confidence: Math.min(0.96, 0.72 + (classification.category !== defaultTicketCategory ? 0.08 : 0) + (classification.workType !== "other" ? 0.08 : 0)),
       reasoning: classification.reasoning,
     };
   });
