@@ -38,7 +38,9 @@ export default async function WorkersPage({
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2"><BriefcaseBusiness className="h-5 w-5 text-orange-300" />Новий виконавець</CardTitle>
-          <CardDescription>Telegram ID потрібен, щоб надсилати виконавцю заявку з кнопкою “Виконав”.</CardDescription>
+          <CardDescription>
+            Щоб підключити Telegram, виконавець має відкрити бота і натиснути /start. Telegram username використовується для прив'язки, Telegram ID - для надсилання заявок.
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <WorkerForm categories={categoriesResult.data} action={createWorkerAction} submitLabel="Додати виконавця" />
@@ -56,9 +58,12 @@ export default async function WorkersPage({
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
                     <CardTitle className="break-words text-lg">{worker.name}</CardTitle>
-                    <CardDescription>
-                      {worker.telegram_username ? `@${worker.telegram_username}` : "Telegram username не вказано"} · ID: {worker.telegram_id || "-"}
-                    </CardDescription>
+                    <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                      <span className="break-words">{worker.telegram_username ? `@${worker.telegram_username}` : "Telegram username не вказано"}</span>
+                      <span className="text-stone-600">·</span>
+                      <span>ID: {worker.telegram_id || "-"}</span>
+                      <TelegramConnectionBadge worker={worker} />
+                    </div>
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <Badge tone={worker.is_active ? "green" : "default"}>{worker.is_active ? "Активний" : "Неактивний"}</Badge>
@@ -102,6 +107,12 @@ export default async function WorkersPage({
       </div>
     </div>
   );
+}
+
+function TelegramConnectionBadge({ worker }: { worker: WorkerWithCategories }) {
+  if (worker.telegram_id) return <Badge tone="green">Підключено</Badge>;
+  if (worker.telegram_username) return <Badge tone="orange">Очікує підключення</Badge>;
+  return <Badge>Username не вказано</Badge>;
 }
 
 function WorkerForm({

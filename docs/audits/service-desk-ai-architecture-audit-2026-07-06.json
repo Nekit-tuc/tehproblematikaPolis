@@ -1,0 +1,193 @@
+{
+  "auditDate": "2026-07-06",
+  "projectPath": "C:\\Users\\User\\Desktop\\Розробка\\Проект Заяка техпроблематики",
+  "branch": "feature/workers-module",
+  "mode": "audit_only",
+  "codeChanged": false,
+  "migrationsChanged": false,
+  "commitsCreated": false,
+  "build": {
+    "command": "npm run build",
+    "status": "passed"
+  },
+  "lint": {
+    "command": "npm run lint",
+    "status": "not_usable_non_interactive",
+    "reason": "next lint prompts to configure ESLint"
+  },
+  "summary": {
+    "health": "build_passes_but_architecture_has_runtime_and_data_model_risks",
+    "mainProblem": "The project is split between profile-based workers and the new workers table model.",
+    "primaryRiskAreas": [
+      "worker data model",
+      "ticket lifecycle",
+      "permissions and RLS",
+      "Telegram callback deployment drift",
+      "reports"
+    ]
+  },
+  "routes": {
+    "app": [
+      "/dashboard",
+      "/tickets",
+      "/tickets/new",
+      "/tickets/[id]",
+      "/ai-tickets",
+      "/ai-test",
+      "/objects",
+      "/workers",
+      "/workers/[id]",
+      "/users",
+      "/reports",
+      "/settings"
+    ],
+    "api": [
+      "/api/telegram/webhook",
+      "/api/ai/classify"
+    ]
+  },
+  "findings": [
+    {
+      "id": "F001",
+      "severity": "critical",
+      "title": "Two worker models are active at the same time",
+      "details": "Old code uses profiles.role=worker and tickets.assigned_to. New workers module uses workers and tickets.assignee_worker_id. Permissions, RLS, reports, and UI do not consistently use the same model.",
+      "evidence": [
+        "lib/auth/permissions.ts uses assigned_to for worker permissions",
+        "lib/supabase/queries.ts filters worker tickets by assigned_to",
+        "lib/supabase/worker-queries.ts uses assignee_worker_id",
+        "tickets table contains both assigned_to and assignee_worker_id"
+      ],
+      "impact": "Workers may not see tickets assigned through the new module; reports may be wrong; RLS may block or expose wrong data.",
+      "recommendation": "Choose one canonical worker model and migrate permissions, RLS, reports, queries, and UI to it."
+    },
+    {
+      "id": "F002",
+      "severity": "critical",
+      "title": "Pending review confirmation has duplicated business logic",
+      "details": "AI-ticket confirmation and ticket-detail confirmation perform different transitions.",
+      "evidence": [
+        "app/(app)/ai-tickets/actions.ts confirmAiTicketAction may assign worker and send Telegram",
+        "app/(app)/tickets/[id]/actions.ts confirmTicketAction changes pending_review to new"
+      ],
+      "impact": "The same ticket can follow different lifecycle paths depending on which page is used.",
+      "recommendation": "Create a shared ticket lifecycle service for confirming, rejecting, assigning, and sending worker notifications."
+    },
+    {
+      "id": "F003",
+      "severity": "critical",
+      "title": "Permissions and RLS still use the old assigned_to model",
+      "details": "Worker access in application permissions and Supabase policies is still tied to tickets.assigned_to/auth.uid(), while the new module assigns tickets through assignee_worker_id.",
+      "evidence": [
+        "lib/auth/permissions.ts canViewTicket/canEditTicket use assigned_to",
+        "RLS policies from migrations use assigned_to = auth.uid()"
+      ],
+      "impact": "Assigned workers in the new workers table may not have correct access.",
+      "recommendation": "Define relation between workers and auth profiles or treat workers as Telegram-only executors, then update RLS accordingly."
+    },
+    {
+      "id": "F004",
+      "severity": "critical",
+      "title": "Telegram worker callback may be running old deployed code",
+      "details": "Local code routes wd:* callback_query before message handling, but the reported Telegram behavior matches the legacy dialog fallback.",
+      "evidence": [
+        "lib/telegram/bot.ts locally handles callback_query first",
+        "lib/telegram/handlers.ts contains legacy stale action response",
+        "User observed stale action text after pressing worker Done button"
+      ],
+      "impact": "Production Telegram may keep failing even when local branch is fixed.",
+      "recommendation": "Verify Telegram getWebhookInfo, Vercel deployment branch and commit, and redeploy the exact feature/workers-module commit."
+    },
+    {
+      "id": "F005",
+      "severity": "critical",
+      "title": "Reports are not adapted to the new workers module",
+      "details": "Worker analytics still rely on profiles and assigned_to instead of workers and assignee_worker_id.",
+      "evidence": [
+        "lib/reports/analytics.ts uses profile-based worker logic",
+        "New worker assignment uses tickets.assignee_worker_id"
+      ],
+      "impact": "Excel reports can show incorrect performer statistics.",
+      "recommendation": "Update report queries and aggregation to use assignee_worker_id and workers table."
+    },
+    {
+      "id": "F006",
+      "severity": "high",
+      "title": "Webhook documentation does not match implementation",
+      "details": "The route checks query param ?secret=, while documentation mentions Telegram secret_token/header.",
+      "impact": "Webhook can be installed with the wrong secret mechanism.",
+      "recommendation": "Update README and deployment notes to one supported method."
+    },
+    {
+      "id": "F007",
+      "severity": "high",
+      "title": "sendTicketToWorker has hidden assignment side effects",
+      "details": "Sending Telegram can also update ticket assignment/status if the selected worker differs.",
+      "impact": "A notification action can mutate core ticket ownership unexpectedly.",
+      "recommendation": "Separate assignment from notification sending."
+    },
+    {
+      "id": "F008",
+      "severity": "medium",
+      "title": "Status naming is inconsistent",
+      "details": "Some code mentions completed while the ticket enum uses done as final completion status.",
+      "impact": "Filters and statistics may misclassify completed work.",
+      "recommendation": "Use one canonical completed status, preferably the DB enum value."
+    },
+    {
+      "id": "F009",
+      "severity": "medium",
+      "title": "Workers route is not fully represented in mobile navigation",
+      "details": "Desktop sidebar includes /workers, but mobile navigation does not fully expose it.",
+      "impact": "Mobile users may not find the workers module.",
+      "recommendation": "Add /workers to role-aware mobile navigation."
+    },
+    {
+      "id": "F010",
+      "severity": "medium",
+      "title": "ESLint is not configured for non-interactive CI",
+      "details": "npm run lint launches next lint setup prompt.",
+      "impact": "CI cannot reliably lint without manual input.",
+      "recommendation": "Add explicit ESLint config or update lint script."
+    }
+  ],
+  "telegram": {
+    "webhookSecretMode": "query_param_secret",
+    "secretEnv": "TELEGRAM_WEBHOOK_SECRET",
+    "workerDoneCallbackData": "wd:{token}",
+    "localRoutingStatus": "callback_query_is_handled_before_message",
+    "legacyStaleActionLocation": [
+      "lib/telegram/messages.ts",
+      "lib/telegram/handlers.ts"
+    ],
+    "deploymentRisk": "If stale action appears in Telegram, webhook likely points to old Vercel deployment or wrong branch."
+  },
+  "ai": {
+    "architecture": "AI v2 Work Items",
+    "openaiMode": "enabled_when_OPENAI_API_KEY_exists",
+    "fallbackMode": "safe fallback parser",
+    "risk": "Object resolver candidate selection should be checked for ambiguous/not_found cases."
+  },
+  "database": {
+    "importantMigrations": [
+      "006_ai_ticket_intake.sql",
+      "009_ticket_number_sequence.sql",
+      "010_workers_module.sql",
+      "011_worker_ticket_actions.sql"
+    ],
+    "mainConcern": "RLS policies still depend on assigned_to while new worker assignments use assignee_worker_id."
+  },
+  "recommendedFixOrder": [
+    "Verify Telegram webhook URL, branch, deployment SHA, and query secret mode.",
+    "Decide canonical worker model: profiles/assigned_to or workers/assignee_worker_id.",
+    "Move ticket lifecycle transitions into shared server-side services.",
+    "Update permissions and RLS to match the canonical worker model.",
+    "Unify pending_review confirmation behavior across /ai-tickets and /tickets/[id].",
+    "Update reports to use the new worker assignment model.",
+    "Clean up webhook docs, lint config, and mobile navigation."
+  ],
+  "createdFiles": [
+    "docs/audits/service-desk-ai-architecture-audit-2026-07-06.md",
+    "docs/audits/service-desk-ai-architecture-audit-2026-07-06.json"
+  ]
+}

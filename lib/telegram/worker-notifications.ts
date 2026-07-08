@@ -51,7 +51,16 @@ export async function sendTicketToWorker(ticketId: string, workerId: string, act
   if (workerError) return { ok: false, error: workerError.message };
   if (!ticket) return { ok: false, error: "Заявку не знайдено." };
   if (!worker) return { ok: false, error: "Виконавця не знайдено." };
-  if (!worker.telegram_id) return { ok: false, error: "У виконавця не вказано Telegram ID." };
+  if (!worker.telegram_id) {
+    console.warn("[telegram-worker]", {
+      result: "send_skipped",
+      reason: "telegram_not_connected",
+      ticketId,
+      workerId,
+      hasTelegramUsername: Boolean(worker.telegram_username),
+    });
+    return { ok: false, error: "У виконавця не підключено Telegram. Він має відкрити бота і натиснути /start." };
+  }
 
   if (ticket.assignee_worker_id !== workerId) {
     const now = new Date().toISOString();

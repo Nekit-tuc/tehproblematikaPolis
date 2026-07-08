@@ -1,44 +1,46 @@
 import type { TelegramUpdate } from "./client";
-import { sendTelegramMessage } from "./client";
-import { handleTelegramCallback } from "./handlers";
+import { answerCallbackQuery } from "./client";
+import { handleTelegramCallback, isLegacyTelegramCallbackData } from "./handlers";
 import { handleTelegramGroupMessage } from "./group-intake";
 import { handleWorkerDoneCallback } from "./worker-callbacks";
+import { linkWorkerTelegramFromStart } from "./worker-linking";
 
-function allowedPrivateTestUserIds() {
-  return new Set(
-    (process.env.TELEGRAM_TEST_USER_IDS ?? "")
-      .split(",")
-      .map((value) => value.trim())
-      .filter(Boolean),
-  );
-}
-
-function isAllowedPrivateTestUser(userId: number | undefined) {
-  return Boolean(userId && allowedPrivateTestUserIds().has(String(userId)));
+function callbackPrefix(data: string) {
+  return data.split(":")[0] || "unknown";
 }
 
 export async function handleTelegramUpdate(update: TelegramUpdate) {
   if (update.callback_query) {
     const data = update.callback_query.data ?? "";
+    const callbackDataLength = Buffer.byteLength(data, "utf8");
 
     if (data.startsWith("wd:")) {
-      console.info("[telegram-worker]", {
-        result: "callback_route",
-        handled: true,
+      console.info("[telegram-callback-router]", {
+        updateId: update.update_id,
+        callbackDataPrefix: "wd",
+        callbackDataLength,
         route: "worker_done",
-        callbackData: data,
-        callbackDataLength: Buffer.byteLength(data, "utf8"),
       });
       await handleWorkerDoneCallback(update.callback_query);
       return { handled: true, created: false, reason: "worker_done_callback" } as const;
     }
 
-    console.info("[telegram-callback]", {
-      result: "callback_route",
-      handled: true,
+    if (!isLegacyTelegramCallbackData(data)) {
+      console.warn("[telegram-callback-router]", {
+        updateId: update.update_id,
+        callbackDataPrefix: callbackPrefix(data),
+        callbackDataLength,
+        route: "unsupported_callback",
+      });
+      await answerCallbackQuery(update.callback_query.id, "Ця дія вже неактуальна або не підтримується.");
+      return { handled: true, created: false, reason: "unsupported_callback_query" } as const;
+    }
+
+    console.info("[telegram-callback-router]", {
+      updateId: update.update_id,
+      callbackDataPrefix: callbackPrefix(data),
+      callbackDataLength,
       route: "legacy_ticket_flow",
-      callbackData: data,
-      callbackDataLength: Buffer.byteLength(data, "utf8"),
     });
     await handleTelegramCallback(update.callback_query);
     return { handled: true, created: false, reason: "callback_query_processed" } as const;
@@ -46,15 +48,10 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
 
   if (update.message) {
     const isPrivate = update.message.chat.type === "private";
-    const allowedPrivateTestUser = isAllowedPrivateTestUser(update.message.from?.id);
+
     if (isPrivate && update.message.text?.trim() === "/start") {
-      if (!allowedPrivateTestUser) {
-        console.info("[telegram-private-test]", { chatType: "private", userId: update.message.from?.id ? String(update.message.from.id) : null, allowedPrivateTestUser, result: "ignored", reason: "private_user_not_allowed" });
-        return { handled: true, created: false, reason: "private_user_not_allowed" } as const;
-      }
-      await sendTelegramMessage(update.message.chat.id, "Привіт. Це тестовий режим Service Desk AI. Надішли текст заявки, і я створю AI-заявку на перевірку.");
-      console.info("[telegram-private-test]", { chatType: "private", userId: String(update.message.from?.id), allowedPrivateTestUser, result: "processed", reason: "start_message_sent" });
-      return { handled: true, created: false, reason: "start_message_sent" } as const;
+      const linkResult = await linkWorkerTelegramFromStart(update.message);
+      return { handled: true, created: false, reason: linkResult.reason } as const;
     }
 
     const result = await handleTelegramGroupMessage(update.message);

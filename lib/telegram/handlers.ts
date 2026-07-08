@@ -15,6 +15,14 @@ import { clearTelegramSession, getTelegramSession, saveTelegramSession, type Tel
 import { buildTelegramTicketSummary, createTicketFromTelegram, findTelegramProfile, getActiveCategories, getAvailableObjects, ticketUrl } from "./tickets";
 
 const MAX_TELEGRAM_PHOTOS = 5;
+const LEGACY_CALLBACK_VALUES = new Set(["ticket:start", "ticket:cancel", "photos:more", "photos:done", "ticket:confirm"]);
+const LEGACY_CALLBACK_PREFIXES = ["object:", "category:"];
+
+export function isLegacyTelegramCallbackData(data: string | undefined) {
+  if (!data) return false;
+  if (data.startsWith("wd:")) return false;
+  return LEGACY_CALLBACK_VALUES.has(data) || LEGACY_CALLBACK_PREFIXES.some((prefix) => data.startsWith(prefix));
+}
 
 function telegramIdFromMessage(message: TelegramMessage) {
   return message.from?.id ? String(message.from.id) : null;
@@ -127,6 +135,23 @@ export async function handleTelegramCallback(callback: TelegramCallbackQuery) {
   const telegramId = telegramIdFromCallback(callback);
   const chatId = callback.message?.chat.id;
   if (!chatId || !callback.data) return;
+
+  if (callback.data.startsWith("wd:")) {
+    console.warn("[telegram-legacy-callback] worker callback rejected by legacy handler", {
+      callbackDataPrefix: "wd",
+      callbackDataLength: Buffer.byteLength(callback.data, "utf8"),
+    });
+    return;
+  }
+
+  if (!isLegacyTelegramCallbackData(callback.data)) {
+    console.warn("[telegram-legacy-callback] unsupported callback rejected", {
+      callbackDataPrefix: callback.data.split(":")[0] || "unknown",
+      callbackDataLength: Buffer.byteLength(callback.data, "utf8"),
+    });
+    await answerCallbackQuery(callback.id, "Ця дія вже неактуальна або не підтримується.");
+    return;
+  }
 
   await answerCallbackQuery(callback.id);
 
