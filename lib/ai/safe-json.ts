@@ -1,6 +1,8 @@
 import type { AiGroupMessageAnalysis, AiPriority, AiWorkItem, AiWorkType } from "@/types/ai";
 
 const WORK_TYPES: AiWorkType[] = ["repair", "install", "replace", "inspect", "administrative", "cleaning", "safety", "other"];
+const DEFAULT_CATEGORY = "\u0411\u0443\u0434\u0456\u0432\u0435\u043b\u044c\u043d\u0456 \u0440\u043e\u0431\u043e\u0442\u0438";
+const DEFAULT_DEPARTMENT = "\u0422\u0435\u0445\u043d\u0456\u0447\u043d\u0438\u0439 \u0432\u0456\u0434\u0434\u0456\u043b";
 
 export type ParsedAiAnalysis = {
   analysis: AiGroupMessageAnalysis;
@@ -29,7 +31,7 @@ export function withTicketAlias(analysis: Omit<AiGroupMessageAnalysis, "tickets"
   return { ...analysis, workItems, tickets: workItems };
 }
 
-export function safeNoTicket(reason = "Повідомлення не схоже на технічну заявку."): AiGroupMessageAnalysis {
+export function safeNoTicket(reason = "\u041f\u043e\u0432\u0456\u0434\u043e\u043c\u043b\u0435\u043d\u043d\u044f \u043d\u0435 \u0441\u0445\u043e\u0436\u0435 \u043d\u0430 \u0442\u0435\u0445\u043d\u0456\u0447\u043d\u0443 \u0437\u0430\u044f\u0432\u043a\u0443."): AiGroupMessageAnalysis {
   return withTicketAlias({
     isTicketMessage: false,
     objectId: null,
@@ -42,7 +44,7 @@ export function safeNoTicket(reason = "Повідомлення не схоже 
   });
 }
 
-export function safeObjectMissing(reason = "Не вдалося впевнено визначити об'єкт."): AiGroupMessageAnalysis {
+export function safeObjectMissing(reason = "\u041d\u0435 \u0432\u0434\u0430\u043b\u043e\u0441\u044f \u0432\u043f\u0435\u0432\u043d\u0435\u043d\u043e \u0432\u0438\u0437\u043d\u0430\u0447\u0438\u0442\u0438 \u043e\u0431'\u0454\u043a\u0442."): AiGroupMessageAnalysis {
   return withTicketAlias({
     isTicketMessage: true,
     objectId: null,
@@ -72,7 +74,7 @@ function normalizeWorkType(value: unknown, warnings: string[]) {
 }
 
 function normalizeCategory(value: unknown, allowedCategories: readonly string[], warnings: string[]) {
-  const fallback = allowedCategories[allowedCategories.length - 1] ?? "Інше";
+  const fallback = allowedCategories.find((category) => category === DEFAULT_CATEGORY) ?? allowedCategories[0] ?? DEFAULT_CATEGORY;
   if (typeof value !== "string") {
     warnings.push(`category normalized from ${String(value)} to ${fallback}`);
     return fallback;
@@ -88,8 +90,8 @@ function normalizeCategory(value: unknown, allowedCategories: readonly string[],
 function normalizeDepartment(value: unknown, allowedDepartments: readonly string[]) {
   const department = asStringOrNull(value);
   if (!department) return null;
-  if (department === "Технічний відділ") return department;
-  return allowedDepartments.find((allowed) => allowed === department) ?? allowedDepartments.find((allowed) => allowed.toLowerCase() === department.toLowerCase()) ?? "Технічний відділ";
+  if (department === DEFAULT_DEPARTMENT) return department;
+  return allowedDepartments.find((allowed) => allowed === department) ?? allowedDepartments.find((allowed) => allowed.toLowerCase() === department.toLowerCase()) ?? DEFAULT_DEPARTMENT;
 }
 
 export function parseAiAnalysisJsonWithMeta({
@@ -153,7 +155,7 @@ export function parseAiAnalysisJsonWithMeta({
       priority: normalizePriority(item.priority, allowedPriorities, warnings),
       recommendedDepartment: normalizeDepartment(item.recommendedDepartment, allowedDepartments),
       confidence: clampConfidence(item.confidence),
-      reasoning: asStringOrNull(item.reasoning) ?? "AI визначив окрему роботу з повідомлення Telegram-групи.",
+      reasoning: asStringOrNull(item.reasoning) ?? "AI \u0432\u0438\u0437\u043d\u0430\u0447\u0438\u0432 \u043e\u043a\u0440\u0435\u043c\u0443 \u0440\u043e\u0431\u043e\u0442\u0443 \u0437 \u043f\u043e\u0432\u0456\u0434\u043e\u043c\u043b\u0435\u043d\u043d\u044f Telegram-\u0433\u0440\u0443\u043f\u0438.",
     };
   });
 
@@ -168,7 +170,7 @@ export function parseAiAnalysisJsonWithMeta({
     confidence: clampConfidence(value.confidence),
     workItems,
     missingFields,
-    reason: asStringOrNull(value.reason) ?? "AI проаналізував повідомлення.",
+    reason: asStringOrNull(value.reason) ?? "AI \u043f\u0440\u043e\u0430\u043d\u0430\u043b\u0456\u0437\u0443\u0432\u0430\u0432 \u043f\u043e\u0432\u0456\u0434\u043e\u043c\u043b\u0435\u043d\u043d\u044f.",
   });
 
   return {

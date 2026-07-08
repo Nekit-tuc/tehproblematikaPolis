@@ -38,7 +38,7 @@ export async function getCategories(): Promise<QueryResult<Category[]>> {
 export async function getAllCategories(): Promise<QueryResult<Category[]>> {
   if (!hasSupabaseEnv()) return emptyWithError([]);
   const supabase = await createClient();
-  const { data, error } = await supabase.from("categories").select("*").order("name");
+  const { data, error } = await supabase.from("categories").select("*").eq("is_active", true).order("name");
   return { data: (data ?? []) as Category[], error: error?.message ?? null };
 }
 

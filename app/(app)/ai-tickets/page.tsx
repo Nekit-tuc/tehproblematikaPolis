@@ -101,7 +101,7 @@ export default async function AiTicketsPage({ searchParams }: { searchParams: Pr
       .in("source", ["telegram_group", "telegram_private_test"])
       .order("created_at", { ascending: false }),
     supabase.from("objects").select("*").order("name"),
-    supabase.from("categories").select("*").order("name"),
+    supabase.from("categories").select("*").eq("is_active", true).order("name"),
     getActiveWorkers(),
   ]);
 

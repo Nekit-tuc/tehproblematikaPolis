@@ -1,50 +1,21 @@
-export const AI_DISPATCHER_ENV_KEY = "OPENAI_API_KEY";
+import { serviceDeskCategories } from "./category-taxonomy";
 
-export const serviceDeskCategories = [
-  "Сантехніка",
-  "Електрика",
-  "Будівельні роботи",
-  "Малярні роботи",
-  "Покрівля",
-  "Водовідведення",
-  "Двері та замки",
-  "Вікна",
-  "Роботи студентів",
-  "Холодильне обладнання",
-  "Кондиціонування та вентиляція",
-  "Торгове обладнання",
-  "Каси та POS-обладнання",
-  "Комп'ютери та мережа",
-  "Інтернет та зв'язок",
-  "Меблі",
-  "Вивіски та реклама",
-  "Прибирання",
-  "Благоустрій території",
-  "Пожежна безпека",
-  "Адміністративне питання",
-  "Інше",
-] as const;
+export { serviceDeskCategories };
+
+export const AI_DISPATCHER_ENV_KEY = "OPENAI_API_KEY";
 
 export const serviceDeskPriorities = ["low", "medium", "high", "critical"] as const;
 
 export const serviceDeskWorkTypes = ["repair", "install", "replace", "inspect", "administrative", "cleaning", "safety", "other"] as const;
 
 export const serviceDeskDepartments = [
-  "Сантехнік",
-  "Електрик",
   "Будівельна бригада",
-  "Малярна бригада",
-  "Покрівельник",
-  "Водовідведення",
-  "Двері та замки",
-  "Вікна",
+  "Сантехнік",
+  "Каналізаційна служба",
+  "Електрик",
+  "Майстер з дверей та вікон",
+  "Зварювальна / ремонтна бригада",
   "Студентська бригада",
-  "Холодильне обладнання",
-  "Кліматична служба",
-  "IT / POS",
-  "Пожежна безпека",
-  "Адміністрація",
-  "Технічний менеджер",
   "Технічний відділ",
 ] as const;
 
@@ -58,26 +29,38 @@ export const ticketClassifierSystemPrompt = `
 - останній символ відповіді має бути };
 - не використовуй markdown;
 - не використовуй \`\`\`json;
-- не використовуй \`\`\`;
 - не додавай пояснення до JSON або після JSON;
 - не додавай коментарі;
 - не додавай текст поза JSON;
-- усі ключі мають бути в подвійних лапках;
-- рядки мають бути в подвійних лапках;
-- якщо немає заявок, все одно поверни валідний JSON object.
+- усі ключі та рядки мають бути в подвійних лапках.
+
+Дозволені категорії тільки такі:
+1. Будівельні роботи
+2. Сантехніка
+3. Каналізація
+4. Електрика
+5. Вікна / двері / фурнітура
+6. Буд-роботи, зварювальні, ремонтні проф
+7. Студенти
+
+Правила категоризації:
+- тече кран, протікає вода, поламаний кран, труби, водопостачання -> Сантехніка;
+- забита раковина, не сходить вода, унітаз не змиває, каналізація, стоки -> Каналізація;
+- розетка, світло, автомат, кабель, електрика, дзвінок з вулиці -> Електрика;
+- замок, ключ, двері, вікно, доводчик, фурнітура -> Вікна / двері / фурнітура;
+- плитка, фасад, фарбування, монтаж, вентиляція, ремонт стін/підлоги -> Будівельні роботи;
+- лавка, стілець, стіл, зварювання, парковка, двір, прилегла територія -> Буд-роботи, зварювальні, ремонтні проф;
+- прибирання, винести, вивезти, косіння, дах, клінінг, санітарний стан -> Студенти.
 
 Правила аналізу:
 - одне повідомлення Telegram-групи може містити багато workItems;
 - не об'єднуй різні незалежні роботи в одну;
 - не дроби одну проблему одного вузла або обладнання на кілька workItems;
-- адресу або назву магазину не включай в description;
-- текст у дужках перенось у description як уточнення;
-- якщо localStoreMatchStatus exact або high_confidence, використовуй fixedStore і не змінюй objectId/objectName/address;
-- якщо localStoreMatchStatus ambiguous або not_found і не можеш впевнено вибрати один candidateStore, поверни objectId=null, workItems=[], tickets=[], missingFields=["object"];
-- Object Resolver is authoritative: if resolvedObject is present, use exactly resolvedObject.id/name/address and never override it;
-- If resolvedObject is null, choose objectId only from allowedObjectIds/objectCandidates. If unsure, return objectId=null, workItems=[], tickets=[];
-- Never invent objectId, objectName, address, store, warehouse, office, or any object outside allowedObjectIds;
-- It is better to return no ticket than to create a ticket on the wrong object;
+- адресу або назву магазину не включай у description;
+- текст у дужках переносити у description як уточнення;
+- якщо Object Resolver дав resolvedObject, використовуй тільки resolvedObject.id/name/address і не змінюй об'єкт;
+- якщо об'єкт не визначено впевнено, поверни objectId=null, workItems=[], tickets=[], missingFields=["object"];
+- ніколи не вигадуй об'єкти;
 - category вибирай тільки з allowedCategories;
 - priority вибирай тільки з allowedPriorities;
 - workType вибирай тільки з allowedWorkTypes;
