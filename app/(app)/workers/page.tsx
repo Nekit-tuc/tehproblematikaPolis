@@ -1,4 +1,4 @@
-import { BriefcaseBusiness, Pencil, PowerOff } from "lucide-react";
+import { ArrowLeft, BriefcaseBusiness, Pencil, Plus, PowerOff } from "lucide-react";
 import Link from "next/link";
 import type React from "react";
 import { Alert } from "@/components/ui/alert";
@@ -17,33 +17,64 @@ import { createWorkerAction, deactivateWorkerAction, updateWorkerAction } from "
 export default async function WorkersPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; success?: string }>;
+  searchParams: Promise<{ error?: string; success?: string; addWorker?: string }>;
 }) {
   await requireRole(["admin", "management", "tech_manager"]);
   const params = await searchParams;
   const [workersResult, categoriesResult, statsResult] = await Promise.all([getWorkers(), getCategories(), getWorkerStats()]);
   const error = params.error ? decodeURIComponent(params.error) : workersResult.error ?? categoriesResult.error ?? statsResult.error;
   const statsByWorker = new Map(statsResult.data.map((item) => [item.worker.id, item]));
+  const isCreatingWorker = params.addWorker === "1";
 
   return (
     <div className="page-shell space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Виконавці</h1>
-        <p className="subtle">Довідник майстрів, Telegram-контакти та спеціалізації по категоріях заявок.</p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold">Виконавці</h1>
+          <p className="subtle">Довідник майстрів, Telegram-контакти та спеціалізації по категоріях заявок.</p>
+        </div>
+        {!isCreatingWorker ? (
+          <Button asChild className="min-h-11 w-full rounded-2xl md:w-auto md:rounded-md">
+            <Link href="/workers?addWorker=1"><Plus className="h-4 w-4" />Додати виконавця</Link>
+          </Button>
+        ) : null}
       </div>
 
       {error ? <Alert title="Не вдалося виконати дію">{error}</Alert> : null}
       {params.success ? <Alert title="Зміни збережено">Дані виконавця оновлено.</Alert> : null}
 
-      <Card>
+      {isCreatingWorker ? (
+      <Card className="rounded-3xl border-orange-500/30 bg-stone-950/80 shadow-2xl shadow-black/40 md:rounded-lg">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2"><BriefcaseBusiness className="h-5 w-5 text-orange-300" />Новий виконавець</CardTitle>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <CardTitle className="flex items-center gap-2"><BriefcaseBusiness className="h-5 w-5 text-orange-300" />Новий виконавець</CardTitle>
+              <CardDescription>
+                Щоб підключити Telegram, виконавець має відкрити бота і натиснути /start. Telegram username використовується для прив'язки, Telegram ID - для надсилання заявок.
+              </CardDescription>
+            </div>
+            <Button asChild variant="outline" className="min-h-11 w-full rounded-2xl md:w-auto md:rounded-md">
+              <Link href="/workers"><ArrowLeft className="h-4 w-4" />Скасувати</Link>
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className="pb-28 md:pb-6">
+          <WorkerForm categories={categoriesResult.data} action={createWorkerAction} submitLabel="Додати виконавця" cancelHref="/workers" />
+        </CardContent>
+      </Card>
+      ) : (
+      <>
+      <Card className="border-dashed border-white/10 bg-white/[0.03]">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2"><BriefcaseBusiness className="h-5 w-5 text-orange-300" />Додавання виконавця</CardTitle>
           <CardDescription>
-            Щоб підключити Telegram, виконавець має відкрити бота і натиснути /start. Telegram username використовується для прив'язки, Telegram ID - для надсилання заявок.
+            Форма створення прихована, щоб не займати робочу область. Натисніть кнопку зверху, коли потрібно додати нового виконавця.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <WorkerForm categories={categoriesResult.data} action={createWorkerAction} submitLabel="Додати виконавця" />
+          <Button asChild variant="outline" className="min-h-11 w-full rounded-2xl md:w-auto md:rounded-md">
+            <Link href="/workers?addWorker=1"><Plus className="h-4 w-4" />Додати виконавця</Link>
+          </Button>
         </CardContent>
       </Card>
 
@@ -105,6 +136,8 @@ export default async function WorkersPage({
           );
         })}
       </div>
+      </>
+      )}
     </div>
   );
 }
@@ -120,11 +153,13 @@ function WorkerForm({
   categories,
   action,
   submitLabel,
+  cancelHref,
 }: {
   worker?: WorkerWithCategories;
   categories: Category[];
   action: (formData: FormData) => void | Promise<void>;
   submitLabel: string;
+  cancelHref?: string;
 }) {
   const selected = new Set((worker?.categories ?? []).map((category) => category.id));
   return (
@@ -161,7 +196,14 @@ function WorkerForm({
         <input name="is_active" type="checkbox" defaultChecked={worker?.is_active ?? true} className="h-4 w-4 accent-orange-500" />
         Активний
       </label>
-      <Button type="submit">{submitLabel}</Button>
+      <div className="grid gap-2 md:flex md:flex-wrap">
+        <Button type="submit" className="min-h-11 rounded-2xl md:min-h-0 md:rounded-md">{submitLabel}</Button>
+        {cancelHref ? (
+          <Button asChild type="button" variant="outline" className="min-h-11 rounded-2xl md:min-h-0 md:rounded-md">
+            <Link href={cancelHref}>Скасувати</Link>
+          </Button>
+        ) : null}
+      </div>
     </form>
   );
 }

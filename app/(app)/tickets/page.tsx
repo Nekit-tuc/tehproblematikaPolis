@@ -1,14 +1,18 @@
 import Link from "next/link";
-import { ArrowRight, Filter, Plus } from "lucide-react";
+import { ArrowRight, Filter, Plus, Trash2 } from "lucide-react";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { TD, TH, THead, TBody, TR, Table } from "@/components/ui/table";
+import { ConfirmSubmitButton } from "@/components/tickets/confirm-submit-button";
+import { canHardDeleteTicket } from "@/lib/auth/permissions";
+import { requireAuth } from "@/lib/auth/server";
 import { getTickets } from "@/lib/supabase/queries";
 import { priorityLabels, statusLabels } from "@/lib/labels";
 import { formatDate } from "@/lib/utils";
 import type { TicketStatus } from "@/types/domain";
+import { hardDeleteTicketAction } from "./[id]/actions";
 
 const statusFilters: Array<{ value: "all" | TicketStatus; label: string }> = [
   { value: "all", label: "Всі" },
@@ -32,8 +36,10 @@ export default async function TicketsPage({
 }: {
   searchParams: Promise<{ status?: string; deleted?: string }>;
 }) {
+  const { profile } = await requireAuth();
   const query = await searchParams;
   const { data: tickets, error } = await getTickets();
+  const canDeleteTickets = canHardDeleteTicket(profile);
   const activeStatus = statusFilters.some((filter) => filter.value === query.status) ? query.status : "all";
   const visibleTickets = activeStatus === "all" ? tickets : tickets.filter((ticket) => ticket.status === activeStatus);
 
@@ -65,24 +71,38 @@ export default async function TicketsPage({
 
         <div className="space-y-3">
           {visibleTickets.map((ticket) => (
-            <Link key={ticket.id} href={`/tickets/${ticket.id}`} className="mobile-card block p-4 active:bg-white/5">
-              <div className="flex items-start gap-3">
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-xs font-semibold text-orange-300">{ticket.number}</span>
-                    {ticket.telegram_source_group_id ? <Badge tone="gray">Telegram</Badge> : null}
+            <div key={ticket.id} className="mobile-card overflow-hidden">
+              <Link href={`/tickets/${ticket.id}`} className="block p-4 active:bg-white/5">
+                <div className="flex items-start gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-xs font-semibold text-orange-300">{ticket.number}</span>
+                      {ticket.telegram_source_group_id ? <Badge tone="gray">Telegram</Badge> : null}
+                    </div>
+                    <h2 className="mt-2 line-clamp-2 text-base font-semibold">{ticket.title}</h2>
+                    <p className="mt-2 line-clamp-2 text-sm text-stone-400">{ticket.description}</p>
+                    <div className="mt-3 text-xs text-stone-500">{ticket.object?.name ?? "-"} · {formatDate(ticket.created_at)}</div>
                   </div>
-                  <h2 className="mt-2 line-clamp-2 text-base font-semibold">{ticket.title}</h2>
-                  <p className="mt-2 line-clamp-2 text-sm text-stone-400">{ticket.description}</p>
-                  <div className="mt-3 text-xs text-stone-500">{ticket.object?.name ?? "-"} · {formatDate(ticket.created_at)}</div>
+                  <ArrowRight className="mt-1 h-5 w-5 shrink-0 text-stone-500" />
                 </div>
-                <ArrowRight className="mt-1 h-5 w-5 shrink-0 text-stone-500" />
-              </div>
-              <div className="mt-4 flex flex-wrap gap-2">
-                <Badge tone={statusTone(ticket.status)}>{statusLabels[ticket.status]}</Badge>
-                <Badge tone={ticket.priority === "critical" || ticket.priority === "high" ? "orange" : "gray"}>{priorityLabels[ticket.priority]}</Badge>
-              </div>
-            </Link>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <Badge tone={statusTone(ticket.status)}>{statusLabels[ticket.status]}</Badge>
+                  <Badge tone={ticket.priority === "critical" || ticket.priority === "high" ? "orange" : "gray"}>{priorityLabels[ticket.priority]}</Badge>
+                </div>
+              </Link>
+              {canDeleteTickets ? (
+                <form action={hardDeleteTicketAction.bind(null, ticket.id)} className="border-t border-white/10 p-3">
+                  <ConfirmSubmitButton
+                    type="submit"
+                    variant="destructive"
+                    className="min-h-11 w-full rounded-2xl"
+                    message="Ви точно хочете повністю видалити заявку? Цю дію не можна скасувати."
+                  >
+                    <Trash2 className="h-4 w-4" />Видалити
+                  </ConfirmSubmitButton>
+                </form>
+              ) : null}
+            </div>
           ))}
           {visibleTickets.length === 0 ? <div className="mobile-card p-4 text-sm text-stone-500">Заявок поки немає.</div> : null}
         </div>
@@ -103,7 +123,7 @@ export default async function TicketsPage({
           ) : (
             <Table>
               <THead>
-                <TR><TH>Номер</TH><TH>Заявка</TH><TH>Об'єкт</TH><TH>Виконавець</TH><TH>Статус</TH><TH>Термін</TH></TR>
+                <TR><TH>Номер</TH><TH>Заявка</TH><TH>Об'єкт</TH><TH>Виконавець</TH><TH>Статус</TH><TH>Термін</TH>{canDeleteTickets ? <TH>Дії</TH> : null}</TR>
               </THead>
               <TBody>
                 {visibleTickets.map((ticket) => (
@@ -120,6 +140,20 @@ export default async function TicketsPage({
                     <TD>{ticket.assignee?.full_name ?? "Не призначено"}</TD>
                     <TD><Badge tone={statusTone(ticket.status)}>{statusLabels[ticket.status]}</Badge></TD>
                     <TD>{formatDate(ticket.due_at)}</TD>
+                    {canDeleteTickets ? (
+                      <TD>
+                        <form action={hardDeleteTicketAction.bind(null, ticket.id)}>
+                          <ConfirmSubmitButton
+                            type="submit"
+                            variant="destructive"
+                            size="sm"
+                            message="Ви точно хочете повністю видалити заявку? Цю дію не можна скасувати."
+                          >
+                            <Trash2 className="h-4 w-4" />Видалити
+                          </ConfirmSubmitButton>
+                        </form>
+                      </TD>
+                    ) : null}
                   </TR>
                 ))}
               </TBody>
