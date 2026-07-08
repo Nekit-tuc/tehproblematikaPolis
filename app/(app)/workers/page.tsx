@@ -1,10 +1,11 @@
-import { ArrowLeft, BriefcaseBusiness, Pencil, Plus, PowerOff } from "lucide-react";
+import { ArrowLeft, BriefcaseBusiness, Pencil, Plus, PowerOff, Trash2 } from "lucide-react";
 import Link from "next/link";
 import type React from "react";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { ConfirmSubmitButton } from "@/components/tickets/confirm-submit-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -12,19 +13,20 @@ import { requireRole } from "@/lib/auth/server";
 import { getCategories } from "@/lib/supabase/queries";
 import { getWorkerStats, getWorkers } from "@/lib/supabase/worker-queries";
 import type { Category, WorkerWithCategories } from "@/types/domain";
-import { createWorkerAction, deactivateWorkerAction, updateWorkerAction } from "./actions";
+import { createWorkerAction, deactivateWorkerAction, deleteOrDeactivateWorkerAction, updateWorkerAction } from "./actions";
 
 export default async function WorkersPage({
   searchParams,
 }: {
   searchParams: Promise<{ error?: string; success?: string; addWorker?: string }>;
 }) {
-  await requireRole(["admin", "management", "tech_manager"]);
+  const { profile } = await requireRole(["admin", "management", "tech_manager"]);
   const params = await searchParams;
   const [workersResult, categoriesResult, statsResult] = await Promise.all([getWorkers(), getCategories(), getWorkerStats()]);
   const error = params.error ? decodeURIComponent(params.error) : workersResult.error ?? categoriesResult.error ?? statsResult.error;
   const statsByWorker = new Map(statsResult.data.map((item) => [item.worker.id, item]));
   const isCreatingWorker = params.addWorker === "1";
+  const canDeleteWorkers = profile.role === "admin";
 
   return (
     <div className="page-shell space-y-6">
@@ -41,7 +43,9 @@ export default async function WorkersPage({
       </div>
 
       {error ? <Alert title="Не вдалося виконати дію">{error}</Alert> : null}
-      {params.success ? <Alert title="Зміни збережено">Дані виконавця оновлено.</Alert> : null}
+      {params.success === "deleted" ? <Alert title="Виконавця видалено">Запис виконавця та службові зв'язки видалено з бази.</Alert> : null}
+      {params.success === "deactivated" ? <Alert title="Виконавця деактивовано">У виконавця є пов'язані заявки, тому фізичне видалення не виконувалось.</Alert> : null}
+      {params.success && !["deleted", "deactivated"].includes(params.success) ? <Alert title="Зміни збережено">Дані виконавця оновлено.</Alert> : null}
 
       {isCreatingWorker ? (
       <Card className="rounded-3xl border-orange-500/30 bg-stone-950/80 shadow-2xl shadow-black/40 md:rounded-lg">
@@ -131,6 +135,21 @@ export default async function WorkersPage({
                     ) : null}
                   </div>
                 </details>
+                {canDeleteWorkers ? (
+                  <form action={deleteOrDeactivateWorkerAction.bind(null, worker.id)} className="border-t border-white/10 pt-4">
+                    <ConfirmSubmitButton
+                      type="submit"
+                      variant="destructive"
+                      className="min-h-11 w-full rounded-2xl md:min-h-0 md:w-auto md:rounded-md"
+                      message="Ви точно хочете видалити виконавця? Якщо в нього є заявки, він буде деактивований."
+                    >
+                      <Trash2 className="h-4 w-4" />Видалити виконавця
+                    </ConfirmSubmitButton>
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Якщо є пов'язані заявки, запис не видаляється, а виконавець деактивується.
+                    </p>
+                  </form>
+                ) : null}
               </CardContent>
             </Card>
           );

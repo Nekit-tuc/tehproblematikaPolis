@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireRole } from "@/lib/auth/server";
-import { assignCategoriesToWorker, createWorker, deactivateWorker, updateWorker } from "@/lib/supabase/workers";
+import { assignCategoriesToWorker, createWorker, deactivateWorker, deleteOrDeactivateWorker, updateWorker } from "@/lib/supabase/workers";
 
 function readString(formData: FormData, key: string) {
   const value = formData.get(key);
@@ -69,4 +69,14 @@ export async function deactivateWorkerAction(workerId: string) {
 
   revalidatePath("/workers");
   redirect("/workers?success=deactivated");
+}
+
+export async function deleteOrDeactivateWorkerAction(workerId: string) {
+  await requireRole(["admin"]);
+  const result = await deleteOrDeactivateWorker(workerId);
+  if (result.error) redirect(errorUrl(result.error.message));
+
+  revalidatePath("/workers");
+  revalidatePath(`/workers/${workerId}`);
+  redirect(`/workers?success=${result.mode === "deleted" ? "deleted" : "deactivated"}`);
 }

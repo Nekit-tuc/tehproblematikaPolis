@@ -49,6 +49,32 @@ export async function deactivateWorker(workerId: string) {
   return supabase.from("workers").update({ is_active: false, updated_at: new Date().toISOString() }).eq("id", workerId);
 }
 
+export async function deleteOrDeactivateWorker(workerId: string) {
+  const supabase = await createClient();
+  const { count, error: countError } = await supabase
+    .from("tickets")
+    .select("id", { count: "exact", head: true })
+    .eq("assignee_worker_id", workerId);
+  if (countError) return { data: null, error: countError, mode: null as "deleted" | "deactivated" | null };
+
+  if ((count ?? 0) > 0) {
+    const result = await supabase
+      .from("workers")
+      .update({ is_active: false, updated_at: new Date().toISOString() })
+      .eq("id", workerId);
+    return { data: result.data, error: result.error, mode: result.error ? null : "deactivated" as const };
+  }
+
+  const actionDelete = await supabase.from("worker_ticket_actions").delete().eq("worker_id", workerId);
+  if (actionDelete.error) return { data: null, error: actionDelete.error, mode: null as "deleted" | "deactivated" | null };
+
+  const categoriesDelete = await supabase.from("worker_categories").delete().eq("worker_id", workerId);
+  if (categoriesDelete.error) return { data: null, error: categoriesDelete.error, mode: null as "deleted" | "deactivated" | null };
+
+  const workerDelete = await supabase.from("workers").delete().eq("id", workerId);
+  return { data: workerDelete.data, error: workerDelete.error, mode: workerDelete.error ? null : "deleted" as const };
+}
+
 export async function assignCategoriesToWorker(workerId: string, categoryIds: string[]) {
   const supabase = await createClient();
   const uniqueCategoryIds = Array.from(new Set(categoryIds.filter(Boolean)));
