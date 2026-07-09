@@ -1,7 +1,8 @@
 import { measureAsync } from "@/lib/performance";
 import { hasSupabaseEnv, missingSupabaseMessage } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
-import type { TicketStatus, TicketWithRelations } from "@/types/domain";
+import { sendWorkPlanToWorker } from "@/lib/telegram/work-plan-notifications";
+import type { TicketStatus, TicketWithRelations, Worker } from "@/types/domain";
 import type { QueryResult } from "./queries";
 
 export type WorkPlanStatus = "draft" | "sent" | "partially_done" | "done" | "cancelled";
@@ -48,6 +49,21 @@ export type WorkPlanItem = {
   sort_order: number;
   created_at: string;
   ticket?: TicketWithRelations | null;
+  worker?: Worker | null;
+};
+
+export type WorkPlanDispatchStatus = "sent" | "failed" | "skipped_no_telegram";
+
+export type WorkPlanDispatch = {
+  id: string;
+  work_plan_id: string;
+  worker_id?: string | null;
+  telegram_chat_id?: string | null;
+  sent_at: string;
+  status: WorkPlanDispatchStatus;
+  message_id?: string | null;
+  error?: string | null;
+  worker?: Worker | null;
 };
 
 export type PlanningFilters = {
@@ -67,6 +83,13 @@ export type CreateWorkPlanInput = {
   periodEnd: string;
   notes?: string | null;
   createdBy?: string | null;
+};
+
+export type UpdateWorkPlanInput = {
+  title: string;
+  periodStart: string;
+  periodEnd: string;
+  notes?: string | null;
 };
 
 const planningStatuses: TicketStatus[] = ["new", "assigned", "in_progress", "waiting_admin_confirmation"];
@@ -102,6 +125,7 @@ const planItemSelect = `
   category,
   sort_order,
   created_at,
+  worker:workers(id, name, phone, telegram_username, telegram_id, is_active, notes, created_at, updated_at),
   ticket:tickets(
     id,
     number,
@@ -123,6 +147,18 @@ const planItemSelect = `
     object:objects(id, name, type, object_number, city, district, address, is_active, created_at),
     category:categories(id, name, description, is_active, created_at)
   )
+`;
+
+const dispatchSelect = `
+  id,
+  work_plan_id,
+  worker_id,
+  telegram_chat_id,
+  sent_at,
+  status,
+  message_id,
+  error,
+  worker:workers(id, name, phone, telegram_username, telegram_id, is_active, notes, created_at, updated_at)
 `;
 
 function emptyWithError<T>(data: T): QueryResult<T> {
@@ -345,6 +381,25 @@ export async function getWorkPlanById(id: string): Promise<QueryResult<WorkPlan 
   return { data: data as WorkPlan | null, error: error?.message ?? null };
 }
 
+export async function updateWorkPlan(id: string, input: UpdateWorkPlanInput): Promise<QueryResult<WorkPlan | null>> {
+  if (!hasSupabaseEnv()) return { data: null, error: missingSupabaseMessage };
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("work_plans")
+    .update({
+      title: input.title,
+      period_start: input.periodStart,
+      period_end: input.periodEnd,
+      notes: input.notes || null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id)
+    .eq("status", "draft")
+    .select("id, title, period_start, period_end, status, created_by, created_at, updated_at, sent_at, notes")
+    .maybeSingle();
+  return { data: data as WorkPlan | null, error: error?.message ?? null };
+}
+
 export async function getWorkPlanItems(id: string): Promise<QueryResult<WorkPlanItem[]>> {
   if (!hasSupabaseEnv()) return emptyWithError([]);
   const supabase = await createClient();
@@ -354,6 +409,14 @@ export async function getWorkPlanItems(id: string): Promise<QueryResult<WorkPlan
     .eq("work_plan_id", id)
     .order("sort_order", { ascending: true });
   return { data: (data ?? []) as unknown as WorkPlanItem[], error: error?.message ?? null };
+}
+
+export async function removeWorkPlanItem(workPlanId: string, ticketId: string) {
+  const planResult = await getWorkPlanById(workPlanId);
+  if (planResult.error) return { data: null, error: planResult.error };
+  if (!planResult.data) return { data: null, error: "План не знайдено." };
+  if (planResult.data.status !== "draft") return { data: null, error: "Змінювати склад можна тільки у чернетці плану." };
+  return removeTicketFromWorkPlan(workPlanId, ticketId);
 }
 
 export async function updateWorkPlanStatus(id: string, status: WorkPlanStatus) {
@@ -368,6 +431,120 @@ export async function updateWorkPlanStatus(id: string, status: WorkPlanStatus) {
   return { data, error: error?.message ?? null };
 }
 
-export async function sendWorkPlanToWorkers() {
-  return { data: null, error: "Telegram-розсилка планів буде додана на етапі 2." };
+export async function cancelWorkPlan(workPlanId: string) {
+  const planResult = await getWorkPlanById(workPlanId);
+  if (planResult.error) return { data: null, error: planResult.error };
+  if (!planResult.data) return { data: null, error: "План не знайдено." };
+  if (planResult.data.status !== "draft") return { data: null, error: "Скасувати можна тільки чернетку плану." };
+  return updateWorkPlanStatus(workPlanId, "cancelled");
+}
+
+export async function getWorkPlanDispatches(workPlanId: string): Promise<QueryResult<WorkPlanDispatch[]>> {
+  if (!hasSupabaseEnv()) return emptyWithError([]);
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("work_plan_dispatches")
+    .select(dispatchSelect)
+    .eq("work_plan_id", workPlanId)
+    .order("sent_at", { ascending: false });
+  return { data: (data ?? []) as unknown as WorkPlanDispatch[], error: error?.message ?? null };
+}
+
+function groupedItemsByWorker(items: WorkPlanItem[]) {
+  const groups = new Map<string, WorkPlanItem[]>();
+  for (const item of items) {
+    if (!item.worker_id) continue;
+    const group = groups.get(item.worker_id) ?? [];
+    group.push(item);
+    groups.set(item.worker_id, group);
+  }
+  return groups;
+}
+
+async function createDispatchRow(input: {
+  workPlanId: string;
+  workerId: string;
+  telegramChatId?: string | null;
+  status: WorkPlanDispatchStatus;
+  messageId?: string | null;
+  error?: string | null;
+}) {
+  const supabase = await createClient();
+  return supabase.from("work_plan_dispatches").insert({
+    work_plan_id: input.workPlanId,
+    worker_id: input.workerId,
+    telegram_chat_id: input.telegramChatId ?? null,
+    status: input.status,
+    message_id: input.messageId ?? null,
+    error: input.error ?? null,
+  });
+}
+
+export async function sendWorkPlanToWorkers(workPlanId: string): Promise<QueryResult<{ sent: number; failed: number; skipped: number } | null>> {
+  if (!hasSupabaseEnv()) return { data: null, error: missingSupabaseMessage };
+  const planResult = await getWorkPlanById(workPlanId);
+  if (planResult.error) return { data: null, error: planResult.error };
+  if (!planResult.data) return { data: null, error: "План не знайдено." };
+  if (planResult.data.status !== "draft") return { data: null, error: "Повторна відправка плану недоступна для цього статусу." };
+
+  const dispatchesResult = await getWorkPlanDispatches(workPlanId);
+  if (dispatchesResult.error) return { data: null, error: dispatchesResult.error };
+  if (dispatchesResult.data.length > 0) return { data: null, error: "Для цього плану вже є історія надсилань." };
+
+  const itemsResult = await getWorkPlanItems(workPlanId);
+  if (itemsResult.error) return { data: null, error: itemsResult.error };
+  const workerGroups = groupedItemsByWorker(itemsResult.data);
+  if (workerGroups.size === 0) return { data: null, error: "У плані немає заявок із призначеними виконавцями." };
+
+  let sent = 0;
+  let failed = 0;
+  let skipped = 0;
+
+  for (const [workerId, items] of workerGroups.entries()) {
+    const worker = items[0]?.worker;
+    if (!worker) {
+      failed += 1;
+      await createDispatchRow({ workPlanId, workerId, status: "failed", error: "Виконавця не знайдено." });
+      continue;
+    }
+
+    if (!worker.telegram_id) {
+      skipped += 1;
+      await createDispatchRow({ workPlanId, workerId, status: "skipped_no_telegram", error: "У виконавця не підключено Telegram." });
+      continue;
+    }
+
+    const result = await sendWorkPlanToWorker(worker, planResult.data, items);
+    if (result.ok) {
+      sent += 1;
+      await createDispatchRow({
+        workPlanId,
+        workerId,
+        telegramChatId: worker.telegram_id,
+        status: "sent",
+        messageId: result.messageIds.join(","),
+      });
+    } else {
+      failed += 1;
+      await createDispatchRow({
+        workPlanId,
+        workerId,
+        telegramChatId: worker.telegram_id,
+        status: "failed",
+        error: result.error,
+      });
+    }
+  }
+
+  if (sent > 0) {
+    const supabase = await createClient();
+    const now = new Date().toISOString();
+    const { error } = await supabase
+      .from("work_plans")
+      .update({ status: "sent", sent_at: now, updated_at: now })
+      .eq("id", workPlanId);
+    if (error) return { data: null, error: error.message };
+  }
+
+  return { data: { sent, failed, skipped }, error: null };
 }

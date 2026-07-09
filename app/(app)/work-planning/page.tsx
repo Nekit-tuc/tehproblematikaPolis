@@ -250,7 +250,9 @@ export default async function WorkPlanningPage({ searchParams }: { searchParams:
               <div className="text-muted-foreground">{plan.period_start} - {plan.period_end}</div>
               <Badge tone={plan.status === "draft" ? "orange" : plan.status === "done" ? "green" : "gray"}>{planStatusLabels[plan.status]}</Badge>
               <div className="text-muted-foreground">{plan.items_count ?? 0} заявок</div>
-              <Button type="button" variant="outline" disabled className="min-h-11 rounded-2xl md:min-h-0 md:rounded-md">Переглянути</Button>
+              <Button asChild variant="outline" className="min-h-11 rounded-2xl md:min-h-0 md:rounded-md">
+                <Link href={`/work-planning/${plan.id}`}>Переглянути</Link>
+              </Button>
             </div>
           ))}
         </CardContent>
