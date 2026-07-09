@@ -37,9 +37,9 @@ export function MobileDrawer({
   const visibleNav = nav.filter((item) => item.roles.includes(profile.role));
 
   return (
-    <div className={`fixed inset-0 z-50 md:hidden ${open ? "" : "pointer-events-none"}`} aria-hidden={!open}>
-      <div className={`absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity ${open ? "opacity-100" : "opacity-0"}`} onClick={onClose} />
-      <aside className={`absolute inset-y-0 left-0 w-[86vw] max-w-sm border-r border-white/10 bg-[#0b0c0f] p-4 shadow-2xl transition-transform duration-200 ${open ? "translate-x-0" : "-translate-x-full"}`}>
+    <div className={`fixed inset-0 z-[90] max-w-full overflow-x-hidden md:hidden ${open ? "" : "pointer-events-none"}`} aria-hidden={!open}>
+      <div className={`fixed inset-0 bg-black/75 backdrop-blur-sm transition-opacity ${open ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"}`} onClick={onClose} />
+      <aside className={`fixed inset-y-0 left-0 z-[91] w-[86vw] max-w-sm overflow-y-auto border-r border-white/10 bg-[#0b0c0f] p-4 shadow-2xl transition-transform duration-200 ${open ? "translate-x-0" : "-translate-x-full"}`}>
         <div className="mb-5 flex items-center justify-between">
           <div className="flex min-w-0 items-center gap-3">
             <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-orange-500 text-lg font-black text-stone-950">P</div>

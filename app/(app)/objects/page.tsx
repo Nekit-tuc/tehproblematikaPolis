@@ -134,7 +134,43 @@ export default async function ObjectsPage({ searchParams }: { searchParams: Prom
         </Card>
       ) : null}
 
-      <Card>
+      <details className="mobile-card p-3 md:hidden">
+        <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between rounded-2xl bg-white/[0.04] px-3 text-sm font-semibold text-orange-200">
+          Фільтри
+          <span className="text-xs text-stone-500">{filteredObjects.length}</span>
+        </summary>
+        <form className="mt-3 grid gap-3">
+          <Field label="Пошук"><Input name="q" defaultValue={params.q ?? ""} placeholder="Назва, номер, адреса, місто" className="min-h-11 rounded-2xl" /></Field>
+          <Field label="Тип">
+            <Select name="type" defaultValue={params.type ?? "all"}>
+              <option value="all">Всі</option>
+              {objectTypes.map((type) => <option key={type} value={type}>{getObjectTypeLabel(type)}</option>)}
+            </Select>
+          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Статус">
+              <Select name="status" defaultValue={params.status ?? "active"}>
+                <option value="active">Активні</option>
+                <option value="inactive">Неактивні</option>
+                <option value="all">Всі</option>
+              </Select>
+            </Field>
+            <Field label="Район">
+              <Select name="district" defaultValue={params.district ?? "all"}>
+                <option value="all">Всі райони</option>
+                {districts.map((district) => <option key={district} value={district}>{district}</option>)}
+              </Select>
+            </Field>
+          </div>
+          {mobileView === "table" ? <input type="hidden" name="view" value="table" /> : null}
+          <div className="grid grid-cols-2 gap-2">
+            <Button type="submit" className="min-h-11 rounded-2xl">Застосувати</Button>
+            <Button variant="outline" asChild className="min-h-11 rounded-2xl"><a href="/objects">Скинути</a></Button>
+          </div>
+        </form>
+      </details>
+
+      <Card className="hidden md:block">
         <CardHeader>
           <CardTitle>Фільтри</CardTitle>
           <CardDescription>Пошук працює по назві, номеру, адресі та місту.</CardDescription>

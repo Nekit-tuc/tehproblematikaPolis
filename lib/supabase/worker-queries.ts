@@ -111,12 +111,23 @@ export async function findRecommendedWorkerForTicket(
     activeCounts.set(row.assignee_worker_id, (activeCounts.get(row.assignee_worker_id) ?? 0) + 1);
   }
 
-  const preferredWorkers = workers.filter((worker) => worker.categories?.some((category) => category.id === ticket.category_id));
-  const candidates = preferredWorkers.length > 0 ? preferredWorkers : workers;
+  const candidates = workers.filter((worker) => worker.categories?.some((category) => category.id === ticket.category_id));
+  if (candidates.length === 0) {
+    console.info("[worker-auto-assignment] no_worker_found", { categoryId: ticket.category_id });
+    return { data: null, error: null };
+  }
   const [recommendedWorker] = [...candidates].sort((left, right) => {
     const workloadDiff = (activeCounts.get(left.id) ?? 0) - (activeCounts.get(right.id) ?? 0);
     return workloadDiff || left.name.localeCompare(right.name, "uk");
   });
+
+  if (recommendedWorker) {
+    console.info("[worker-auto-assignment] assigned", {
+      categoryId: ticket.category_id,
+      workerId: recommendedWorker.id,
+      activeTickets: activeCounts.get(recommendedWorker.id) ?? 0,
+    });
+  }
 
   return { data: recommendedWorker ?? null, error: null };
 }
