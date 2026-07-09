@@ -12,10 +12,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { requireRole } from "@/lib/auth/server";
 import { priorityLabels, statusLabels } from "@/lib/labels";
 import { getCategories, getObjects } from "@/lib/supabase/queries";
-import { getTicketsGroupedByCategory, getWorkPlans, type PlanningFilters, type WorkPlanStatus } from "@/lib/supabase/work-plans";
+import { getTicketsGroupedByCategory, getWorkPlans, type PlanningFilters, type PlanningTicket, type WorkPlanStatus } from "@/lib/supabase/work-plans";
 import { getActiveWorkers } from "@/lib/supabase/worker-queries";
 import { cn, formatDate } from "@/lib/utils";
-import type { TicketPriority, TicketStatus, TicketWithRelations, WorkerWithCategories } from "@/types/domain";
+import type { TicketPriority, TicketStatus, WorkerWithCategories } from "@/types/domain";
 import { createWorkPlanAction } from "./actions";
 
 type SearchParams = {
@@ -69,6 +69,16 @@ function statusTone(status: TicketStatus) {
 function assignmentLabel(workerId?: string | null, workersById?: Map<string, WorkerWithCategories>) {
   if (!workerId) return "Не призначено";
   return workersById?.get(workerId)?.name ?? "Виконавець не знайдений";
+}
+
+function planPeriodLabel(ticket: PlanningTicket) {
+  if (!ticket.plannedPlanPeriodStart || !ticket.plannedPlanPeriodEnd) return null;
+  return `${ticket.plannedPlanPeriodStart} - ${ticket.plannedPlanPeriodEnd}`;
+}
+
+function plannedLabel(ticket: PlanningTicket) {
+  if (!ticket.isPlanned) return null;
+  return ticket.plannedPlanTitle || planPeriodLabel(ticket) || "Активний план";
 }
 
 function safeDecode(value: string) {
@@ -306,7 +316,7 @@ function FilterForm({
   );
 }
 
-function CategoryGroup({ title, tickets, workersById }: { title: string; tickets: TicketWithRelations[]; workersById: Map<string, WorkerWithCategories> }) {
+function CategoryGroup({ title, tickets, workersById }: { title: string; tickets: PlanningTicket[]; workersById: Map<string, WorkerWithCategories> }) {
   return (
     <Card className="rounded-3xl border-white/10 bg-white/[0.04] md:rounded-lg">
       <CardHeader className="p-3 md:p-6">
@@ -317,14 +327,14 @@ function CategoryGroup({ title, tickets, workersById }: { title: string; tickets
       </CardHeader>
       <CardContent className="p-3 pt-0 md:p-6 md:pt-0">
         <div className="max-w-full overflow-x-auto rounded-2xl border border-border bg-stone-950/30 md:rounded-lg">
-          <table className="w-full min-w-[720px] text-left text-xs md:text-sm">
+          <table className="w-full min-w-[780px] text-left text-xs md:text-sm">
             <thead className="bg-white/[0.04] text-xs uppercase tracking-wide text-muted-foreground">
               <tr>
                 <th className="w-12 px-3 py-3">#</th>
                 <th className="px-3 py-3">Номер</th>
                 <th className="px-3 py-3">Об'єкт / опис</th>
                 <th className="px-3 py-3">Пріоритет</th>
-                <th className="px-3 py-3">Статус</th>
+                <th className="px-3 py-3">Статус / план</th>
                 <th className="px-3 py-3">Виконавець</th>
                 <th className="px-3 py-3 text-right">Дія</th>
               </tr>
@@ -341,16 +351,18 @@ function CategoryGroup({ title, tickets, workersById }: { title: string; tickets
   );
 }
 
-function TicketPlanningRow({ ticket, workersById }: { ticket: TicketWithRelations; workersById: Map<string, WorkerWithCategories> }) {
+function TicketPlanningRow({ ticket, workersById }: { ticket: PlanningTicket; workersById: Map<string, WorkerWithCategories> }) {
+  const planned = plannedLabel(ticket);
   return (
-    <tr className="transition hover:bg-stone-900/60">
+    <tr className={cn("transition hover:bg-stone-900/60", ticket.isPlanned && "opacity-60")}>
       <td className="px-3 py-3 align-top">
         <input
           name="ticketIds"
           value={ticket.id}
           type="checkbox"
+          disabled={ticket.isPlanned}
           aria-label={`Додати заявку ${ticket.number} до плану`}
-          className="h-5 w-5 accent-orange-500"
+          className="h-5 w-5 accent-orange-500 disabled:cursor-not-allowed disabled:opacity-40"
         />
       </td>
       <td className="whitespace-nowrap px-3 py-3 align-top font-semibold text-orange-200">{ticket.number}</td>
@@ -362,7 +374,17 @@ function TicketPlanningRow({ ticket, workersById }: { ticket: TicketWithRelation
         <Badge tone={priorityTone(ticket.priority)}>{priorityLabels[ticket.priority]}</Badge>
       </td>
       <td className="px-3 py-3 align-top">
-        <Badge tone={statusTone(ticket.status)}>{statusLabels[ticket.status]}</Badge>
+        <div className="flex max-w-[180px] flex-col gap-1">
+          <Badge tone={statusTone(ticket.status)}>{statusLabels[ticket.status]}</Badge>
+          {planned ? (
+            <div className="min-w-0">
+              <Badge tone="orange">Заплановано</Badge>
+              <div className="mt-1 line-clamp-2 break-words text-[11px] leading-snug text-orange-100/80">
+                {planned}
+              </div>
+            </div>
+          ) : null}
+        </div>
       </td>
       <td className="max-w-[160px] break-words px-3 py-3 align-top text-xs text-muted-foreground">{assignmentLabel(ticket.assignee_worker_id, workersById)}</td>
       <td className="px-3 py-3 align-top text-right">

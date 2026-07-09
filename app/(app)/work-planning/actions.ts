@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireRole } from "@/lib/auth/server";
-import { addTicketsToWorkPlan, createWorkPlan } from "@/lib/supabase/work-plans";
+import { addTicketsToWorkPlan, createWorkPlan, getActivePlannedTickets } from "@/lib/supabase/work-plans";
 
 function text(formData: FormData, key: string) {
   const value = formData.get(key);
@@ -31,6 +31,11 @@ function publicErrorMessage(message?: string | null) {
   return message;
 }
 
+function plannedTicketsError(numbers: string[]) {
+  const suffix = numbers.length > 0 ? ` Заявки: ${numbers.slice(0, 8).join(", ")}.` : "";
+  return `Деякі заявки вже заплановані в іншому активному плані. Оновіть список і виберіть інші заявки.${suffix}`;
+}
+
 export async function createWorkPlanAction(formData: FormData) {
   const { user } = await requireRole(["admin", "management", "tech_manager"]);
   const title = text(formData, "title");
@@ -43,6 +48,19 @@ export async function createWorkPlanAction(formData: FormData) {
   if (!periodStart || !periodEnd) fail("Вкажіть період плану.");
   if (new Date(periodStart) > new Date(periodEnd)) fail("Дата початку не може бути пізніше дати завершення.");
   if (ticketIds.length === 0) fail("Оберіть хоча б одну заявку для плану.");
+
+  const plannedTicketsResult = await getActivePlannedTickets(ticketIds);
+  if (plannedTicketsResult.error) {
+    console.error("[work-planning] planned tickets check failed", { error: plannedTicketsResult.error });
+    fail(publicErrorMessage(plannedTicketsResult.error));
+  }
+  if (plannedTicketsResult.data.length > 0) {
+    console.error("[work-planning] create plan blocked because tickets are already planned", {
+      ticketIds: plannedTicketsResult.data.map((ticket) => ticket.ticketId),
+      planIds: plannedTicketsResult.data.map((ticket) => ticket.planId),
+    });
+    fail(plannedTicketsError(plannedTicketsResult.data.map((ticket) => ticket.ticketNumber).filter(Boolean) as string[]));
+  }
 
   const planResult = await createWorkPlan({
     title,

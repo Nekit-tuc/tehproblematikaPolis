@@ -20,6 +20,25 @@ export type WorkPlan = {
   items_count?: number;
 };
 
+export type PlanningTicket = TicketWithRelations & {
+  isPlanned: boolean;
+  plannedPlanId: string | null;
+  plannedPlanTitle: string | null;
+  plannedPlanStatus: WorkPlanStatus | null;
+  plannedPlanPeriodStart: string | null;
+  plannedPlanPeriodEnd: string | null;
+};
+
+export type ActivePlannedTicket = {
+  ticketId: string;
+  ticketNumber: string | null;
+  planId: string;
+  planTitle: string;
+  planStatus: WorkPlanStatus;
+  planPeriodStart: string;
+  planPeriodEnd: string;
+};
+
 export type WorkPlanItem = {
   id: string;
   work_plan_id: string;
@@ -51,6 +70,7 @@ export type CreateWorkPlanInput = {
 };
 
 const planningStatuses: TicketStatus[] = ["new", "assigned", "in_progress", "waiting_admin_confirmation"];
+const activeWorkPlanStatuses: WorkPlanStatus[] = ["draft", "sent", "partially_done"];
 
 const planningTicketSelect = `
   id,
@@ -109,7 +129,78 @@ function emptyWithError<T>(data: T): QueryResult<T> {
   return { data, error: missingSupabaseMessage };
 }
 
-export async function getPlanningTickets(filters: PlanningFilters = {}): Promise<QueryResult<TicketWithRelations[]>> {
+type ActivePlanItemRow = {
+  ticket_id: string;
+  ticket?: { number?: string | null } | { number?: string | null }[] | null;
+  work_plan?: {
+    id: string;
+    title: string;
+    status: WorkPlanStatus;
+    period_start: string;
+    period_end: string;
+  } | {
+    id: string;
+    title: string;
+    status: WorkPlanStatus;
+    period_start: string;
+    period_end: string;
+  }[] | null;
+};
+
+function planFromRow(row: ActivePlanItemRow) {
+  const plan = Array.isArray(row.work_plan) ? row.work_plan[0] : row.work_plan;
+  return plan ?? null;
+}
+
+function ticketFromRow(row: ActivePlanItemRow) {
+  const ticket = Array.isArray(row.ticket) ? row.ticket[0] : row.ticket;
+  return ticket ?? null;
+}
+
+async function getActivePlannedItemRows(ticketIds: string[]) {
+  if (ticketIds.length === 0) return { data: [] as ActivePlanItemRow[], error: null };
+  const supabase = await createClient();
+  const { data, error } = await measureAsync("work-planning:active_planned_items", () =>
+    supabase
+      .from("work_plan_items")
+      .select(`
+        ticket_id,
+        ticket:tickets(number),
+        work_plan:work_plans!inner(id, title, status, period_start, period_end)
+      `)
+      .in("ticket_id", ticketIds)
+      .in("work_plan.status", activeWorkPlanStatuses),
+  );
+  return { data: (data ?? []) as unknown as ActivePlanItemRow[], error: error?.message ?? null };
+}
+
+function plannedInfoMap(rows: ActivePlanItemRow[]) {
+  const map = new Map<string, ActivePlannedTicket>();
+  for (const row of rows) {
+    const plan = planFromRow(row);
+    if (!plan || map.has(row.ticket_id)) continue;
+    map.set(row.ticket_id, {
+      ticketId: row.ticket_id,
+      ticketNumber: ticketFromRow(row)?.number ?? null,
+      planId: plan.id,
+      planTitle: plan.title,
+      planStatus: plan.status,
+      planPeriodStart: plan.period_start,
+      planPeriodEnd: plan.period_end,
+    });
+  }
+  return map;
+}
+
+export async function getActivePlannedTickets(ticketIds: string[]): Promise<QueryResult<ActivePlannedTicket[]>> {
+  if (!hasSupabaseEnv()) return emptyWithError([]);
+  const uniqueTicketIds = Array.from(new Set(ticketIds.filter(Boolean)));
+  const rowsResult = await getActivePlannedItemRows(uniqueTicketIds);
+  if (rowsResult.error) return { data: [], error: rowsResult.error };
+  return { data: Array.from(plannedInfoMap(rowsResult.data).values()), error: null };
+}
+
+export async function getPlanningTickets(filters: PlanningFilters = {}): Promise<QueryResult<PlanningTicket[]>> {
   if (!hasSupabaseEnv()) return emptyWithError([]);
   const supabase = await createClient();
   let query = supabase
@@ -129,12 +220,29 @@ export async function getPlanningTickets(filters: PlanningFilters = {}): Promise
   if (filters.assignment === "without_worker") query = query.is("assignee_worker_id", null);
 
   const { data, error } = await measureAsync("work-planning:tickets", () => query);
-  return { data: (data ?? []) as unknown as TicketWithRelations[], error: error?.message ?? null };
+  if (error) return { data: [], error: error.message };
+
+  const tickets = (data ?? []) as unknown as TicketWithRelations[];
+  const plannedRowsResult = await getActivePlannedItemRows(tickets.map((ticket) => ticket.id));
+  const plannedMap = plannedInfoMap(plannedRowsResult.data);
+  const ticketsWithPlanning = tickets.map((ticket) => {
+    const planned = plannedMap.get(ticket.id);
+    return {
+      ...ticket,
+      isPlanned: Boolean(planned),
+      plannedPlanId: planned?.planId ?? null,
+      plannedPlanTitle: planned?.planTitle ?? null,
+      plannedPlanStatus: planned?.planStatus ?? null,
+      plannedPlanPeriodStart: planned?.planPeriodStart ?? null,
+      plannedPlanPeriodEnd: planned?.planPeriodEnd ?? null,
+    };
+  });
+  return { data: ticketsWithPlanning, error: plannedRowsResult.error };
 }
 
 export async function getTicketsGroupedByCategory(filters: PlanningFilters = {}) {
   const ticketsResult = await getPlanningTickets(filters);
-  const groups = new Map<string, { categoryName: string; tickets: TicketWithRelations[] }>();
+  const groups = new Map<string, { categoryName: string; tickets: PlanningTicket[] }>();
   for (const ticket of ticketsResult.data) {
     const categoryId = ticket.category_id || "uncategorized";
     const categoryName = ticket.category?.name ?? "Без категорії";
