@@ -5,22 +5,21 @@ import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { TD, TH, THead, TBody, TR, Table } from "@/components/ui/table";
-import { getObjects, getTickets } from "@/lib/supabase/queries";
+import { getDashboardStats, getRecentTickets } from "@/lib/supabase/queries";
 import { getWorkerStats } from "@/lib/supabase/worker-queries";
 import { priorityLabels, statusLabels } from "@/lib/labels";
 
 export default async function DashboardPage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
   const params = await searchParams;
-  const [ticketsResult, objectsResult, workerStatsResult] = await Promise.all([getTickets(), getObjects(), getWorkerStats()]);
+  const [statsResult, ticketsResult, workerStatsResult] = await Promise.all([getDashboardStats(), getRecentTickets(8), getWorkerStats()]);
+  const stats = statsResult.data;
   const tickets = ticketsResult.data;
-  const objects = objectsResult.data;
-  const active = tickets.filter((ticket) => ticket.status !== "done" && ticket.status !== "cancelled");
-  const newTickets = tickets.filter((ticket) => ticket.status === "new").length;
-  const inProgress = tickets.filter((ticket) => ticket.status === "in_progress").length;
-  const pendingReview = tickets.filter((ticket) => ticket.status === "pending_review").length;
-  const critical = tickets.filter((ticket) => ticket.priority === "critical").length;
-  const doneThisWeek = tickets.filter((ticket) => ticket.status === "done").length;
-  const error = ticketsResult.error ?? objectsResult.error ?? workerStatsResult.error;
+  const newTickets = stats.newTickets;
+  const inProgress = stats.inProgress;
+  const pendingReview = stats.pendingReview;
+  const critical = stats.critical;
+  const doneThisWeek = stats.done;
+  const error = statsResult.error ?? ticketsResult.error ?? workerStatsResult.error;
   const topWorkers = workerStatsResult.data
     .filter((item) => item.total > 0)
     .sort((a, b) => b.done - a.done || b.total - a.total)
@@ -105,9 +104,9 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
       </div>
 
       <div className="hidden gap-4 md:grid md:grid-cols-4">
-        <Metric title="Відкриті заявки" value={active.length} icon={ClipboardList} />
+        <Metric title="Відкриті заявки" value={stats.active} icon={ClipboardList} />
         <Metric title="Критичні" value={critical} icon={AlertTriangle} tone="text-red-300" />
-        <Metric title="Об'єкти" value={objects.length} icon={Clock3} />
+        <Metric title="Об'єкти" value={stats.objects} icon={Clock3} />
         <Metric title="Виконано за тиждень" value={doneThisWeek} icon={CheckCircle2} tone="text-emerald-300" />
       </div>
       <Card className="hidden md:block">

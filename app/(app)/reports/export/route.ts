@@ -21,7 +21,7 @@ function filtersFromUrl(request: NextRequest): ReportFilters {
 export async function GET(request: NextRequest) {
   await requireRole(["admin", "management", "tech_manager"]);
   const [ticketsResult, objectsResult, profilesResult, categoriesResult] = await Promise.all([
-    getTickets(),
+    getTickets({ limit: null }),
     getObjects(),
     getProfiles(),
     getCategories(),

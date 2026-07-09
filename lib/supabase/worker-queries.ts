@@ -1,5 +1,6 @@
-import { createClient } from "@/lib/supabase/server";
+﻿import { createClient } from "@/lib/supabase/server";
 import { hasSupabaseEnv, missingSupabaseMessage } from "@/lib/supabase/env";
+import { measureAsync } from "@/lib/performance";
 import type { Category, Ticket, TicketWithRelations, Worker, WorkerStats, WorkerWithCategories } from "@/types/domain";
 import type { QueryResult } from "./queries";
 
@@ -11,57 +12,77 @@ function normalizeWorker(worker: WorkerWithCategories): WorkerWithCategories {
   return {
     ...worker,
     categories: (worker.worker_categories ?? [])
-      .map((item) => item.category)
+      .map((item) => Array.isArray(item.category) ? item.category[0] : item.category)
       .filter((category): category is Category => Boolean(category?.is_active)),
   };
 }
 
 const inactiveTicketStatuses = ["done", "completed", "cancelled", "rejected"];
+const workerSelect = `
+  id,
+  name,
+  phone,
+  telegram_username,
+  telegram_id,
+  is_active,
+  notes,
+  created_at,
+  updated_at,
+  worker_categories(
+    id,
+    worker_id,
+    category_id,
+    created_at,
+    category:categories(id, name, description, is_active, created_at)
+  )
+`;
 
 export async function getWorkers(): Promise<QueryResult<WorkerWithCategories[]>> {
   if (!hasSupabaseEnv()) return emptyWithError([]);
   const supabase = await createClient();
-  const { data, error } = await supabase
+  const { data, error } = await measureAsync("workers:list", () => supabase
     .from("workers")
-    .select("*, worker_categories(*, category:categories(*))")
+    .select(workerSelect)
     .order("is_active", { ascending: false })
-    .order("name");
+    .order("name"));
 
-  return { data: ((data ?? []) as WorkerWithCategories[]).map(normalizeWorker), error: error?.message ?? null };
+  return { data: ((data ?? []) as unknown as WorkerWithCategories[]).map(normalizeWorker), error: error?.message ?? null };
 }
 
 export async function getActiveWorkers(): Promise<QueryResult<WorkerWithCategories[]>> {
   if (!hasSupabaseEnv()) return emptyWithError([]);
   const supabase = await createClient();
-  const { data, error } = await supabase
+  const { data, error } = await measureAsync("workers:active", () => supabase
     .from("workers")
-    .select("*, worker_categories(*, category:categories(*))")
+    .select(workerSelect)
     .eq("is_active", true)
-    .order("name");
+    .order("name"));
 
-  return { data: ((data ?? []) as WorkerWithCategories[]).map(normalizeWorker), error: error?.message ?? null };
+  return { data: ((data ?? []) as unknown as WorkerWithCategories[]).map(normalizeWorker), error: error?.message ?? null };
 }
 
 export async function getWorkerById(id: string): Promise<QueryResult<WorkerWithCategories | null>> {
   if (!hasSupabaseEnv()) return { data: null, error: missingSupabaseMessage };
   const supabase = await createClient();
-  const { data, error } = await supabase
+  const { data, error } = await measureAsync("worker:detail", () => supabase
     .from("workers")
-    .select("*, worker_categories(*, category:categories(*))")
+    .select(workerSelect)
     .eq("id", id)
-    .maybeSingle();
+    .maybeSingle());
 
-  return { data: data ? normalizeWorker(data as WorkerWithCategories) : null, error: error?.message ?? null };
+  return { data: data ? normalizeWorker(data as unknown as WorkerWithCategories) : null, error: error?.message ?? null };
 }
 
 export async function getWorkersByCategory(categoryId: string): Promise<QueryResult<WorkerWithCategories[]>> {
   if (!hasSupabaseEnv()) return emptyWithError([]);
-  const workers = await getActiveWorkers();
-  if (workers.error) return workers;
-  return {
-    data: workers.data.filter((worker) => worker.categories?.some((category) => category.id === categoryId)),
-    error: null,
-  };
+  const supabase = await createClient();
+  const { data, error } = await measureAsync("workers:by_category", () => supabase
+    .from("workers")
+    .select(workerSelect)
+    .eq("is_active", true)
+    .eq("worker_categories.category_id", categoryId)
+    .order("name"));
+  return { data: ((data ?? []) as unknown as WorkerWithCategories[]).map(normalizeWorker), error: error?.message ?? null };
 }
 
 export async function findRecommendedWorkerForTicket(
@@ -76,10 +97,10 @@ export async function findRecommendedWorkerForTicket(
   if (workers.length === 0) return { data: null, error: null };
 
   const supabase = await createClient();
-  const { data, error } = await supabase
+  const { data, error } = await measureAsync("workers:workload", () => supabase
     .from("tickets")
     .select("assignee_worker_id,status")
-    .not("assignee_worker_id", "is", null);
+    .not("assignee_worker_id", "is", null));
 
   if (error) return { data: null, error: error.message };
 
@@ -106,15 +127,22 @@ export async function getWorkerStats(): Promise<QueryResult<WorkerStats[]>> {
   if (workersResult.error) return { data: [], error: workersResult.error };
 
   const supabase = await createClient();
-  const { data, error } = await supabase
+  const { data, error } = await measureAsync("workers:stats_rows", () => supabase
     .from("tickets")
     .select("assignee_worker_id,status,admin_rating")
-    .not("assignee_worker_id", "is", null);
+    .not("assignee_worker_id", "is", null));
   if (error) return { data: [], error: error.message };
 
   const rows = (data ?? []) as Array<{ assignee_worker_id: string | null; status: string; admin_rating: number | null }>;
+  const grouped = new Map<string, typeof rows>();
+  for (const row of rows) {
+    if (!row.assignee_worker_id) continue;
+    const scoped = grouped.get(row.assignee_worker_id) ?? [];
+    scoped.push(row);
+    grouped.set(row.assignee_worker_id, scoped);
+  }
   const stats = workersResult.data.map((worker) => {
-    const assigned = rows.filter((row) => row.assignee_worker_id === worker.id);
+    const assigned = grouped.get(worker.id) ?? [];
     const ratings = assigned.map((row) => row.admin_rating).filter((rating): rating is number => typeof rating === "number");
     return {
       worker,
@@ -130,21 +158,45 @@ export async function getWorkerStats(): Promise<QueryResult<WorkerStats[]>> {
 }
 
 const workerTicketSelect = `
-  *,
-  object:objects(*),
-  category:categories(*),
-  creator:profiles!tickets_created_by_fkey(*),
-  assignee:profiles!tickets_assigned_to_fkey(*)
+  id,
+  number,
+  title,
+  description,
+  status,
+  priority,
+  object_id,
+  category_id,
+  created_by,
+  assigned_to,
+  assignee_worker_id,
+  due_at,
+  completed_at,
+  assigned_at,
+  sent_to_worker_at,
+  worker_completed_at,
+  admin_confirmed_at,
+  admin_rating,
+  admin_feedback,
+  source,
+  telegram_source_group_id,
+  created_at,
+  updated_at,
+  object:objects(id, name, type, object_number, city, district, address, is_active, created_at),
+  category:categories(id, name, description, is_active, created_at),
+  creator:profiles!tickets_created_by_fkey(id, full_name, email, role, object_id, default_object_id, telegram_id, telegram_username, phone, is_active, created_at),
+  assignee:profiles!tickets_assigned_to_fkey(id, full_name, email, role, object_id, default_object_id, telegram_id, telegram_username, phone, is_active, created_at)
 `;
 
 export async function getTicketsByWorkerId(workerId: string): Promise<QueryResult<TicketWithRelations[]>> {
   if (!hasSupabaseEnv()) return emptyWithError([]);
   const supabase = await createClient();
-  const { data, error } = await supabase
+  const { data, error } = await measureAsync("worker:tickets", () => supabase
     .from("tickets")
     .select(workerTicketSelect)
     .eq("assignee_worker_id", workerId)
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false })
+    .limit(100));
 
-  return { data: (data ?? []) as TicketWithRelations[], error: error?.message ?? null };
+  return { data: (data ?? []) as unknown as TicketWithRelations[], error: error?.message ?? null };
 }
+

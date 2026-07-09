@@ -1,3 +1,5 @@
+import { logDuration } from "@/lib/performance";
+
 type InlineButton = { text: string; callback_data?: string; url?: string };
 
 export type TelegramUser = {
@@ -35,15 +37,29 @@ function token() {
   return value;
 }
 
+const telegramTimeoutMs = Number(process.env.TELEGRAM_TIMEOUT_MS ?? 8000);
+
 async function telegramRequest<T>(method: string, body: Record<string, unknown>) {
-  const response = await fetch(`https://api.telegram.org/bot${token()}/${method}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const data = (await response.json()) as { ok: boolean; result?: T; description?: string };
-  if (!response.ok || !data.ok) throw new Error(data.description ?? `Telegram ${method} failed`);
-  return data.result as T;
+  const startedAt = performance.now();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), telegramTimeoutMs);
+  try {
+    const response = await fetch(`https://api.telegram.org/bot${token()}/${method}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    const data = (await response.json()) as { ok: boolean; result?: T; description?: string };
+    if (!response.ok || !data.ok) throw new Error(data.description ?? `Telegram ${method} failed`);
+    return data.result as T;
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") throw new Error(`Telegram ${method} timed out after ${telegramTimeoutMs}ms`);
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+    logDuration(`telegram:${method}`, startedAt);
+  }
 }
 
 export async function sendTelegramMessage(chatId: string | number, text: string, keyboard?: InlineButton[][]) {

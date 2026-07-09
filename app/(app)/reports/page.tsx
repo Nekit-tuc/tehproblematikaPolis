@@ -37,7 +37,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
   const params = await searchParams;
   const filters = filtersFromSearch(params);
   const [ticketsResult, objectsResult, profilesResult, categoriesResult, workerStatsResult] = await Promise.all([
-    getTickets(),
+    getTickets({ limit: null }),
     getObjects(),
     getProfiles(),
     getCategories(),

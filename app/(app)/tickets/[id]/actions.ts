@@ -5,10 +5,12 @@ import { redirect } from "next/navigation";
 import { canAddTicketPhoto, canConfirmTicket, canEditTicket, canHardDeleteTicket, canUnassignWorkerFromTicket } from "@/lib/auth/permissions";
 import { requireAuth } from "@/lib/auth/server";
 import { getFiles, uploadTicketPhotos } from "@/lib/photos";
+import { measureAsync } from "@/lib/performance";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { getTicket } from "@/lib/supabase/queries";
 import { assignTicketToWorker, confirmWorkerCompletion, unassignTicketWorker } from "@/lib/supabase/workers";
 import { createClient } from "@/lib/supabase/server";
-import { sendTicketToWorker } from "@/lib/telegram/worker-notifications";
+import { sendTicketToWorker, sendWorkerCompletionConfirmedNotification } from "@/lib/telegram/worker-notifications";
 import type { PhotoType, TicketStatus } from "@/types/domain";
 
 function readString(formData: FormData, key: string) {
@@ -25,6 +27,12 @@ function appendSearchParam(url: string, key: string, value: string) {
   return `${url}${separator}${key}=${encodeURIComponent(value)}`;
 }
 
+function deleteErrorRedirect(ticketId: string, message: string, returnTo?: string): never {
+  console.error("[ticket-delete] failed", { ticketId, message });
+  if (returnTo) redirect(appendSearchParam(returnTo, "error", message));
+  redirectWith(ticketId, "statusError", message);
+}
+
 const statusActionLabels: Record<TicketStatus, string> = {
   pending_review: "Статус змінено: Очікує підтвердження",
   new: "Статус змінено: Нова",
@@ -38,6 +46,7 @@ const statusActionLabels: Record<TicketStatus, string> = {
 };
 
 export async function uploadTicketPhotosAction(ticketId: string, type: PhotoType, formData: FormData) {
+  const startedAt = performance.now();
   const { profile } = await requireAuth();
   const ticketResult = await getTicket(ticketId);
   const ticket = ticketResult.data;
@@ -50,6 +59,7 @@ export async function uploadTicketPhotosAction(ticketId: string, type: PhotoType
   if (result.error) redirectWith(ticketId, "photoError", result.error);
 
   revalidatePath(`/tickets/${ticketId}`);
+  console.info(`[perf] ticket:photo_upload ${Math.round(performance.now() - startedAt)}ms`);
   redirect(`/tickets/${ticketId}?photoSuccess=${type}`);
 }
 
@@ -164,6 +174,7 @@ export async function rejectTicketAction(ticketId: string) {
 }
 
 export async function assignWorkerAction(ticketId: string, formData: FormData) {
+  const startedAt = performance.now();
   const { user, profile } = await requireAuth();
   const ticketResult = await getTicket(ticketId);
   const ticket = ticketResult.data;
@@ -178,7 +189,7 @@ export async function assignWorkerAction(ticketId: string, formData: FormData) {
 
   revalidatePath(`/tickets/${ticketId}`);
   revalidatePath("/tickets");
-  revalidatePath("/dashboard");
+  console.info(`[perf] worker:assign ${Math.round(performance.now() - startedAt)}ms`);
   redirect(`/tickets/${ticketId}?statusSuccess=assigned`);
 }
 
@@ -226,6 +237,7 @@ export async function unassignWorkerAction(ticketId: string, formData: FormData)
 }
 
 export async function sendTicketToWorkerAction(ticketId: string, formData: FormData) {
+  const startedAt = performance.now();
   const { user, profile } = await requireAuth();
   const ticketResult = await getTicket(ticketId);
   const ticket = ticketResult.data;
@@ -239,10 +251,12 @@ export async function sendTicketToWorkerAction(ticketId: string, formData: FormD
   if (!result.ok) redirectWith(ticketId, "statusError", result.error);
 
   revalidatePath(`/tickets/${ticketId}`);
+  console.info(`[perf] telegram:send_to_worker_action ${Math.round(performance.now() - startedAt)}ms`);
   redirect(`/tickets/${ticketId}?statusSuccess=sent`);
 }
 
 export async function confirmWorkerCompletionAction(ticketId: string, formData: FormData) {
+  const startedAt = performance.now();
   const { user, profile } = await requireAuth();
   const ticketResult = await getTicket(ticketId);
   const ticket = ticketResult.data;
@@ -256,9 +270,18 @@ export async function confirmWorkerCompletionAction(ticketId: string, formData: 
   const result = await confirmWorkerCompletion({ ticketId, actorId: user.id, rating: safeRating, feedback });
   if (result.error) redirectWith(ticketId, "statusError", result.error.message);
 
+  if (ticket.assignee_worker_id) {
+    const notifyResult = await sendWorkerCompletionConfirmedNotification(ticketId, ticket.assignee_worker_id);
+    if (!notifyResult.ok) {
+      console.warn("[worker-confirmation] telegram_send_failed", { ticketId, workerId: ticket.assignee_worker_id, reason: notifyResult.error });
+    }
+  } else {
+    console.warn("[worker-confirmation] worker_missing", { ticketId });
+  }
+
   revalidatePath(`/tickets/${ticketId}`);
   revalidatePath("/tickets");
-  revalidatePath("/dashboard");
+  console.info(`[perf] worker:confirm_completion ${Math.round(performance.now() - startedAt)}ms`);
   redirect(`/tickets/${ticketId}?statusSuccess=worker_confirmed`);
 }
 
@@ -290,17 +313,21 @@ export async function returnWorkerCompletionAction(ticketId: string, formData: F
   redirect(`/tickets/${ticketId}?statusSuccess=worker_returned`);
 }
 
-export async function hardDeleteTicketAction(ticketId: string) {
+export async function hardDeleteTicketAction(ticketId: string, formData?: FormData) {
+  const startedAt = performance.now();
   const { profile } = await requireAuth();
-  if (!canHardDeleteTicket(profile)) redirectWith(ticketId, "statusError", "Повністю видаляти заявки може тільки адміністратор.");
+  const returnTo = formData ? readString(formData, "returnTo") : "";
+  if (!canHardDeleteTicket(profile)) deleteErrorRedirect(ticketId, "Повністю видаляти заявки може тільки адміністратор.", returnTo);
 
   const ticketResult = await getTicket(ticketId);
   const ticket = ticketResult.data;
-  if (!ticket) redirectWith(ticketId, "statusError", ticketResult.error ?? "Заявку не знайдено");
+  if (!ticket) deleteErrorRedirect(ticketId, ticketResult.error ?? "Заявку не знайдено", returnTo);
 
-  const supabase = await createClient();
-  const { data: photos, error: photosLoadError } = await supabase.from("ticket_photos").select("storage_path").eq("ticket_id", ticketId);
-  if (photosLoadError) redirectWith(ticketId, "statusError", photosLoadError.message);
+  const supabase = createAdminClient();
+  const { data: photos, error: photosLoadError } = await measureAsync("ticket:delete_photos_lookup", () =>
+    supabase.from("ticket_photos").select("storage_path").eq("ticket_id", ticketId),
+  );
+  if (photosLoadError) deleteErrorRedirect(ticketId, photosLoadError.message, returnTo);
 
   const storagePaths = (photos ?? [])
     .map((photo) => typeof photo.storage_path === "string" ? photo.storage_path : "")
@@ -318,14 +345,15 @@ export async function hardDeleteTicketAction(ticketId: string) {
   ];
   const results = await Promise.all(dependentDeletes);
   const dependencyError = results.find((result) => result.error)?.error;
-  if (dependencyError) redirectWith(ticketId, "statusError", dependencyError.message);
+  if (dependencyError) deleteErrorRedirect(ticketId, dependencyError.message, returnTo);
 
-  const { error } = await supabase.from("tickets").delete().eq("id", ticketId);
-  if (error) redirectWith(ticketId, "statusError", error.message);
+  const { data: deletedTicket, error } = await supabase.from("tickets").delete().eq("id", ticketId).select("id").maybeSingle();
+  if (error) deleteErrorRedirect(ticketId, error.message, returnTo);
+  if (!deletedTicket) deleteErrorRedirect(ticketId, "Заявку не видалено: запис не знайдено або delete зачепив 0 рядків.", returnTo);
 
   revalidatePath("/tickets");
-  revalidatePath("/dashboard");
   revalidatePath("/ai-tickets");
   revalidatePath("/workers");
-  redirect("/tickets?deleted=1");
+  console.info(`[perf] ticket:delete ${Math.round(performance.now() - startedAt)}ms`);
+  redirect("/tickets?success=deleted");
 }

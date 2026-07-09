@@ -4,6 +4,22 @@ import { sendTelegramMessage } from "@/lib/telegram/client";
 
 type SendResult = { ok: true } | { ok: false; error: string };
 
+type CompletionNotificationTicket = {
+  id: string;
+  number: string | null;
+  title: string | null;
+  object?: { name?: string | null } | { name?: string | null }[] | null;
+};
+
+type CompletionNotificationWorker = {
+  id: string;
+  telegram_id?: string | null;
+};
+
+function firstRelation<T>(value: T | T[] | null | undefined) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
 function appUrl() {
   return (process.env.NEXT_PUBLIC_APP_URL ?? "").replace(/\/$/, "");
 }
@@ -136,4 +152,49 @@ export async function sendTicketToWorker(ticketId: string, workerId: string, act
     callbackDataLength: Buffer.byteLength(callbackData, "utf8"),
   });
   return { ok: true };
+}
+
+export async function sendWorkerCompletionConfirmedNotification(ticketId: string, workerId: string): Promise<SendResult> {
+  const supabase = createAdminClient();
+  const [{ data: ticket, error: ticketError }, { data: worker, error: workerError }] = await Promise.all([
+    supabase
+      .from("tickets")
+      .select("id, number, title, object:objects(name)")
+      .eq("id", ticketId)
+      .maybeSingle(),
+    supabase.from("workers").select("id, telegram_id").eq("id", workerId).maybeSingle(),
+  ]);
+
+  if (ticketError) return { ok: false, error: ticketError.message };
+  if (workerError) return { ok: false, error: workerError.message };
+  if (!ticket) return { ok: false, error: "Заявку не знайдено." };
+  if (!worker) return { ok: false, error: "Виконавця не знайдено." };
+
+  const typedTicket = ticket as CompletionNotificationTicket;
+  const typedWorker = worker as CompletionNotificationWorker;
+  if (!typedWorker.telegram_id) {
+    console.warn("[worker-confirmation]", { result: "telegram_id_missing", ticketId, workerId });
+    return { ok: false, error: "telegram_id_missing" };
+  }
+
+  const object = firstRelation(typedTicket.object);
+  const text = [
+    "✅ Виконання підтверджено адміністратором",
+    "",
+    `Заявка: ${typedTicket.number ?? "-"}`,
+    `Об'єкт: ${object?.name ?? "-"}`,
+    `Робота: ${typedTicket.title ?? "-"}`,
+    "",
+    "Дякуємо за роботу.",
+  ].join("\n");
+
+  try {
+    await sendTelegramMessage(typedWorker.telegram_id, text);
+    console.info("[worker-confirmation]", { result: "telegram_send_success", ticketId, workerId });
+    return { ok: true };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("[worker-confirmation]", { result: "telegram_send_failed", ticketId, workerId, message });
+    return { ok: false, error: message };
+  }
 }

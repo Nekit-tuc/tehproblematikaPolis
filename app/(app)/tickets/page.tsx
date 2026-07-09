@@ -34,7 +34,7 @@ function statusTone(status: TicketStatus) {
 export default async function TicketsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; deleted?: string }>;
+  searchParams: Promise<{ status?: string; success?: string; error?: string; deleted?: string }>;
 }) {
   const { profile } = await requireAuth();
   const query = await searchParams;
@@ -42,6 +42,7 @@ export default async function TicketsPage({
   const canDeleteTickets = canHardDeleteTicket(profile);
   const activeStatus = statusFilters.some((filter) => filter.value === query.status) ? query.status : "all";
   const visibleTickets = activeStatus === "all" ? tickets : tickets.filter((ticket) => ticket.status === activeStatus);
+  const returnTo = activeStatus === "all" ? "/tickets" : `/tickets?status=${activeStatus}`;
 
   return (
     <div className="page-shell space-y-6">
@@ -54,6 +55,8 @@ export default async function TicketsPage({
       </div>
       {error ? <Alert title="Не вдалося завантажити заявки">{error}</Alert> : null}
       {query.deleted === "1" ? <Alert title="Заявку повністю видалено">Заявку та пов'язані записи прибрано з бази.</Alert> : null}
+      {query.error ? <Alert title="Не вдалося видалити заявку">{query.error}</Alert> : null}
+      {query.success === "deleted" ? <Alert title="Заявку повністю видалено">Заявку та пов'язані записи прибрано з бази.</Alert> : null}
       <div className="space-y-4 md:hidden">
         <details className="mobile-card p-4">
           <summary className="flex cursor-pointer list-none items-center justify-between text-sm font-medium">
@@ -92,6 +95,7 @@ export default async function TicketsPage({
               </Link>
               {canDeleteTickets ? (
                 <form action={hardDeleteTicketAction.bind(null, ticket.id)} className="border-t border-white/10 p-3">
+                  <input type="hidden" name="returnTo" value={returnTo} />
                   <ConfirmSubmitButton
                     type="submit"
                     variant="destructive"
@@ -143,6 +147,7 @@ export default async function TicketsPage({
                     {canDeleteTickets ? (
                       <TD>
                         <form action={hardDeleteTicketAction.bind(null, ticket.id)}>
+                          <input type="hidden" name="returnTo" value={returnTo} />
                           <ConfirmSubmitButton
                             type="submit"
                             variant="destructive"

@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { SubmitButton } from "@/components/ui/submit-button";
 import { Textarea } from "@/components/ui/textarea";
 import { priorityLabels } from "@/lib/labels";
 import { requireRole } from "@/lib/auth/server";
@@ -18,11 +19,32 @@ import { assignWorkerToAiTicketAction, confirmAiTicketAction, rejectAiTicketActi
 const priorities: TicketPriority[] = ["low", "medium", "high", "critical"];
 
 const ticketSelect = `
-  *,
-  object:objects(*),
-  category:categories(*),
-  creator:profiles!tickets_created_by_fkey(*),
-  assignee:profiles!tickets_assigned_to_fkey(*)
+  id,
+  number,
+  title,
+  description,
+  status,
+  priority,
+  object_id,
+  category_id,
+  created_by,
+  assigned_to,
+  assignee_worker_id,
+  due_at,
+  completed_at,
+  assigned_at,
+  source,
+  telegram_source_group_id,
+  telegram_user_id,
+  telegram_user_name,
+  original_message_text,
+  ai_confidence,
+  ai_raw_result,
+  recommended_department,
+  created_at,
+  updated_at,
+  object:objects(id, name, type, object_number, city, district, address, is_active, created_at),
+  category:categories(id, name, description, is_active, created_at)
 `;
 
 type SearchParams = {
@@ -93,21 +115,29 @@ export default async function AiTicketsPage({ searchParams }: { searchParams: Pr
   await requireRole(["admin", "management", "tech_manager"]);
   const params = await searchParams;
   const supabase = await createClient();
+  let ticketsQuery = supabase
+    .from("tickets")
+    .select(ticketSelect)
+    .eq("status", "pending_review")
+    .in("source", ["telegram_group", "telegram_private_test"])
+    .order("created_at", { ascending: false })
+    .limit(50);
+  if (params.object && params.object !== "all") ticketsQuery = ticketsQuery.eq("object_id", params.object);
+  if (params.category && params.category !== "all") ticketsQuery = ticketsQuery.eq("category_id", params.category);
+  if (params.priority && params.priority !== "all") ticketsQuery = ticketsQuery.eq("priority", params.priority);
+  if (params.date) {
+    ticketsQuery = ticketsQuery.gte("created_at", `${params.date}T00:00:00`).lte("created_at", `${params.date}T23:59:59`);
+  }
   const [{ data: ticketsData, error }, { data: objectsData }, { data: categoriesData }, workersResult] = await Promise.all([
-    supabase
-      .from("tickets")
-      .select(ticketSelect)
-      .eq("status", "pending_review")
-      .in("source", ["telegram_group", "telegram_private_test"])
-      .order("created_at", { ascending: false }),
-    supabase.from("objects").select("*").order("name"),
-    supabase.from("categories").select("*").eq("is_active", true).order("name"),
+    ticketsQuery,
+    supabase.from("objects").select("id, name, type, object_number, city, district, address, aliases, manager_id, is_active, created_at").order("name"),
+    supabase.from("categories").select("id, name, description, is_active, created_at").eq("is_active", true).order("name"),
     getActiveWorkers(),
   ]);
 
-  const tickets = (ticketsData ?? []) as TicketWithRelations[];
-  const objects = (objectsData ?? []) as CompanyObject[];
-  const categories = (categoriesData ?? []) as Category[];
+  const tickets = (ticketsData ?? []) as unknown as TicketWithRelations[];
+  const objects = (objectsData ?? []) as unknown as CompanyObject[];
+  const categories = (categoriesData ?? []) as unknown as Category[];
   const workers = workersResult.data;
   const workersById = new Map(workers.map((worker) => [worker.id, worker]));
   const visibleTickets = filterTickets(tickets, params);
@@ -330,10 +360,10 @@ function AiTicketCard({
 
         <div className="grid gap-2 md:flex md:flex-wrap">
           <form action={confirmAiTicketAction.bind(null, ticket.id)}>
-            <Button type="submit" className="min-h-11 w-full rounded-2xl md:min-h-0 md:w-auto md:rounded-md">✅ Підтвердити</Button>
+            <SubmitButton type="submit" pendingText="Підтверджується..." className="min-h-11 w-full rounded-2xl md:min-h-0 md:w-auto md:rounded-md">✅ Підтвердити</SubmitButton>
           </form>
           <form action={rejectAiTicketAction.bind(null, ticket.id)}>
-            <Button type="submit" variant="destructive" className="min-h-11 w-full rounded-2xl md:min-h-0 md:w-auto md:rounded-md">❌ Відхилити</Button>
+            <SubmitButton type="submit" pendingText="Відхиляється..." variant="destructive" className="min-h-11 w-full rounded-2xl md:min-h-0 md:w-auto md:rounded-md">❌ Відхилити</SubmitButton>
           </form>
           <Button asChild variant="outline" className="min-h-11 w-full rounded-2xl md:min-h-0 md:w-auto md:rounded-md"><Link href={`/tickets/${ticket.id}`}>Відкрити картку</Link></Button>
         </div>
@@ -378,7 +408,7 @@ function AiTicketCard({
               </details>
             ) : null}
             <div className="md:col-span-2">
-              <Button type="submit">Зберегти правки</Button>
+              <SubmitButton type="submit" pendingText="Зберігається...">Зберегти правки</SubmitButton>
             </div>
           </form>
         </details>
@@ -425,7 +455,7 @@ function WorkerAssignPanel({
             </option>
           ))}
         </select>
-        <Button type="submit" variant="outline" className="min-h-11 rounded-2xl md:min-h-0 md:rounded-md">Зберегти виконавця</Button>
+        <SubmitButton type="submit" pendingText="Зберігається..." variant="outline" className="min-h-11 rounded-2xl md:min-h-0 md:rounded-md">Зберегти виконавця</SubmitButton>
       </form>
       <p className="mt-2 text-xs text-muted-foreground">Telegram не надсилається автоматично.</p>
     </div>
