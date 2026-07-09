@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { Textarea } from "@/components/ui/textarea";
+import { MobileTicketSwitch } from "@/components/tickets/mobile-ticket-switch";
 import { priorityLabels } from "@/lib/labels";
 import { requireRole } from "@/lib/auth/server";
 import { createClient } from "@/lib/supabase/server";
@@ -56,6 +57,7 @@ type SearchParams = {
   date?: string;
   success?: string;
   error?: string;
+  view?: string;
 };
 
 function confidenceTone(value: number | null | undefined) {
@@ -114,6 +116,7 @@ function groupTickets(tickets: TicketWithRelations[]) {
 export default async function AiTicketsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   await requireRole(["admin", "management", "tech_manager"]);
   const params = await searchParams;
+  const mobileView = params.view === "table" ? "table" : "cards";
   const supabase = await createClient();
   let ticketsQuery = supabase
     .from("tickets")
@@ -142,6 +145,15 @@ export default async function AiTicketsPage({ searchParams }: { searchParams: Pr
   const workersById = new Map(workers.map((worker) => [worker.id, worker]));
   const visibleTickets = filterTickets(tickets, params);
   const relatedGroups = groupTickets(tickets);
+  const viewHref = (view: "cards" | "table") => {
+    const next = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      if (value && key !== "success" && key !== "error" && key !== "view") next.set(key, value);
+    }
+    if (view === "table") next.set("view", "table");
+    const search = next.toString();
+    return search ? `/ai-tickets?${search}` : "/ai-tickets";
+  };
 
   return (
     <div className="page-shell space-y-6">
@@ -149,6 +161,21 @@ export default async function AiTicketsPage({ searchParams }: { searchParams: Pr
         <h1 className="text-2xl font-semibold">AI-заявки</h1>
         <p className="subtle">Перевірка заявок, які Telegram AI-бот створив зі статусом очікування підтвердження.</p>
       </div>
+      <MobileTicketSwitch active="ai" />
+      <details className="mobile-card p-3 md:hidden">
+        <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between rounded-2xl bg-white/[0.04] px-3 text-sm font-semibold text-orange-200">
+          Вигляд
+          <span className="text-xs text-stone-500">{mobileView === "table" ? "Таблиця" : "Картки"}</span>
+        </summary>
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <Button asChild variant={mobileView === "cards" ? "default" : "outline"} size="sm" className="min-h-10 rounded-2xl">
+            <Link href={viewHref("cards")}>Картки</Link>
+          </Button>
+          <Button asChild variant={mobileView === "table" ? "default" : "outline"} size="sm" className="min-h-10 rounded-2xl">
+            <Link href={viewHref("table")}>Таблиця</Link>
+          </Button>
+        </div>
+      </details>
 
       {error || workersResult.error ? <Alert title="Не вдалося завантажити AI-заявки">{error?.message ?? workersResult.error}</Alert> : null}
       {params.error ? <Alert title="Помилка">{decodeURIComponent(params.error)}</Alert> : null}
@@ -266,6 +293,37 @@ export default async function AiTicketsPage({ searchParams }: { searchParams: Pr
         <Card className="rounded-3xl border-white/10 bg-white/[0.04]">
           <CardContent className="pt-6 text-sm text-muted-foreground">AI-заявок на підтвердження немає.</CardContent>
         </Card>
+      ) : mobileView === "table" ? (
+        <div className="max-w-full overflow-x-auto rounded-2xl border border-white/10 bg-white/[0.04]">
+          <table className="w-full min-w-[760px] text-left text-xs">
+            <thead className="bg-white/[0.04] text-muted-foreground">
+              <tr>
+                <th className="px-3 py-3">№</th>
+                <th className="px-3 py-3">Заявка</th>
+                <th className="px-3 py-3">Об'єкт</th>
+                <th className="px-3 py-3">Категорія</th>
+                <th className="px-3 py-3">Пріоритет</th>
+                <th className="px-3 py-3">AI</th>
+                <th className="px-3 py-3 text-right">Дії</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-white/10">
+              {visibleTickets.map((ticket) => (
+                <tr key={ticket.id}>
+                  <td className="whitespace-nowrap px-3 py-3 font-semibold text-orange-200">{ticket.number}</td>
+                  <td className="max-w-[180px] px-3 py-3"><div className="line-clamp-2 break-words">{ticket.title}</div></td>
+                  <td className="max-w-[150px] px-3 py-3"><div className="line-clamp-2 break-words">{ticket.object?.name ?? "-"}</div></td>
+                  <td className="max-w-[150px] px-3 py-3"><div className="line-clamp-2 break-words">{ticket.category?.name ?? "-"}</div></td>
+                  <td className="px-3 py-3"><Badge tone="gray">{priorityLabels[ticket.priority]}</Badge></td>
+                  <td className="px-3 py-3"><Badge tone={confidenceTone(ticket.ai_confidence)}>{confidenceLabel(ticket.ai_confidence)}</Badge></td>
+                  <td className="px-3 py-3 text-right">
+                    <Button asChild size="sm" variant="outline" className="rounded-2xl"><Link href={`/tickets/${ticket.id}`}>Відкрити</Link></Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       ) : (
         <div className="grid gap-3 md:gap-4">
           {visibleTickets.map((ticket) => (
@@ -360,10 +418,10 @@ function AiTicketCard({
 
         <div className="grid gap-2 md:flex md:flex-wrap">
           <form action={confirmAiTicketAction.bind(null, ticket.id)}>
-            <SubmitButton type="submit" pendingText="Підтверджується..." className="min-h-11 w-full rounded-2xl md:min-h-0 md:w-auto md:rounded-md">✅ Підтвердити</SubmitButton>
+            <SubmitButton type="submit" pendingText="Підтверджується..." showOverlay className="min-h-11 w-full rounded-2xl md:min-h-0 md:w-auto md:rounded-md">✅ Підтвердити</SubmitButton>
           </form>
           <form action={rejectAiTicketAction.bind(null, ticket.id)}>
-            <SubmitButton type="submit" pendingText="Відхиляється..." variant="destructive" className="min-h-11 w-full rounded-2xl md:min-h-0 md:w-auto md:rounded-md">❌ Відхилити</SubmitButton>
+            <SubmitButton type="submit" pendingText="Відхиляється..." showOverlay variant="destructive" className="min-h-11 w-full rounded-2xl md:min-h-0 md:w-auto md:rounded-md">❌ Відхилити</SubmitButton>
           </form>
           <Button asChild variant="outline" className="min-h-11 w-full rounded-2xl md:min-h-0 md:w-auto md:rounded-md"><Link href={`/tickets/${ticket.id}`}>Відкрити картку</Link></Button>
         </div>
@@ -408,7 +466,7 @@ function AiTicketCard({
               </details>
             ) : null}
             <div className="md:col-span-2">
-              <SubmitButton type="submit" pendingText="Зберігається...">Зберегти правки</SubmitButton>
+              <SubmitButton type="submit" pendingText="Зберігається..." showOverlay>Зберегти правки</SubmitButton>
             </div>
           </form>
         </details>
@@ -455,7 +513,7 @@ function WorkerAssignPanel({
             </option>
           ))}
         </select>
-        <SubmitButton type="submit" pendingText="Зберігається..." variant="outline" className="min-h-11 rounded-2xl md:min-h-0 md:rounded-md">Зберегти виконавця</SubmitButton>
+        <SubmitButton type="submit" pendingText="Зберігається..." showOverlay variant="outline" className="min-h-11 rounded-2xl md:min-h-0 md:rounded-md">Зберегти виконавця</SubmitButton>
       </form>
       <p className="mt-2 text-xs text-muted-foreground">Telegram не надсилається автоматично.</p>
     </div>

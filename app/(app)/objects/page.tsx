@@ -63,7 +63,7 @@ function filterObjects(objects: CompanyObject[], filters: { q?: string; type?: s
   });
 }
 
-export default async function ObjectsPage({ searchParams }: { searchParams: Promise<{ q?: string; type?: string; status?: string; district?: string; error?: string; success?: string }> }) {
+export default async function ObjectsPage({ searchParams }: { searchParams: Promise<{ q?: string; type?: string; status?: string; district?: string; error?: string; success?: string; view?: string; page?: string }> }) {
   const { profile } = await requireRole(["admin", "management", "tech_manager"]);
   const params = await searchParams;
   const [objectsResult, profilesResult] = await Promise.all([getObjects(), getProfiles()]);
@@ -78,6 +78,25 @@ export default async function ObjectsPage({ searchParams }: { searchParams: Prom
   const canManage = profile.role === "admin";
   const nextObjectNumber = getNextObjectNumber(objectsResult.data);
   const districts = getDistricts(objectsResult.data);
+  const mobileView = params.view === "table" ? "table" : "cards";
+  const pageSize = 25;
+  const currentPage = Math.max(1, Number.parseInt(params.page ?? "1", 10) || 1);
+  const totalPages = Math.max(1, Math.ceil(filteredObjects.length / pageSize));
+  const safePage = Math.min(currentPage, totalPages);
+  const pagedObjects = filteredObjects.slice((safePage - 1) * pageSize, safePage * pageSize);
+  const mobileHref = (updates: Record<string, string | number | undefined>) => {
+    const next = new URLSearchParams();
+    for (const key of ["q", "type", "status", "district", "view", "page"] as const) {
+      const value = params[key];
+      if (value && value !== "all") next.set(key, value);
+    }
+    for (const [key, value] of Object.entries(updates)) {
+      if (!value || value === "all" || (key === "page" && Number(value) <= 1)) next.delete(key);
+      else next.set(key, String(value));
+    }
+    const search = next.toString();
+    return search ? `/objects?${search}` : "/objects";
+  };
 
   return (
     <div className="page-shell space-y-6">
@@ -150,13 +169,76 @@ export default async function ObjectsPage({ searchParams }: { searchParams: Prom
         </CardContent>
       </Card>
 
+      <details className="mobile-card p-3 md:hidden">
+        <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between rounded-2xl bg-white/[0.04] px-3 text-sm font-semibold text-orange-200">
+          Вигляд
+          <span className="text-xs text-stone-500">{mobileView === "table" ? "Таблиця" : "Картки"}</span>
+        </summary>
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <Button asChild variant={mobileView === "cards" ? "default" : "outline"} size="sm" className="min-h-10 rounded-2xl">
+            <a href={mobileHref({ view: undefined, page: 1 })}>Картки</a>
+          </Button>
+          <Button asChild variant={mobileView === "table" ? "default" : "outline"} size="sm" className="min-h-10 rounded-2xl">
+            <a href={mobileHref({ view: "table", page: 1 })}>Таблиця</a>
+          </Button>
+        </div>
+      </details>
+
       <div className="space-y-3 md:hidden">
         {filteredObjects.length === 0 ? (
           <div className="mobile-card p-4 text-sm text-stone-500">Об'єктів за цими фільтрами немає.</div>
+        ) : mobileView === "table" ? (
+          <div className="max-w-full overflow-x-auto rounded-2xl border border-white/10 bg-white/[0.04]">
+            <table className="w-full min-w-[720px] text-left text-xs">
+              <thead className="bg-white/[0.04] text-muted-foreground">
+                <tr>
+                  <th className="px-3 py-3">№</th>
+                  <th className="px-3 py-3">Назва</th>
+                  <th className="px-3 py-3">Тип</th>
+                  <th className="px-3 py-3">Район</th>
+                  <th className="px-3 py-3">Адреса</th>
+                  <th className="px-3 py-3">Статус</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/10">
+                {filteredObjects.map((object) => (
+                  <tr key={object.id}>
+                    <td className="whitespace-nowrap px-3 py-3 font-semibold text-orange-200">{getObjectNumber(object)}</td>
+                    <td className="max-w-[180px] px-3 py-3"><div className="line-clamp-2 break-words">{object.name}</div></td>
+                    <td className="px-3 py-3">{getObjectTypeLabel(object.type)}</td>
+                    <td className="max-w-[140px] px-3 py-3"><div className="line-clamp-2 break-words">{getObjectDistrict(object) || "-"}</div></td>
+                    <td className="max-w-[220px] px-3 py-3"><div className="line-clamp-2 break-words">{object.address}</div></td>
+                    <td className="px-3 py-3"><Badge tone={object.is_active ? "green" : "gray"}>{object.is_active ? "Активний" : "Неактивний"}</Badge></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         ) : (
-          filteredObjects.map((object) => (
-            <MobileObjectCard key={object.id} object={object} managers={managers} canManage={canManage} districts={districts} />
-          ))
+          <>
+            {pagedObjects.map((object) => (
+              <MobileObjectCard key={object.id} object={object} managers={managers} canManage={canManage} districts={districts} />
+            ))}
+            {totalPages > 1 ? (
+              <div className="mobile-card flex items-center justify-between gap-2 p-3 text-sm">
+                {safePage > 1 ? (
+                  <Button asChild variant="outline" size="sm" className="min-h-10 rounded-2xl">
+                    <a href={mobileHref({ page: safePage - 1 })}>Назад</a>
+                  </Button>
+                ) : (
+                  <Button variant="outline" size="sm" className="min-h-10 rounded-2xl" disabled>Назад</Button>
+                )}
+                <span className="text-stone-400">Сторінка {safePage} з {totalPages}</span>
+                {safePage < totalPages ? (
+                  <Button asChild variant="outline" size="sm" className="min-h-10 rounded-2xl">
+                    <a href={mobileHref({ page: safePage + 1 })}>Далі</a>
+                  </Button>
+                ) : (
+                  <Button variant="outline" size="sm" className="min-h-10 rounded-2xl" disabled>Далі</Button>
+                )}
+              </div>
+            ) : null}
+          </>
         )}
       </div>
 

@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { TD, TH, THead, TBody, TR, Table } from "@/components/ui/table";
 import { ConfirmSubmitButton } from "@/components/tickets/confirm-submit-button";
+import { MobileTicketSwitch } from "@/components/tickets/mobile-ticket-switch";
 import { canHardDeleteTicket } from "@/lib/auth/permissions";
 import { requireAuth } from "@/lib/auth/server";
 import { getTickets } from "@/lib/supabase/queries";
@@ -34,15 +35,23 @@ function statusTone(status: TicketStatus) {
 export default async function TicketsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; success?: string; error?: string; deleted?: string }>;
+  searchParams: Promise<{ status?: string; success?: string; error?: string; deleted?: string; view?: string }>;
 }) {
   const { profile } = await requireAuth();
   const query = await searchParams;
   const { data: tickets, error } = await getTickets();
   const canDeleteTickets = canHardDeleteTicket(profile);
-  const activeStatus = statusFilters.some((filter) => filter.value === query.status) ? query.status : "all";
+  const activeStatus: "all" | TicketStatus = statusFilters.some((filter) => filter.value === query.status) ? (query.status as "all" | TicketStatus) : "all";
+  const mobileView = query.view === "table" ? "table" : "cards";
   const visibleTickets = activeStatus === "all" ? tickets : tickets.filter((ticket) => ticket.status === activeStatus);
   const returnTo = activeStatus === "all" ? "/tickets" : `/tickets?status=${activeStatus}`;
+  const viewHref = (view: "cards" | "table") => {
+    const params = new URLSearchParams();
+    if (activeStatus !== "all") params.set("status", activeStatus);
+    if (view === "table") params.set("view", "table");
+    const search = params.toString();
+    return search ? `/tickets?${search}` : "/tickets";
+  };
 
   return (
     <div className="page-shell space-y-6">
@@ -57,6 +66,21 @@ export default async function TicketsPage({
       {query.deleted === "1" ? <Alert title="Заявку повністю видалено">Заявку та пов'язані записи прибрано з бази.</Alert> : null}
       {query.error ? <Alert title="Не вдалося видалити заявку">{query.error}</Alert> : null}
       {query.success === "deleted" ? <Alert title="Заявку повністю видалено">Заявку та пов'язані записи прибрано з бази.</Alert> : null}
+      <MobileTicketSwitch active="tickets" />
+      <details className="mobile-card p-3 md:hidden">
+        <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between rounded-2xl bg-white/[0.04] px-3 text-sm font-semibold text-orange-200">
+          Вигляд
+          <span className="text-xs text-stone-500">{mobileView === "table" ? "Таблиця" : "Картки"}</span>
+        </summary>
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <Button asChild variant={mobileView === "cards" ? "default" : "outline"} size="sm" className="min-h-10 rounded-2xl">
+            <Link href={viewHref("cards")}>Картки</Link>
+          </Button>
+          <Button asChild variant={mobileView === "table" ? "default" : "outline"} size="sm" className="min-h-10 rounded-2xl">
+            <Link href={viewHref("table")}>Таблиця</Link>
+          </Button>
+        </div>
+      </details>
       <div className="space-y-4 md:hidden">
         <details className="mobile-card p-4">
           <summary className="flex cursor-pointer list-none items-center justify-between text-sm font-medium">
@@ -72,7 +96,41 @@ export default async function TicketsPage({
           </div>
         </details>
 
-        <div className="space-y-3">
+        {mobileView === "table" ? (
+          <div className="max-w-full overflow-x-auto rounded-2xl border border-white/10 bg-white/[0.04]">
+            <table className="w-full min-w-[720px] text-left text-xs">
+              <thead className="bg-white/[0.04] text-muted-foreground">
+                <tr>
+                  <th className="px-3 py-3">№</th>
+                  <th className="px-3 py-3">Об'єкт</th>
+                  <th className="px-3 py-3">Категорія</th>
+                  <th className="px-3 py-3">Статус</th>
+                  <th className="px-3 py-3">Пріоритет</th>
+                  <th className="px-3 py-3">Виконавець</th>
+                  <th className="px-3 py-3 text-right">Дії</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/10">
+                {visibleTickets.map((ticket) => (
+                  <tr key={ticket.id}>
+                    <td className="whitespace-nowrap px-3 py-3 font-semibold text-orange-200">{ticket.number}</td>
+                    <td className="max-w-[150px] px-3 py-3"><div className="line-clamp-2 break-words">{ticket.object?.name ?? "-"}</div></td>
+                    <td className="max-w-[150px] px-3 py-3"><div className="line-clamp-2 break-words">{ticket.category?.name ?? "-"}</div></td>
+                    <td className="px-3 py-3"><Badge tone={statusTone(ticket.status)}>{statusLabels[ticket.status]}</Badge></td>
+                    <td className="px-3 py-3"><Badge tone={ticket.priority === "critical" || ticket.priority === "high" ? "orange" : "gray"}>{priorityLabels[ticket.priority]}</Badge></td>
+                    <td className="max-w-[150px] px-3 py-3"><div className="line-clamp-2 break-words">{ticket.assignee?.full_name ?? "-"}</div></td>
+                    <td className="px-3 py-3 text-right">
+                      <Button asChild size="sm" variant="outline" className="rounded-2xl">
+                        <Link href={`/tickets/${ticket.id}`}>Відкрити</Link>
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+        <div className="space-y-2">
           {visibleTickets.map((ticket) => (
             <div key={ticket.id} className="mobile-card overflow-hidden">
               <Link href={`/tickets/${ticket.id}`} className="block p-4 active:bg-white/5">
@@ -110,6 +168,7 @@ export default async function TicketsPage({
           ))}
           {visibleTickets.length === 0 ? <div className="mobile-card p-4 text-sm text-stone-500">Заявок поки немає.</div> : null}
         </div>
+        )}
       </div>
 
       <Card className="hidden md:block">

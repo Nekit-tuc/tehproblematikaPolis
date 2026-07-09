@@ -18,7 +18,7 @@ import { createWorkerAction, deactivateWorkerAction, deleteOrDeactivateWorkerAct
 export default async function WorkersPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; success?: string; addWorker?: string }>;
+  searchParams: Promise<{ error?: string; success?: string; addWorker?: string; view?: string }>;
 }) {
   const { profile } = await requireRole(["admin", "management", "tech_manager"]);
   const params = await searchParams;
@@ -27,6 +27,13 @@ export default async function WorkersPage({
   const statsByWorker = new Map(statsResult.data.map((item) => [item.worker.id, item]));
   const isCreatingWorker = params.addWorker === "1";
   const canDeleteWorkers = profile.role === "admin";
+  const mobileView = params.view === "table" ? "table" : "cards";
+  const viewHref = (view: "cards" | "table") => {
+    const next = new URLSearchParams();
+    if (view === "table") next.set("view", "table");
+    const search = next.toString();
+    return search ? `/workers?${search}` : "/workers";
+  };
 
   return (
     <div className="page-shell space-y-6">
@@ -82,7 +89,58 @@ export default async function WorkersPage({
         </CardContent>
       </Card>
 
-      <div className="grid gap-4 xl:grid-cols-2">
+      <details className="mobile-card p-3 md:hidden">
+        <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between rounded-2xl bg-white/[0.04] px-3 text-sm font-semibold text-orange-200">
+          Вигляд
+          <span className="text-xs text-stone-500">{mobileView === "table" ? "Таблиця" : "Картки"}</span>
+        </summary>
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <Button asChild variant={mobileView === "cards" ? "default" : "outline"} size="sm" className="min-h-10 rounded-2xl">
+            <Link href={viewHref("cards")}>Картки</Link>
+          </Button>
+          <Button asChild variant={mobileView === "table" ? "default" : "outline"} size="sm" className="min-h-10 rounded-2xl">
+            <Link href={viewHref("table")}>Таблиця</Link>
+          </Button>
+        </div>
+      </details>
+
+      {mobileView === "table" ? (
+        <div className="max-w-full overflow-x-auto rounded-2xl border border-white/10 bg-white/[0.04] md:hidden">
+          <table className="w-full min-w-[760px] text-left text-xs">
+            <thead className="bg-white/[0.04] text-muted-foreground">
+              <tr>
+                <th className="px-3 py-3">Виконавець</th>
+                <th className="px-3 py-3">Telegram</th>
+                <th className="px-3 py-3">Статус</th>
+                <th className="px-3 py-3">Активні</th>
+                <th className="px-3 py-3">Категорії</th>
+                <th className="px-3 py-3 text-right">Дії</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-white/10">
+              {workersResult.data.map((worker) => {
+                const stats = statsByWorker.get(worker.id);
+                return (
+                  <tr key={worker.id}>
+                    <td className="max-w-[170px] px-3 py-3"><div className="line-clamp-2 break-words font-semibold">{worker.name}</div></td>
+                    <td className="max-w-[150px] px-3 py-3"><div className="line-clamp-2 break-words">{worker.telegram_username ? `@${worker.telegram_username}` : "-"}</div></td>
+                    <td className="px-3 py-3"><Badge tone={worker.is_active ? "green" : "default"}>{worker.is_active ? "Активний" : "Неактивний"}</Badge></td>
+                    <td className="px-3 py-3">{stats?.active ?? 0}</td>
+                    <td className="max-w-[220px] px-3 py-3"><div className="line-clamp-2 break-words">{worker.categories?.map((category) => category.name).join(", ") || "-"}</div></td>
+                    <td className="px-3 py-3 text-right">
+                      <Button asChild variant="outline" size="sm" className="rounded-2xl">
+                        <Link href={`/workers/${worker.id}`}>Заявки</Link>
+                      </Button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+
+      <div className={mobileView === "table" ? "hidden gap-4 md:grid xl:grid-cols-2" : "grid gap-4 xl:grid-cols-2"}>
         {workersResult.data.length === 0 ? (
           <Card><CardContent className="pt-5 text-sm text-muted-foreground">Виконавців поки немає.</CardContent></Card>
         ) : workersResult.data.map((worker) => {

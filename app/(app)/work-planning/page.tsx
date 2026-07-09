@@ -27,6 +27,7 @@ type SearchParams = {
   status?: TicketStatus | "";
   objectId?: string;
   assignment?: "all" | "with_worker" | "without_worker";
+  create?: string;
   success?: string;
   error?: string;
 };
@@ -113,6 +114,7 @@ export default async function WorkPlanningPage({ searchParams }: { searchParams:
   await requireRole(["admin", "management", "tech_manager"]);
   const params = await searchParams;
   const view = params.view === "worker" || params.view === "object" ? params.view : "category";
+  const createMode = params.create === "1";
   const filters = filtersFromParams(params);
 
   const [groupsResult, plansResult, categoriesResult, objectsResult, workersResult] = await Promise.all([
@@ -190,7 +192,13 @@ export default async function WorkPlanningPage({ searchParams }: { searchParams:
           <CardContent className="pt-6 text-sm text-muted-foreground">Буде додано на наступному етапі.</CardContent>
         </Card>
       ) : (
-        <form action={createWorkPlanAction} className="space-y-6">
+        <>
+        {!createMode ? (
+          <Button asChild className="min-h-11 w-full rounded-2xl md:hidden">
+            <Link href="/work-planning?create=1">Створити тижневий план</Link>
+          </Button>
+        ) : null}
+        <form action={createWorkPlanAction} className={cn("space-y-6", !createMode && "hidden md:block")}>
           <Card className="rounded-3xl border-orange-500/20 bg-orange-950/10 md:rounded-lg">
             <CardHeader>
               <CardTitle className="flex items-center gap-2"><FolderKanban className="h-5 w-5 text-orange-300" />Створити тижневий план</CardTitle>
@@ -207,7 +215,7 @@ export default async function WorkPlanningPage({ searchParams }: { searchParams:
                 <Input name="period_end" type="date" required />
               </Field>
               <div className="flex items-end">
-                <SubmitButton type="submit" pendingText="Створюється..." className="min-h-11 w-full rounded-2xl md:min-h-0 md:rounded-md">
+                <SubmitButton type="submit" pendingText="Створюється..." showOverlay className="min-h-11 w-full rounded-2xl md:min-h-0 md:rounded-md">
                   Створити план
                 </SubmitButton>
               </div>
@@ -216,6 +224,9 @@ export default async function WorkPlanningPage({ searchParams }: { searchParams:
                   <Textarea name="notes" placeholder="Додатковий контекст для плану" className="min-h-20" />
                 </Field>
               </div>
+              <Button asChild variant="outline" className="min-h-11 rounded-2xl md:hidden">
+                <Link href="/work-planning">Скасувати</Link>
+              </Button>
             </CardContent>
           </Card>
 
@@ -231,6 +242,7 @@ export default async function WorkPlanningPage({ searchParams }: { searchParams:
             </div>
           )}
         </form>
+        </>
       )}
 
       <Card className="rounded-3xl border-white/10 bg-white/[0.04] md:rounded-lg">
