@@ -21,6 +21,16 @@ function fail(message: string): never {
   redirect(`/work-planning?error=${encodeURIComponent(message)}`);
 }
 
+function publicErrorMessage(message?: string | null) {
+  if (!message) return "Не вдалося створити план.";
+  const lower = message.toLowerCase();
+  if (lower.includes("row-level security") || lower.includes("violates row-level security")) {
+    return "Не вдалося створити план. Перевірте права доступу або RLS.";
+  }
+  if (message.length > 180) return "Не вдалося створити план. Деталі помилки записано в логах сервера.";
+  return message;
+}
+
 export async function createWorkPlanAction(formData: FormData) {
   const { user } = await requireRole(["admin", "management", "tech_manager"]);
   const title = text(formData, "title");
@@ -41,10 +51,20 @@ export async function createWorkPlanAction(formData: FormData) {
     notes,
     createdBy: user.id,
   });
-  if (planResult.error || !planResult.data) fail(planResult.error ?? "Не вдалося створити план.");
+  if (planResult.error || !planResult.data) {
+    console.error("[work-planning] create plan failed", { error: planResult.error });
+    fail(publicErrorMessage(planResult.error));
+  }
 
   const itemsResult = await addTicketsToWorkPlan(planResult.data.id, ticketIds);
-  if (itemsResult.error) fail(itemsResult.error);
+  if (itemsResult.error) {
+    console.error("[work-planning] add tickets to plan failed", {
+      error: itemsResult.error,
+      workPlanId: planResult.data.id,
+      ticketCount: ticketIds.length,
+    });
+    fail(publicErrorMessage(itemsResult.error));
+  }
 
   revalidatePath("/work-planning");
   redirect("/work-planning?success=created");

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type React from "react";
-import { CalendarDays, ClipboardList, Filter, FolderKanban } from "lucide-react";
+import { CalendarDays, Filter, FolderKanban } from "lucide-react";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -71,6 +71,25 @@ function assignmentLabel(workerId?: string | null, workersById?: Map<string, Wor
   return workersById?.get(workerId)?.name ?? "Виконавець не знайдений";
 }
 
+function safeDecode(value: string) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function displayWorkPlanningError(value?: string | null) {
+  if (!value) return null;
+  const message = safeDecode(value);
+  const lower = message.toLowerCase();
+  if (lower.includes("row-level security") || lower.includes("violates row-level security")) {
+    return "Не вдалося створити план. Перевірте права доступу або RLS.";
+  }
+  if (message.length > 180) return `${message.slice(0, 177)}...`;
+  return message;
+}
+
 function buildTabHref(view: string, params: SearchParams) {
   const search = new URLSearchParams();
   Object.entries(params).forEach(([key, value]) => {
@@ -96,6 +115,8 @@ export default async function WorkPlanningPage({ searchParams }: { searchParams:
 
   const workersById = new Map(workersResult.data.map((worker) => [worker.id, worker]));
   const error = groupsResult.error ?? plansResult.error ?? categoriesResult.error ?? objectsResult.error ?? workersResult.error;
+  const pageError = displayWorkPlanningError(error);
+  const createError = displayWorkPlanningError(params.error);
   const ticketCount = groupsResult.data.reduce((sum, group) => sum + group.tickets.length, 0);
 
   return (
@@ -108,9 +129,27 @@ export default async function WorkPlanningPage({ searchParams }: { searchParams:
         <Badge tone="orange">{ticketCount} заявок доступно</Badge>
       </div>
 
-      {error ? <Alert title="Не вдалося завантажити планування">{error}</Alert> : null}
-      {params.error ? <Alert title="План не створено">{decodeURIComponent(params.error)}</Alert> : null}
-      {params.success === "created" ? <Alert title="План створено">Чернетку плану робіт збережено. Заявки залишилися окремими і не змінили статус.</Alert> : null}
+      {pageError ? (
+        <div className="min-w-0 max-w-full overflow-hidden break-words whitespace-normal">
+          <Alert title="Не вдалося завантажити планування">
+            <span className="break-words whitespace-normal">{pageError}</span>
+          </Alert>
+        </div>
+      ) : null}
+      {createError ? (
+        <div className="min-w-0 max-w-full overflow-hidden break-words whitespace-normal">
+          <Alert title="План не створено">
+            <span className="break-words whitespace-normal">{createError}</span>
+          </Alert>
+        </div>
+      ) : null}
+      {params.success === "created" ? (
+        <div className="min-w-0 max-w-full overflow-hidden break-words whitespace-normal">
+          <Alert title="План створено">
+            <span className="break-words whitespace-normal">Чернетку плану робіт збережено. Заявки залишилися окремими і не змінили статус.</span>
+          </Alert>
+        </div>
+      ) : null}
 
       <details className="mobile-card p-3 md:hidden">
         <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between rounded-2xl bg-white/[0.04] px-3 text-sm font-semibold text-orange-200">
@@ -276,10 +315,27 @@ function CategoryGroup({ title, tickets, workersById }: { title: string; tickets
           <Badge tone="orange">{tickets.length} заявок</Badge>
         </div>
       </CardHeader>
-      <CardContent className="space-y-2 p-3 pt-0 md:p-6 md:pt-0">
-        {tickets.map((ticket) => (
-          <TicketPlanningRow key={ticket.id} ticket={ticket} workersById={workersById} />
-        ))}
+      <CardContent className="p-3 pt-0 md:p-6 md:pt-0">
+        <div className="max-w-full overflow-x-auto rounded-2xl border border-border bg-stone-950/30 md:rounded-lg">
+          <table className="w-full min-w-[720px] text-left text-xs md:text-sm">
+            <thead className="bg-white/[0.04] text-xs uppercase tracking-wide text-muted-foreground">
+              <tr>
+                <th className="w-12 px-3 py-3">#</th>
+                <th className="px-3 py-3">Номер</th>
+                <th className="px-3 py-3">Об'єкт / опис</th>
+                <th className="px-3 py-3">Пріоритет</th>
+                <th className="px-3 py-3">Статус</th>
+                <th className="px-3 py-3">Виконавець</th>
+                <th className="px-3 py-3 text-right">Дія</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {tickets.map((ticket) => (
+                <TicketPlanningRow key={ticket.id} ticket={ticket} workersById={workersById} />
+              ))}
+            </tbody>
+          </table>
+        </div>
       </CardContent>
     </Card>
   );
@@ -287,20 +343,34 @@ function CategoryGroup({ title, tickets, workersById }: { title: string; tickets
 
 function TicketPlanningRow({ ticket, workersById }: { ticket: TicketWithRelations; workersById: Map<string, WorkerWithCategories> }) {
   return (
-    <label className="grid cursor-pointer gap-3 rounded-2xl border border-border bg-stone-950/30 p-3 text-sm transition hover:bg-stone-900/60 md:grid-cols-[32px_130px_1fr_140px_120px_130px_auto] md:items-center md:rounded-lg">
-      <input name="ticketIds" value={ticket.id} type="checkbox" className="h-6 w-6 accent-orange-500 md:h-5 md:w-5" />
-      <div className="font-semibold text-orange-200">{ticket.number}</div>
-      <div className="min-w-0">
-        <div className="line-clamp-1 break-words font-medium text-stone-100">{ticket.object?.name ?? "-"}</div>
-        <div className="mt-1 line-clamp-2 break-words text-xs text-muted-foreground">{ticket.title || ticket.description}</div>
-      </div>
-      <Badge tone={priorityTone(ticket.priority)}>{priorityLabels[ticket.priority]}</Badge>
-      <Badge tone={statusTone(ticket.status)}>{statusLabels[ticket.status]}</Badge>
-      <div className="break-words text-xs text-muted-foreground">{assignmentLabel(ticket.assignee_worker_id, workersById)}</div>
-      <Button asChild variant="outline" size="sm" className="min-h-10 rounded-2xl md:min-h-0 md:rounded-md">
-        <Link href={`/tickets/${ticket.id}`}>Відкрити</Link>
-      </Button>
-    </label>
+    <tr className="transition hover:bg-stone-900/60">
+      <td className="px-3 py-3 align-top">
+        <input
+          name="ticketIds"
+          value={ticket.id}
+          type="checkbox"
+          aria-label={`Додати заявку ${ticket.number} до плану`}
+          className="h-5 w-5 accent-orange-500"
+        />
+      </td>
+      <td className="whitespace-nowrap px-3 py-3 align-top font-semibold text-orange-200">{ticket.number}</td>
+      <td className="min-w-0 px-3 py-3 align-top">
+        <div className="max-w-[260px] break-words font-medium text-stone-100">{ticket.object?.name ?? "-"}</div>
+        <div className="mt-1 line-clamp-2 max-w-[320px] break-words text-xs text-muted-foreground">{ticket.title || ticket.description}</div>
+      </td>
+      <td className="px-3 py-3 align-top">
+        <Badge tone={priorityTone(ticket.priority)}>{priorityLabels[ticket.priority]}</Badge>
+      </td>
+      <td className="px-3 py-3 align-top">
+        <Badge tone={statusTone(ticket.status)}>{statusLabels[ticket.status]}</Badge>
+      </td>
+      <td className="max-w-[160px] break-words px-3 py-3 align-top text-xs text-muted-foreground">{assignmentLabel(ticket.assignee_worker_id, workersById)}</td>
+      <td className="px-3 py-3 align-top text-right">
+        <Button asChild variant="outline" size="sm" className="min-h-10 rounded-2xl md:min-h-0 md:rounded-md">
+          <Link href={`/tickets/${ticket.id}`}>Відкрити</Link>
+        </Button>
+      </td>
+    </tr>
   );
 }
 
