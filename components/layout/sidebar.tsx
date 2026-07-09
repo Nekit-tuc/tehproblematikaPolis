@@ -1,6 +1,9 @@
+"use client";
+
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import type React from "react";
-import { BarChart3, Bot, BriefcaseBusiness, Building2, ClipboardList, FileSpreadsheet, LayoutDashboard, Settings, Users } from "lucide-react";
+import { BarChart3, Bot, BriefcaseBusiness, Building2, CalendarDays, ClipboardList, FileSpreadsheet, LayoutDashboard, Settings, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Profile, UserRole } from "@/types/domain";
 
@@ -10,6 +13,7 @@ const nav = [
   { href: "/ai-tickets", label: "AI-заявки", icon: Bot, roles: ["admin", "management", "tech_manager"] },
   { href: "/objects", label: "Об'єкти", icon: Building2, roles: ["admin", "management", "tech_manager"] },
   { href: "/workers", label: "Виконавці", icon: BriefcaseBusiness, roles: ["admin", "management", "tech_manager"] },
+  { href: "/work-planning", label: "Планування", icon: CalendarDays, roles: ["admin", "management", "tech_manager"] },
   { href: "/users", label: "Користувачі", icon: Users, roles: ["admin", "management"] },
   { href: "/reports", label: "Excel-звіти", icon: FileSpreadsheet, roles: ["admin", "management", "tech_manager"] },
   { href: "/ai-test", label: "AI-тест", icon: Bot, roles: ["admin", "management", "tech_manager"] },
@@ -17,6 +21,7 @@ const nav = [
 ] satisfies Array<{ href: string; label: string; icon: React.ElementType; roles: UserRole[] }>;
 
 export function Sidebar({ profile, aiTicketsCount = 0 }: { profile: Profile; aiTicketsCount?: number }) {
+  const pathname = usePathname();
   const visibleNav = nav.filter((item) => item.roles.includes(profile.role));
 
   return (
@@ -29,21 +34,27 @@ export function Sidebar({ profile, aiTicketsCount = 0 }: { profile: Profile; aiT
         </div>
       </Link>
       <nav className="space-y-1">
-        {visibleNav.map((item) => (
-          <Link
-            key={item.href}
-            href={item.href}
-            className={cn("flex items-center gap-3 rounded-md px-3 py-2.5 text-sm text-stone-300 hover:bg-stone-900 hover:text-orange-200")}
-          >
-            <item.icon className="h-4 w-4" />
-            <span className="min-w-0 flex-1">{item.label}</span>
-            {item.href === "/ai-tickets" && aiTicketsCount > 0 ? (
-              <span className="rounded-full border border-orange-700/60 bg-orange-950/60 px-2 py-0.5 text-xs font-semibold text-orange-200">
-                {aiTicketsCount}
-              </span>
-            ) : null}
-          </Link>
-        ))}
+        {visibleNav.map((item) => {
+          const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={cn(
+                "flex items-center gap-3 rounded-md px-3 py-2.5 text-sm text-stone-300 hover:bg-stone-900 hover:text-orange-200",
+                isActive && "border border-orange-500/30 bg-orange-500/10 text-orange-100",
+              )}
+            >
+              <item.icon className={cn("h-4 w-4", isActive && "text-orange-200")} />
+              <span className="min-w-0 flex-1">{item.label}</span>
+              {item.href === "/ai-tickets" && aiTicketsCount > 0 ? (
+                <span className="rounded-full border border-orange-700/60 bg-orange-950/60 px-2 py-0.5 text-xs font-semibold text-orange-200">
+                  {aiTicketsCount}
+                </span>
+              ) : null}
+            </Link>
+          );
+        })}
       </nav>
       <div className="mt-8 rounded-lg border border-orange-900/50 bg-orange-950/20 p-4">
         <BarChart3 className="mb-3 h-5 w-5 text-orange-300" />

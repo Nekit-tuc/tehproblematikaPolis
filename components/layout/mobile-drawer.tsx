@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Bot, BriefcaseBusiness, Building2, ClipboardList, FileSpreadsheet, Home, LogOut, Settings, Users, X } from "lucide-react";
+import type React from "react";
+import { Bot, BriefcaseBusiness, Building2, CalendarDays, ClipboardList, FileSpreadsheet, Home, LogOut, Settings, Users, X } from "lucide-react";
 import { logoutAction } from "@/app/login/actions";
 import { Button } from "@/components/ui/button";
 import { roleLabels } from "@/lib/labels";
@@ -15,6 +16,7 @@ const nav = [
   { href: "/ai-tickets", label: "AI-заявки", icon: Bot, roles: ["admin", "management", "tech_manager"] },
   { href: "/objects", label: "Об'єкти", icon: Building2, roles: ["admin", "management", "tech_manager"] },
   { href: "/workers", label: "Виконавці", icon: BriefcaseBusiness, roles: ["admin", "management", "tech_manager"] },
+  { href: "/work-planning", label: "Планування", icon: CalendarDays, roles: ["admin", "management", "tech_manager"] },
   { href: "/users", label: "Користувачі", icon: Users, roles: ["admin", "management"] },
   { href: "/reports", label: "Excel-звіти", icon: FileSpreadsheet, roles: ["admin", "management", "tech_manager"] },
   { href: "/ai-test", label: "AI-тест", icon: Bot, roles: ["admin", "management", "tech_manager"] },
