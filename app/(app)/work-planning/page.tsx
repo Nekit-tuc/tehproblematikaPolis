@@ -1,6 +1,23 @@
 ﻿import Link from "next/link";
 import type React from "react";
-import { CalendarDays, Filter, FolderKanban } from "lucide-react";
+import {
+  Building2,
+  CalendarDays,
+  CalendarPlus,
+  CheckCircle,
+  ChevronDown,
+  ClipboardList,
+  Eye,
+  Filter,
+  FolderKanban,
+  LayoutGrid,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+  Send,
+  Users,
+  XCircle,
+} from "lucide-react";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -12,7 +29,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { requireRole } from "@/lib/auth/server";
 import { priorityLabels, statusLabels } from "@/lib/labels";
 import { getCategories, getObjects } from "@/lib/supabase/queries";
-import { getTicketsGroupedByCategory, getWorkPlans, type PlanningFilters, type PlanningTicket, type WorkPlanStatus } from "@/lib/supabase/work-plans";
+import { getTicketsGroupedByCategory, getWorkPlans, type PlanningFilters, type PlanningTicket, type WorkPlan, type WorkPlanStatus } from "@/lib/supabase/work-plans";
 import { getActiveWorkers } from "@/lib/supabase/worker-queries";
 import { cn, formatDate } from "@/lib/utils";
 import type { TicketPriority, TicketStatus, WorkerWithCategories } from "@/types/domain";
@@ -40,6 +57,34 @@ const planStatusLabels: Record<WorkPlanStatus, string> = {
   partially_done: "Частково виконано",
   done: "Виконано",
   cancelled: "Скасовано",
+};
+
+const planStatusStyle: Record<WorkPlanStatus, { stripe: string; badge: string; icon: React.ElementType }> = {
+  draft: {
+    stripe: "bg-zinc-500",
+    badge: "border-white/[0.10] bg-white/[0.06] text-zinc-300",
+    icon: Pencil,
+  },
+  sent: {
+    stripe: "bg-blue-500",
+    badge: "border-blue-400/25 bg-blue-500/12 text-blue-300",
+    icon: Send,
+  },
+  partially_done: {
+    stripe: "bg-amber-500",
+    badge: "border-amber-400/25 bg-amber-500/12 text-amber-300",
+    icon: CalendarDays,
+  },
+  done: {
+    stripe: "bg-emerald-500",
+    badge: "border-emerald-400/25 bg-emerald-500/12 text-emerald-300",
+    icon: CheckCircle,
+  },
+  cancelled: {
+    stripe: "bg-red-500",
+    badge: "border-red-400/25 bg-red-500/12 text-red-300",
+    icon: XCircle,
+  },
 };
 
 function filtersFromParams(params: SearchParams): PlanningFilters {
@@ -132,13 +177,16 @@ export default async function WorkPlanningPage({ searchParams }: { searchParams:
   const ticketCount = groupsResult.data.reduce((sum, group) => sum + group.tickets.length, 0);
 
   return (
-    <div className="page-shell space-y-2.5 pb-20 md:space-y-6 md:pb-6">
+    <div className="page-shell max-w-full space-y-2.5 overflow-x-hidden bg-[radial-gradient(circle_at_50%_0%,rgba(249,115,22,0.10),transparent_28%)] pb-28 md:space-y-6 md:bg-none md:pb-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-[23px] font-semibold leading-none tracking-[-0.03em] md:text-2xl">Планування робіт</h1>
-          <p className="subtle">Групування заявок по підрозділах, виконавцях і тижневих планах.</p>
+        <div className="min-w-0">
+          <h1 className="text-[23px] font-bold leading-[1.05] tracking-[-0.03em] text-zinc-100 md:text-2xl">Планування робіт</h1>
+          <p className="mt-1 max-w-[320px] text-[11px] leading-4 text-zinc-400 md:text-sm">Групування заявок по підрозділах, виконавцях і тижневих планах.</p>
         </div>
-        <Badge tone="orange">{ticketCount} заявок доступно</Badge>
+        <div className="inline-flex h-8 items-center gap-1.5 rounded-[11px] border border-orange-500/45 bg-orange-500/10 px-3 text-[11px] font-semibold text-orange-200">
+          <ClipboardList className="h-[13px] w-[13px]" />
+          {ticketCount} заявок доступно
+        </div>
       </div>
 
       {pageError ? (
@@ -163,10 +211,14 @@ export default async function WorkPlanningPage({ searchParams }: { searchParams:
         </div>
       ) : null}
 
-      <details className="mobile-card p-3 md:hidden">
-        <summary className="flex min-h-9 cursor-pointer list-none items-center justify-between rounded-lg bg-white/[0.04] px-3 text-[12px] font-semibold text-orange-200">
-          <span className="flex items-center gap-2"><Filter className="h-4 w-4" />Фільтри</span>
-          <span className="text-xs text-stone-500">{ticketCount} знайдено</span>
+      <details className="rounded-[18px] border border-white/[0.08] bg-white/[0.035] p-2.5 shadow-[0_10px_28px_rgba(0,0,0,0.28)] md:hidden">
+        <summary className="flex h-10 cursor-pointer list-none items-center justify-between rounded-[13px] bg-white/[0.045] px-3">
+          <span className="flex items-center gap-2 text-[12px] font-semibold text-orange-200"><Filter className="h-4 w-4" />Фільтри</span>
+          <span className="flex items-center gap-1.5 text-[10px] text-zinc-400">
+            <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-white/[0.08] px-1.5 text-[10px] font-semibold text-zinc-200">{ticketCount}</span>
+            знайдено
+            <ChevronDown className="h-3.5 w-3.5" />
+          </span>
         </summary>
         <FilterForm params={params} categories={categoriesResult.data} objects={objectsResult.data} workers={workersResult.data} compact />
       </details>
@@ -181,10 +233,12 @@ export default async function WorkPlanningPage({ searchParams }: { searchParams:
         </CardContent>
       </Card>
 
-      <div className="flex gap-2 overflow-x-auto pb-1">
-        <TabLink href={buildTabHref("category", params)} active={view === "category"}>По категоріях</TabLink>
-        <TabLink href={buildTabHref("worker", params)} active={view === "worker"}>По виконавцях</TabLink>
-        <TabLink href={buildTabHref("object", params)} active={view === "object"}>По об'єктах</TabLink>
+      <div className="-mx-1 max-w-full overflow-x-auto px-1 pb-1">
+        <div className="flex min-w-0 gap-2">
+          <TabLink href={buildTabHref("category", params)} active={view === "category"} icon={LayoutGrid}>По категоріях</TabLink>
+          <TabLink href={buildTabHref("worker", params)} active={view === "worker"} icon={Users}>По виконавцях</TabLink>
+          <TabLink href={buildTabHref("object", params)} active={view === "object"} icon={Building2}>По об'єктах</TabLink>
+        </div>
       </div>
 
       {view !== "category" ? (
@@ -194,14 +248,14 @@ export default async function WorkPlanningPage({ searchParams }: { searchParams:
       ) : (
         <>
         {!createMode ? (
-          <Button asChild className="min-h-8 w-full rounded-lg text-[10px] md:hidden">
-            <Link href="/work-planning?create=1">Створити тижневий план</Link>
+          <Button asChild className="h-11 w-full rounded-[14px] bg-gradient-to-r from-orange-500 to-orange-400 text-[12px] font-semibold text-white shadow-[0_10px_28px_rgba(249,115,22,0.25)] md:hidden">
+            <Link href="/work-planning?create=1"><Plus className="h-4 w-4" />Створити тижневий план</Link>
           </Button>
         ) : null}
         <form action={createWorkPlanAction} className={cn("space-y-6", !createMode && "hidden md:block")}>
-          <Card className="rounded-[17px] border-orange-500/20 bg-orange-950/10 md:rounded-lg">
+          <Card className="rounded-[18px] border-orange-500/20 bg-orange-950/10 shadow-[0_10px_28px_rgba(0,0,0,0.24)] md:rounded-lg">
             <CardHeader>
-              <CardTitle className="flex items-center gap-2"><FolderKanban className="h-5 w-5 text-orange-300" />Створити тижневий план</CardTitle>
+              <CardTitle className="flex items-center gap-2 text-[15px] md:text-lg"><FolderKanban className="h-4 w-4 text-orange-300 md:h-5 md:w-5" />Створити тижневий план</CardTitle>
               <CardDescription>Оберіть заявки нижче, вкажіть період і створіть чернетку плану. Telegram-розсилка буде на етапі 2.</CardDescription>
             </CardHeader>
             <CardContent className="grid gap-3 md:grid-cols-4">
@@ -245,30 +299,89 @@ export default async function WorkPlanningPage({ searchParams }: { searchParams:
         </>
       )}
 
-      <Card className="rounded-[17px] border-white/10 bg-white/[0.04] md:rounded-lg">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2"><CalendarDays className="h-5 w-5 text-orange-300" />Плани робіт</CardTitle>
-          <CardDescription>Останні чернетки та плани. Детальна сторінка плану буде додана окремим етапом.</CardDescription>
+      <Card className="rounded-[18px] border-white/[0.08] bg-white/[0.03] shadow-[0_14px_34px_rgba(0,0,0,0.28)] md:rounded-lg">
+        <CardHeader className="p-3 md:p-6">
+          <div className="flex items-start gap-2.5">
+            <div className="grid h-8 w-8 shrink-0 place-items-center rounded-[10px] border border-orange-400/25 bg-orange-500/15">
+              <CalendarDays className="h-4 w-4 text-orange-300" />
+            </div>
+            <div className="min-w-0">
+              <CardTitle className="text-[15px] font-bold text-zinc-100 md:text-lg">Плани робіт</CardTitle>
+              <CardDescription className="mt-0.5 text-[11px] leading-4 text-zinc-400 md:text-sm">Останні чернетки та плани. Детальна сторінка плану буде додана окремим етапом.</CardDescription>
+            </div>
+          </div>
         </CardHeader>
-        <CardContent className="space-y-3">
+        <CardContent className="space-y-3 p-3 pt-0 md:p-6 md:pt-0">
           {plansResult.data.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Планів робіт поки немає.</p>
-          ) : plansResult.data.map((plan) => (
-            <div key={plan.id} className="grid gap-3 rounded-2xl border border-border bg-stone-950/30 p-3 text-sm md:grid-cols-[1.4fr_1fr_120px_120px_auto] md:items-center md:rounded-lg">
-              <div className="min-w-0">
-                <div className="break-words font-medium text-stone-100">{plan.title}</div>
-                <div className="mt-1 text-xs text-muted-foreground">Створено: {formatDate(plan.created_at)}</div>
-              </div>
-              <div className="text-muted-foreground">{plan.period_start} - {plan.period_end}</div>
-              <Badge tone={plan.status === "draft" ? "orange" : plan.status === "done" ? "green" : "gray"}>{planStatusLabels[plan.status]}</Badge>
-              <div className="text-muted-foreground">{plan.items_count ?? 0} заявок</div>
-              <Button asChild variant="outline" className="min-h-8 rounded-lg text-[10px] md:min-h-0 md:rounded-md md:text-sm">
-                <Link href={`/work-planning/${plan.id}`}>Переглянути</Link>
+            <div className="rounded-[17px] border border-dashed border-white/[0.10] bg-white/[0.025] p-4 text-center">
+              <CalendarPlus className="mx-auto h-6 w-6 text-orange-300" />
+              <div className="mt-2 text-[13px] font-semibold text-zinc-100">Планів робіт поки немає.</div>
+              <p className="mx-auto mt-1 max-w-[260px] text-[10px] leading-4 text-zinc-400">Створіть тижневий план із доступних заявок.</p>
+              <Button asChild className="mt-3 h-9 rounded-[12px] bg-gradient-to-r from-orange-500 to-orange-400 px-4 text-[11px] font-semibold text-white md:hidden">
+                <Link href="/work-planning?create=1"><Plus className="h-3.5 w-3.5" />Створити план</Link>
               </Button>
             </div>
+          ) : plansResult.data.map((plan) => (
+            <PlanCard key={plan.id} plan={plan} />
           ))}
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+function PlanCard({ plan }: { plan: WorkPlan }) {
+  const style = planStatusStyle[plan.status];
+  const StatusIcon = style.icon;
+  return (
+    <div className="relative overflow-hidden rounded-[17px] border border-white/[0.08] bg-[linear-gradient(145deg,rgba(255,255,255,0.06),rgba(255,255,255,0.025))] p-3 shadow-[0_10px_26px_rgba(0,0,0,0.32)] md:grid md:grid-cols-[1.4fr_1fr_120px_120px_auto] md:items-center md:gap-3 md:rounded-lg">
+      <div className={cn("absolute left-0 top-0 h-full w-[3px]", style.stripe)} />
+      <div className="flex min-w-0 items-start justify-between gap-2 md:block">
+        <div className="min-w-0 pl-1 md:pl-0">
+          <div className="line-clamp-1 break-words text-[13px] font-bold leading-4 text-zinc-100 md:text-sm">{plan.title}</div>
+          <div className="mt-1 hidden text-xs text-muted-foreground md:block">Створено: {formatDate(plan.created_at)}</div>
+        </div>
+        <span className={cn("inline-flex h-6 shrink-0 items-center gap-1 rounded-full border px-2 text-[9px] font-semibold md:hidden", style.badge)}>
+          <StatusIcon className="h-[11px] w-[11px]" />
+          {planStatusLabels[plan.status]}
+        </span>
+      </div>
+
+      <div className="mt-2 flex items-center gap-1.5 pl-1 text-[10px] text-zinc-400 md:mt-0 md:pl-0 md:text-sm">
+        <CalendarDays className="h-3 w-3 shrink-0 md:hidden" />
+        <span className="min-w-0 break-words">{plan.period_start} - {plan.period_end}</span>
+      </div>
+
+      <div className="mt-2.5 grid grid-cols-2 gap-x-2 gap-y-1.5 pl-1 md:hidden">
+        <MetaItem icon={ClipboardList}>{plan.items_count ?? 0} заявок</MetaItem>
+        <MetaItem icon={CalendarDays}>{formatDate(plan.created_at)}</MetaItem>
+      </div>
+
+      <div className="mt-2 hidden md:block">
+        <span className={cn("inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-medium", style.badge)}>
+          <StatusIcon className="h-3 w-3" />
+          {planStatusLabels[plan.status]}
+        </span>
+      </div>
+      <div className="hidden text-muted-foreground md:block">{plan.items_count ?? 0} заявок</div>
+
+      <div className="mt-3 grid grid-cols-[1fr_auto] gap-1.5 md:mt-0 md:flex md:justify-end">
+        <Button asChild variant="outline" className="h-8 rounded-[10px] border-white/[0.08] bg-white/[0.035] text-[10px] text-zinc-200 md:h-auto md:rounded-md md:text-sm">
+          <Link href={`/work-planning/${plan.id}`}><Eye className="h-3 w-3 md:h-4 md:w-4" />Переглянути</Link>
+        </Button>
+        <Button asChild variant="outline" className="h-8 w-8 rounded-[10px] border-white/[0.08] bg-white/[0.035] p-0 text-zinc-300 md:hidden">
+          <Link href={`/work-planning/${plan.id}`} aria-label="Деталі плану"><MoreHorizontal className="h-3.5 w-3.5" /></Link>
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function MetaItem({ icon: Icon, children }: { icon: React.ElementType; children: React.ReactNode }) {
+  return (
+    <div className="flex min-w-0 items-center gap-1.5 text-[10px] text-zinc-400">
+      <Icon className="h-3 w-3 shrink-0 text-zinc-500" />
+      <span className="min-w-0 truncate">{children}</span>
     </div>
   );
 }
@@ -410,15 +523,16 @@ function TicketPlanningRow({ ticket, workersById }: { ticket: PlanningTicket; wo
   );
 }
 
-function TabLink({ href, active, children }: { href: string; active: boolean; children: React.ReactNode }) {
+function TabLink({ href, active, icon: Icon, children }: { href: string; active: boolean; icon: React.ElementType; children: React.ReactNode }) {
   return (
     <Link
       href={href}
       className={cn(
-        "shrink-0 rounded-full border border-white/10 bg-white/[0.03] px-4 py-2 text-sm text-stone-300",
-        active && "border-orange-500 bg-orange-500 text-stone-950 font-semibold",
+        "inline-flex h-10 shrink-0 items-center gap-1.5 rounded-[15px] border border-white/[0.08] bg-white/[0.035] px-4 text-[11px] font-semibold text-zinc-300",
+        active && "border-orange-400 bg-gradient-to-r from-orange-500 to-orange-400 text-white shadow-[0_8px_22px_rgba(249,115,22,0.22)]",
       )}
     >
+      <Icon className="h-[13px] w-[13px]" />
       {children}
     </Link>
   );

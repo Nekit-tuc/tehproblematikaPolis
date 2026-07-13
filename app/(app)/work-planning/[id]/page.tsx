@@ -1,5 +1,6 @@
-﻿import Link from "next/link";
-import { ArrowLeft, Download, RefreshCw, Send } from "lucide-react";
+﻿import type { ComponentType } from "react";
+import Link from "next/link";
+import { ArrowLeft, Building2, CalendarDays, CheckCircle, ChevronRight, ClipboardList, Clock, Download, ExternalLink, Info, ListChecks, RefreshCw, RotateCcw, Send, Users } from "lucide-react";
 import { ConfirmSubmitButton } from "@/components/tickets/confirm-submit-button";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -112,6 +113,33 @@ function statusTone(status: string) {
   return "gray";
 }
 
+function planStatusBadgeClass(status: WorkPlanStatus) {
+  if (status === "done") return "border-emerald-400/25 bg-emerald-500/12 text-emerald-200";
+  if (status === "sent") return "border-sky-400/25 bg-sky-500/12 text-sky-200";
+  if (status === "cancelled") return "border-red-400/25 bg-red-500/12 text-red-200";
+  return "border-orange-400/25 bg-orange-500/12 text-orange-200";
+}
+
+function priorityTone(priority?: string | null) {
+  if (priority === "high" || priority === "critical") return "orange";
+  if (priority === "medium") return "orange";
+  return "gray";
+}
+
+function priorityStripeClass(priority?: string | null) {
+  if (priority === "critical" || priority === "high") return "bg-red-500";
+  if (priority === "medium") return "bg-orange-400";
+  return "bg-emerald-500";
+}
+
+function metricToneClass(tone: "gray" | "green" | "orange" | "red" | "blue") {
+  if (tone === "green") return "border-emerald-400/20 bg-emerald-500/10 text-emerald-300";
+  if (tone === "orange") return "border-orange-400/20 bg-orange-500/10 text-orange-300";
+  if (tone === "red") return "border-red-400/20 bg-red-500/10 text-red-300";
+  if (tone === "blue") return "border-sky-400/20 bg-sky-500/10 text-sky-300";
+  return "border-white/[0.08] bg-white/[0.05] text-zinc-300";
+}
+
 export default async function WorkPlanDetailPage({ params, searchParams }: PageProps) {
   await requireRole(["admin", "management", "tech_manager"]);
   const [{ id }, query] = await Promise.all([params, searchParams]);
@@ -142,46 +170,57 @@ export default async function WorkPlanDetailPage({ params, searchParams }: PageP
   const progress = planProgress(items);
 
   return (
-    <div className="page-shell space-y-2.5 pb-20 md:space-y-6 md:pb-8">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <Button asChild variant="outline" size="sm" className="mb-2 min-h-8 rounded-lg text-[10px] md:rounded-md md:text-sm">
-            <Link href="/work-planning"><ArrowLeft className="h-4 w-4" />До планування</Link>
-          </Button>
-          <h1 className="break-words text-[23px] font-semibold leading-tight tracking-[-0.03em] md:text-2xl">{plan.title}</h1>
-          <p className="subtle">{plan.period_start} - {plan.period_end}</p>
+    <div className="page-shell max-w-full space-y-2.5 overflow-x-hidden bg-[radial-gradient(circle_at_50%_0%,rgba(249,115,22,0.12),transparent_30%)] pb-32 md:space-y-6 md:bg-none md:pb-8">
+      <div className="grid min-w-0 gap-2.5">
+        <Button asChild variant="outline" size="sm" className="h-9 w-fit rounded-[13px] border-white/[0.08] bg-white/[0.035] px-3 text-[11px] text-zinc-200 md:h-auto md:rounded-md md:text-sm">
+          <Link href="/work-planning"><ArrowLeft className="h-3.5 w-3.5 md:h-4 md:w-4" />До планування</Link>
+        </Button>
+
+        <div className="min-w-0 rounded-[18px] border border-white/[0.08] bg-[linear-gradient(145deg,rgba(255,255,255,0.055),rgba(255,255,255,0.025))] p-3 shadow-[0_18px_44px_rgba(0,0,0,0.32)] md:rounded-lg md:p-4">
+          <div className="flex min-w-0 items-start gap-2.5">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] border border-orange-400/25 bg-orange-500/15 text-orange-300">
+              <CalendarDays className="h-4 w-4" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex min-w-0 flex-wrap items-start gap-2">
+                <h1 className="min-w-0 flex-1 break-words text-[23px] font-bold leading-[1.05] tracking-[-0.03em] text-zinc-100 md:text-2xl">{plan.title}</h1>
+                <span className={cn("inline-flex h-6 shrink-0 items-center gap-1 rounded-[9px] border px-2 text-[9px] font-semibold", planStatusBadgeClass(plan.status))}>
+                  <Clock className="h-2.5 w-2.5" />{planStatusLabels[plan.status]}
+                </span>
+              </div>
+              <p className="mt-1 break-words text-[12px] leading-4 text-zinc-400 md:text-sm">{plan.period_start} - {plan.period_end}</p>
+            </div>
+          </div>
         </div>
-        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:justify-end">
-          <Button asChild variant="outline" className="min-h-8 rounded-lg text-[10px] md:min-h-0 md:rounded-md md:text-sm">
-            <Link href={`/work-planning/${plan.id}/export`}><Download className="h-4 w-4" />Експорт плану</Link>
+
+        <div className="grid w-full min-w-0 grid-cols-2 gap-2 md:flex md:flex-wrap md:justify-end">
+          <Button asChild variant="outline" className="h-10 min-w-0 rounded-[13px] border-white/[0.08] bg-white/[0.035] px-2 text-[11px] text-zinc-200 md:h-auto md:rounded-md md:px-3 md:text-sm">
+            <Link href={`/work-planning/${plan.id}/export`}><Download className="h-3.5 w-3.5 shrink-0 md:h-4 md:w-4" /><span className="truncate">Експорт плану</span></Link>
           </Button>
           {isDraft ? (
-            <form action={sendWorkPlanAction.bind(null, plan.id)}>
-              <SubmitButton className="min-h-8 w-full rounded-lg text-[10px] md:min-h-0 md:w-auto md:rounded-md md:text-sm" pendingText="Надсилається...">
-                <Send className="h-4 w-4" />Надіслати план виконавцям
+            <form action={sendWorkPlanAction.bind(null, plan.id)} className="min-w-0">
+              <SubmitButton className="h-10 w-full rounded-[13px] bg-gradient-to-r from-orange-500 to-orange-400 px-2 text-[11px] font-semibold text-white shadow-[0_10px_28px_rgba(249,115,22,0.22)] md:h-auto md:w-auto md:rounded-md md:px-3 md:text-sm" pendingText="Надсилається...">
+                <Send className="h-3.5 w-3.5 shrink-0 md:h-4 md:w-4" /><span className="truncate">Надіслати</span>
               </SubmitButton>
             </form>
           ) : null}
           {canResend && retryableCount > 0 ? (
-            <form action={retryFailedWorkPlanDispatchAction.bind(null, plan.id)}>
-              <SubmitButton className="min-h-8 w-full rounded-lg text-[10px] md:min-h-0 md:w-auto md:rounded-md md:text-sm" pendingText="Повторюється...">
-                <RefreshCw className="h-4 w-4" />Повторити невдалі
+            <form action={retryFailedWorkPlanDispatchAction.bind(null, plan.id)} className="min-w-0">
+              <SubmitButton className="h-10 w-full rounded-[13px] px-2 text-[11px] md:h-auto md:w-auto md:rounded-md md:px-3 md:text-sm" pendingText="Повторюється...">
+                <RefreshCw className="h-3.5 w-3.5 shrink-0 md:h-4 md:w-4" /><span className="truncate">Повторити невдалі</span>
               </SubmitButton>
-              <p className="mt-1 max-w-xs text-[10px] leading-4 text-muted-foreground">
-                Повторить відправку тільки виконавцям, кому план не надіслався.
-              </p>
             </form>
           ) : null}
           {canResend ? (
-            <form action={resendWorkPlanToAllAction.bind(null, plan.id)}>
+            <form action={resendWorkPlanToAllAction.bind(null, plan.id)} className="min-w-0">
               <ConfirmSubmitButton
                 type="submit"
                 variant="outline"
-                className="min-h-8 w-full rounded-lg text-[10px] md:min-h-0 md:w-auto md:rounded-md md:text-sm"
+                className="h-10 w-full rounded-[13px] border-white/[0.08] bg-white/[0.035] px-2 text-[11px] md:h-auto md:w-auto md:rounded-md md:px-3 md:text-sm"
                 pendingText="Надсилається..."
                 message="План уже надсилався. Ви точно хочете повторно надіслати його всім виконавцям?"
               >
-                <Send className="h-4 w-4" />Надіслати повторно всім
+                <Send className="h-3.5 w-3.5 shrink-0 md:h-4 md:w-4" /><span className="truncate">Повторно всім</span>
               </ConfirmSubmitButton>
             </form>
           ) : null}
@@ -199,32 +238,51 @@ export default async function WorkPlanDetailPage({ params, searchParams }: PageP
         </div>
       ) : null}
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
-        <Metric label="Статус" value={planStatusLabels[plan.status]} tone={statusTone(plan.status)} />
-        <Metric label="Заявок" value={String(items.length)} />
-        <Metric label="Виконавців" value={String(workerCount(items))} />
-        <Metric label="Очікує підтвердження" value={String(progress.waitingConfirmation)} tone="orange" />
-        <Metric label="Виконано" value={String(progress.done)} tone="green" />
-        <Metric label="Залишилось" value={String(progress.remaining)} />
-        <Metric label="Створено" value={formatDate(plan.created_at)} />
-        <Metric label="Надіслано" value={plan.sent_at ? formatDate(plan.sent_at) : "-"} />
+      {dispatches.length > 0 ? (
+        <div className="flex min-w-0 items-center justify-between gap-2 rounded-[13px] border border-orange-500/20 bg-orange-500/[0.08] px-3 py-2.5 text-[11px] text-orange-200">
+          <span className="flex min-w-0 items-center gap-2 break-words"><Info className="h-3.5 w-3.5 shrink-0 text-orange-300" />Було {dispatches.length} спроб надсилання</span>
+          <ChevronRight className="h-3.5 w-3.5 shrink-0 text-orange-300" />
+        </div>
+      ) : null}
+
+      <div className="grid grid-cols-2 gap-2 lg:grid-cols-4 xl:grid-cols-8">
+        <Metric label="Статус" value={planStatusLabels[plan.status]} tone={statusTone(plan.status)} icon={Clock} compact />
+        <Metric label="Заявок" value={String(items.length)} icon={ClipboardList} />
+        <Metric label="Виконавців" value={String(workerCount(items))} tone="blue" icon={Users} />
+        <Metric label="Очікує підтвердження" value={String(progress.waitingConfirmation)} tone="orange" icon={Clock} />
+        <Metric label="Виконано" value={String(progress.done)} tone="green" icon={CheckCircle} />
+        <Metric label="Залишилось" value={String(progress.remaining)} tone="blue" icon={ListChecks} />
+        <Metric label="Створено" value={formatDate(plan.created_at)} icon={CalendarDays} compact />
+        <Metric label="Надіслано" value={plan.sent_at ? formatDate(plan.sent_at) : "Не надсилалось"} tone="orange" icon={Send} compact />
       </div>
 
       {isDraft ? <DraftEditor plan={plan} /> : null}
 
-      <Card className="rounded-[17px] border-white/10 bg-white/[0.04] md:rounded-lg">
-        <CardHeader>
-          <CardTitle>Заявки у плані</CardTitle>
-          <CardDescription>Згруповано по виконавцях. Група без виконавця не надсилається в Telegram.</CardDescription>
+      <Card className="rounded-[18px] border-white/[0.08] bg-white/[0.03] shadow-[0_14px_34px_rgba(0,0,0,0.28)] md:rounded-lg">
+        <CardHeader className="space-y-0 p-3 md:p-6">
+          <div className="flex min-w-0 items-start gap-2.5">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] border border-orange-400/25 bg-orange-500/15 text-orange-300">
+              <ClipboardList className="h-4 w-4" />
+            </div>
+            <div className="min-w-0">
+              <CardTitle className="break-words text-[15px] font-bold text-zinc-100 md:text-lg">Заявки у плані</CardTitle>
+              <CardDescription className="mt-0.5 break-words text-[11px] leading-4 text-zinc-400 md:text-sm">Список заявок, згрупованих за виконавцями.</CardDescription>
+            </div>
+          </div>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-3 p-3 pt-0 md:p-6 md:pt-0">
           {grouped.length === 0 ? (
-            <p className="text-sm text-muted-foreground">У плані немає заявок.</p>
+            <p className="text-[11px] text-muted-foreground md:text-sm">У плані немає заявок.</p>
           ) : grouped.map((group) => (
-            <div key={group.key} className="space-y-2">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <h2 className="break-words text-sm font-semibold text-orange-200">{group.title}</h2>
-                <Badge tone={group.key === "unassigned" ? "gray" : "orange"}>{group.items.length} заявок</Badge>
+            <div key={group.key} className="min-w-0 space-y-2.5 rounded-[15px] border border-white/[0.06] bg-black/15 p-2.5 md:p-3">
+              <div className="flex min-w-0 items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <h2 className="flex min-w-0 items-center gap-1.5 break-words text-[12px] font-semibold text-orange-100 md:text-sm">
+                    <Users className="h-3.5 w-3.5 shrink-0 text-orange-300" />{group.title}
+                  </h2>
+                  {group.key === "unassigned" ? <p className="mt-1 break-words text-[10px] leading-4 text-zinc-500">Група без виконавця не надсилається в Telegram.</p> : null}
+                </div>
+                <Badge className="h-6 shrink-0 rounded-[9px] px-2 text-[10px]" tone={group.key === "unassigned" ? "gray" : "orange"}>{group.items.length} заявок</Badge>
               </div>
               <div className="grid gap-2">
                 {group.items.map((item) => <PlanItemCard key={item.id} item={item} plan={plan} />)}
@@ -284,26 +342,34 @@ function PlanItemCard({ item, plan }: { item: WorkPlanItem; plan: WorkPlan }) {
       ? "Підтверджено адміністратором"
       : null;
   return (
-    <div className={cn("grid gap-3 rounded-2xl border border-border bg-stone-950/30 p-3 text-sm md:grid-cols-[120px_1fr_130px_120px_160px] md:items-center md:rounded-lg")}>
-      <div className="font-semibold text-orange-200">{ticket?.number ?? "-"}</div>
-      <div className="min-w-0">
-        <div className="break-words font-medium text-stone-100">{ticket?.object?.name ?? "-"}</div>
-        <div className="mt-1 line-clamp-2 break-words text-xs text-muted-foreground">{ticket?.title || ticket?.description || "-"}</div>
-        <div className="mt-1 text-xs text-muted-foreground">{ticket?.category?.name ?? item.category ?? "-"}</div>
-        {completionNote ? <div className="mt-1 break-words text-xs font-medium text-orange-200">{completionNote}</div> : null}
+    <div className="relative min-w-0 overflow-hidden rounded-[15px] border border-white/[0.08] bg-[linear-gradient(145deg,rgba(255,255,255,0.055),rgba(255,255,255,0.025))] p-2.5 pl-3.5 shadow-[0_8px_22px_rgba(0,0,0,0.24)] md:grid md:grid-cols-[120px_1fr_120px_120px_150px] md:items-center md:gap-2 md:rounded-lg md:p-3">
+      <span className={cn("absolute inset-y-0 left-0 w-[3px]", priorityStripeClass(ticket?.priority))} />
+      <div className="flex min-w-0 items-start justify-between gap-2 md:block">
+        <div className="flex min-w-0 items-center gap-1.5 break-words text-[12px] font-bold text-orange-100 md:text-sm">
+          <ClipboardList className="h-3 w-3 shrink-0 md:hidden" />{ticket?.number ?? "-"}
+        </div>
+        <Badge className="h-6 shrink-0 rounded-[9px] px-2 text-[9px] md:hidden" tone={priorityTone(ticket?.priority)}>{ticket?.priority ? priorityLabels[ticket.priority] : "-"}</Badge>
       </div>
-      <Badge tone={ticket?.priority === "high" || ticket?.priority === "critical" ? "orange" : "gray"}>{ticket?.priority ? priorityLabels[ticket.priority] : "-"}</Badge>
-      <Badge tone="gray">{ticket?.status ? statusLabels[ticket.status] : "-"}</Badge>
-      <div className="grid gap-2 md:flex md:justify-end">
+      <div className="mt-1.5 min-w-0 md:mt-0">
+        <div className="flex min-w-0 items-center gap-1.5 break-words text-[13px] font-semibold text-stone-100 md:text-sm">
+          <Building2 className="h-3 w-3 shrink-0 text-zinc-500 md:hidden" />{ticket?.object?.name ?? "-"}
+        </div>
+        <div className="mt-1 line-clamp-2 break-words text-[10px] leading-4 text-zinc-400 md:text-xs">{ticket?.title || ticket?.description || "-"}</div>
+        <div className="mt-1 line-clamp-1 break-words text-[10px] text-zinc-500 md:text-xs">{ticket?.category?.name ?? item.category ?? "-"}</div>
+        {completionNote ? <div className="mt-1.5 flex items-center gap-1.5 break-words text-[9px] font-medium text-emerald-300 md:text-xs"><CheckCircle className="h-3 w-3 shrink-0" />{completionNote}</div> : null}
+      </div>
+      <Badge className="mt-2 hidden w-fit text-[9px] md:mt-0 md:inline-flex md:text-xs" tone={priorityTone(ticket?.priority)}>{ticket?.priority ? priorityLabels[ticket.priority] : "-"}</Badge>
+      <Badge className="mt-2 w-fit rounded-[8px] px-2 text-[9px] md:mt-0 md:text-xs" tone={ticket?.status === "waiting_admin_confirmation" ? "orange" : ticket?.status === "done" ? "green" : "gray"}>{ticket?.status ? statusLabels[ticket.status] : "-"}</Badge>
+      <div className="mt-2 grid gap-2 md:mt-0 md:flex md:justify-end">
         {ticket ? (
-          <Button asChild variant="outline" size="sm" className="min-h-8 rounded-lg text-[10px] md:min-h-0 md:rounded-md md:text-sm">
-            <Link href={`/tickets/${ticket.id}`}>Відкрити заявку</Link>
+          <Button asChild variant="outline" size="sm" className="h-8 w-full rounded-[10px] border-white/[0.08] bg-white/[0.035] text-[10px] md:h-auto md:w-auto md:rounded-md md:text-sm">
+            <Link href={`/tickets/${ticket.id}`}><ExternalLink className="h-3 w-3" />Відкрити заявку</Link>
           </Button>
         ) : null}
         {plan.status === "draft" && ticket ? (
           <form action={removeWorkPlanItemAction.bind(null, plan.id)}>
             <input type="hidden" name="ticket_id" value={ticket.id} />
-            <SubmitButton variant="outline" size="sm" className="min-h-8 w-full rounded-lg text-[10px] md:min-h-0 md:w-auto md:rounded-md md:text-sm" pendingText="...">
+            <SubmitButton variant="outline" size="sm" className="h-8 w-full rounded-[10px] border-white/[0.08] bg-white/[0.035] text-[10px] md:h-auto md:w-auto md:rounded-md md:text-sm" pendingText="...">
               Прибрати
             </SubmitButton>
           </form>
@@ -312,43 +378,58 @@ function PlanItemCard({ item, plan }: { item: WorkPlanItem; plan: WorkPlan }) {
     </div>
   );
 }
-
 function DispatchHistory({ dispatches }: { dispatches: WorkPlanDispatch[] }) {
   return (
-    <Card className="rounded-[17px] border-white/10 bg-white/[0.04] md:rounded-lg">
-      <CardHeader>
-        <CardTitle>Історія надсилань</CardTitle>
-        <CardDescription>Результати ручної Telegram-розсилки плану виконавцям.</CardDescription>
+    <Card className="rounded-[18px] border-white/[0.08] bg-white/[0.03] shadow-[0_14px_34px_rgba(0,0,0,0.24)] md:rounded-lg">
+      <CardHeader className="space-y-0 p-3 md:p-6">
+        <div className="flex min-w-0 items-start gap-2.5">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] border border-orange-400/25 bg-orange-500/15 text-orange-300">
+            <RotateCcw className="h-4 w-4" />
+          </div>
+          <div className="min-w-0">
+            <CardTitle className="break-words text-[15px] font-bold text-zinc-100 md:text-lg">Історія надсилань</CardTitle>
+            <CardDescription className="mt-0.5 break-words text-[11px] leading-4 text-zinc-400 md:text-sm">Результати ручної Telegram-розсилки плану виконавцям.</CardDescription>
+          </div>
+        </div>
       </CardHeader>
-      <CardContent className="space-y-2">
+      <CardContent className="space-y-2 p-3 pt-0 md:p-6 md:pt-0">
         {dispatches.length === 0 ? (
-          <p className="text-sm text-muted-foreground">План ще не надсилали.</p>
+          <p className="text-[11px] text-muted-foreground md:text-sm">План ще не надсилали.</p>
         ) : dispatches.map((dispatch, index) => (
-          <div key={dispatch.id} className="grid gap-2 rounded-2xl border border-border bg-stone-950/30 p-3 text-sm md:grid-cols-[90px_1fr_140px_160px_1.4fr] md:items-center md:rounded-lg">
-            <div className="text-xs font-medium text-orange-200">Спроба {dispatches.length - index}</div>
-            <div className="break-words font-medium text-stone-100">{dispatch.worker?.name ?? "Виконавець не знайдений"}</div>
-            <Badge tone={statusTone(dispatch.status)}>{dispatchStatusLabels[dispatch.status] ?? dispatch.status}</Badge>
-            <div className="text-xs text-muted-foreground">{formatDate(dispatch.sent_at)}</div>
-            <div className="line-clamp-3 break-words text-xs text-muted-foreground">{dispatch.error ?? dispatch.message_id ?? "-"}</div>
+          <div key={dispatch.id} className="min-w-0 rounded-[14px] border border-white/[0.08] bg-white/[0.025] p-2.5 text-[11px] shadow-[0_8px_20px_rgba(0,0,0,0.18)] md:grid md:grid-cols-[90px_1fr_130px_150px_1.4fr] md:items-center md:gap-2 md:text-sm">
+            <div className="flex items-center justify-between gap-2 md:block">
+              <div className="font-semibold text-orange-100">Спроба {dispatches.length - index}</div>
+              <Badge className="h-6 rounded-[9px] px-2 text-[9px] md:hidden" tone={statusTone(dispatch.status)}>{dispatchStatusLabels[dispatch.status] ?? dispatch.status}</Badge>
+            </div>
+            <div className="mt-1 break-words font-semibold text-stone-100 md:mt-0">{dispatch.worker?.name ?? "Виконавець не знайдений"}</div>
+            <Badge className="hidden w-fit text-[9px] md:inline-flex md:text-xs" tone={statusTone(dispatch.status)}>{dispatchStatusLabels[dispatch.status] ?? dispatch.status}</Badge>
+            <div className="mt-1 flex items-center gap-1.5 text-[10px] text-zinc-400 md:mt-0 md:text-xs"><CalendarDays className="h-3 w-3 shrink-0" />{formatDate(dispatch.sent_at)}</div>
+            <div className={cn("mt-1 break-words text-[10px] leading-4 md:mt-0 md:text-xs", dispatch.error ? "line-clamp-2 text-red-300" : "text-zinc-500")}>
+              {dispatch.error ? `Помилка: ${dispatch.error}` : dispatch.message_id ? `Telegram message ID: ${dispatch.message_id}` : "-"}
+            </div>
           </div>
         ))}
       </CardContent>
     </Card>
   );
 }
-
-function Metric({ label, value, tone = "gray" }: { label: string; value: string; tone?: "gray" | "green" | "orange" | "red" }) {
+function Metric({ label, value, tone = "gray", icon: Icon, compact = false }: { label: string; value: string; tone?: "gray" | "green" | "orange" | "red" | "blue"; icon?: ComponentType<{ className?: string }>; compact?: boolean }) {
   return (
-    <Card className="rounded-[17px] border-white/10 bg-white/[0.04] md:rounded-lg">
-      <CardContent className="p-3 md:p-4">
-        <div className="text-xs text-muted-foreground">{label}</div>
-        <div className="mt-2 break-words text-sm font-semibold text-stone-100">{value}</div>
-        <div className="mt-2"><Badge tone={tone}>{label}</Badge></div>
+    <Card className="min-h-[72px] rounded-[15px] border-white/[0.08] bg-white/[0.035] md:rounded-lg">
+      <CardContent className="flex h-full min-w-0 items-start justify-between gap-2 p-2.5 md:p-4">
+        <div className="min-w-0">
+          <div className="break-words text-[10px] leading-3 text-zinc-400 md:text-xs">{label}</div>
+          <div className={cn("mt-1.5 break-words font-bold leading-tight text-stone-100", compact ? "text-[12px] md:text-sm" : "text-[18px] md:text-xl")}>{value}</div>
+        </div>
+        {Icon ? (
+          <div className={cn("flex h-7 w-7 shrink-0 items-center justify-center rounded-[9px] border", metricToneClass(tone))}>
+            <Icon className="h-3.5 w-3.5" />
+          </div>
+        ) : null}
       </CardContent>
     </Card>
   );
 }
-
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return <div className="space-y-2"><Label>{label}</Label>{children}</div>;
 }
