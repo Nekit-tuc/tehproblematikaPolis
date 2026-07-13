@@ -15,9 +15,11 @@ import {
   Pencil,
   Plus,
   Send,
+  Trash2,
   Users,
   XCircle,
 } from "lucide-react";
+import { ConfirmSubmitButton } from "@/components/tickets/confirm-submit-button";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -29,11 +31,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { requireRole } from "@/lib/auth/server";
 import { priorityLabels, statusLabels } from "@/lib/labels";
 import { getCategories, getObjects } from "@/lib/supabase/queries";
-import { getTicketsGroupedByCategory, getWorkPlans, type PlanningFilters, type PlanningTicket, type WorkPlan, type WorkPlanStatus } from "@/lib/supabase/work-plans";
+import { getTicketsGroupedByCategory, getWorkPlanningSummary, getWorkPlans, type PlanningFilters, type PlanningTicket, type WorkPlan, type WorkPlanStatus, type WorkPlanningSummary } from "@/lib/supabase/work-plans";
 import { getActiveWorkers } from "@/lib/supabase/worker-queries";
 import { cn, formatDate } from "@/lib/utils";
 import type { TicketPriority, TicketStatus, WorkerWithCategories } from "@/types/domain";
-import { createWorkPlanAction } from "./actions";
+import { createWorkPlanAction, deleteWorkPlanAction } from "./actions";
 
 type SearchParams = {
   view?: "category" | "worker" | "object";
@@ -162,30 +164,36 @@ export default async function WorkPlanningPage({ searchParams }: { searchParams:
   const createMode = params.create === "1";
   const filters = filtersFromParams(params);
 
-  const [groupsResult, plansResult, categoriesResult, objectsResult, workersResult] = await Promise.all([
+  const [groupsResult, plansResult, categoriesResult, objectsResult, workersResult, summaryResult] = await Promise.all([
     getTicketsGroupedByCategory(filters),
     getWorkPlans(),
     getCategories(),
     getObjects(),
     getActiveWorkers(),
+    getWorkPlanningSummary(),
   ]);
 
   const workersById = new Map(workersResult.data.map((worker) => [worker.id, worker]));
-  const error = groupsResult.error ?? plansResult.error ?? categoriesResult.error ?? objectsResult.error ?? workersResult.error;
+  const error = groupsResult.error ?? plansResult.error ?? categoriesResult.error ?? objectsResult.error ?? workersResult.error ?? summaryResult.error;
   const pageError = displayWorkPlanningError(error);
   const createError = displayWorkPlanningError(params.error);
   const ticketCount = groupsResult.data.reduce((sum, group) => sum + group.tickets.length, 0);
+  const planningSummary = summaryResult.data;
 
   return (
     <div className="page-shell max-w-full space-y-2.5 overflow-x-hidden bg-[radial-gradient(circle_at_50%_0%,rgba(249,115,22,0.10),transparent_28%)] pb-28 md:space-y-6 md:bg-none md:pb-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h1 className="text-[23px] font-bold leading-[1.05] tracking-[-0.03em] text-zinc-100 md:text-2xl">Планування робіт</h1>
-          <p className="mt-1 max-w-[320px] text-[11px] leading-4 text-zinc-400 md:text-sm">Групування заявок по підрозділах, виконавцях і тижневих планах.</p>
+          <p className="mt-1 max-w-[320px] text-[11px] leading-4 text-zinc-400 md:text-sm">Формування планів по виконавцях, категоріях і термінах заявок.</p>
         </div>
-        <div className="inline-flex h-8 items-center gap-1.5 rounded-[11px] border border-orange-500/45 bg-orange-500/10 px-3 text-[11px] font-semibold text-orange-200">
-          <ClipboardList className="h-[13px] w-[13px]" />
-          {ticketCount} заявок доступно
+        <div className="flex shrink-0 items-start gap-2">
+          <PlanningSummaryBadge summary={planningSummary} fallbackCount={ticketCount} />
+          {!createMode ? (
+            <Button asChild className="h-9 rounded-[13px] bg-gradient-to-r from-orange-500 to-orange-400 px-3 text-[11px] font-semibold text-white shadow-[0_8px_22px_rgba(249,115,22,0.22)] md:h-10 md:text-sm">
+              <Link href="/work-planning?create=1"><Plus className="h-3.5 w-3.5" /><span className="md:hidden">План</span><span className="hidden md:inline">Створити план</span></Link>
+            </Button>
+          ) : null}
         </div>
       </div>
 
@@ -374,6 +382,41 @@ function PlanCard({ plan }: { plan: WorkPlan }) {
         </Button>
       </div>
     </div>
+  );
+}
+
+
+function PlanningSummaryBadge({ summary, fallbackCount }: { summary: WorkPlanningSummary; fallbackCount: number }) {
+  const total = summary.totalActive || fallbackCount;
+  return (
+    <div className="hidden min-w-0 rounded-[12px] border border-orange-500/30 bg-orange-500/10 px-3 py-1.5 text-right text-[10px] leading-4 text-orange-100 sm:block">
+      <div className="font-semibold">{summary.unplannedActive} не заплановано</div>
+      <div className="text-orange-200/75">{total} активні / {summary.plannedActive} у планах</div>
+    </div>
+  );
+}
+
+function PlanActionsMenu({ planId }: { planId: string }) {
+  return (
+    <details className="group relative">
+      <summary className="flex h-8 w-8 cursor-pointer list-none items-center justify-center rounded-[10px] border border-white/[0.08] bg-white/[0.035] text-zinc-300 hover:bg-white/[0.07]">
+        <MoreHorizontal className="h-3.5 w-3.5" />
+      </summary>
+      <div className="absolute right-0 top-9 z-20 w-44 rounded-[12px] border border-white/[0.10] bg-[#111]/95 p-1.5 shadow-2xl shadow-black/40">
+        <form action={deleteWorkPlanAction.bind(null, planId)}>
+          <ConfirmSubmitButton
+            type="submit"
+            variant="ghost"
+            className="h-8 w-full justify-start rounded-[10px] px-2 text-[11px] text-red-300 hover:bg-red-500/10"
+            pendingText="Видаляємо..."
+            message="Ви точно хочете видалити цей план? Заявки буде відв'язано від плану."
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            Видалити план
+          </ConfirmSubmitButton>
+        </form>
+      </div>
+    </details>
   );
 }
 

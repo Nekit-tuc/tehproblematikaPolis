@@ -1,9 +1,19 @@
 "use client";
 
-import { Bell, Menu } from "lucide-react";
+import { Menu } from "lucide-react";
+import { NotificationsDrawer } from "@/components/layout/notifications-drawer";
 import { Button } from "@/components/ui/button";
+import type { AppNotification } from "@/lib/supabase/notifications";
 
-export function MobileTopbar({ onMenuClick }: { onMenuClick: () => void }) {
+export function MobileTopbar({
+  onMenuClick,
+  notifications,
+  notificationCount,
+}: {
+  onMenuClick: () => void;
+  notifications: AppNotification[];
+  notificationCount: number;
+}) {
   return (
     <header className="sticky top-0 z-40 border-b border-white/10 bg-[#070707]/90 backdrop-blur-xl md:hidden">
       <div className="flex h-[62px] items-center justify-between px-3">
@@ -25,16 +35,7 @@ export function MobileTopbar({ onMenuClick }: { onMenuClick: () => void }) {
           </div>
         </div>
 
-        <Button
-          type="button"
-          variant="outline"
-          size="icon"
-          aria-label="Сповіщення"
-          className="relative h-9 w-9 rounded-full border-white/10 bg-white/[0.04] text-zinc-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]"
-        >
-          <Bell className="h-[18px] w-[18px]" />
-          <span className="absolute right-2.5 top-2.5 h-2 w-2 rounded-full bg-orange-500 shadow-[0_0_16px_rgba(249,115,22,0.85)]" />
-        </Button>
+        <NotificationsDrawer notifications={notifications} count={notificationCount} />
       </div>
     </header>
   );

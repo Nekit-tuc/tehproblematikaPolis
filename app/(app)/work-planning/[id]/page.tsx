@@ -239,10 +239,10 @@ export default async function WorkPlanDetailPage({ params, searchParams }: PageP
       ) : null}
 
       {dispatches.length > 0 ? (
-        <div className="flex min-w-0 items-center justify-between gap-2 rounded-[13px] border border-orange-500/20 bg-orange-500/[0.08] px-3 py-2.5 text-[11px] text-orange-200">
+        <Link href="#dispatch-history" className="flex min-w-0 items-center justify-between gap-2 rounded-[13px] border border-orange-500/20 bg-orange-500/[0.08] px-3 py-2.5 text-[11px] text-orange-200 transition hover:bg-orange-500/[0.12]">
           <span className="flex min-w-0 items-center gap-2 break-words"><Info className="h-3.5 w-3.5 shrink-0 text-orange-300" />Було {dispatches.length} спроб надсилання</span>
           <ChevronRight className="h-3.5 w-3.5 shrink-0 text-orange-300" />
-        </div>
+        </Link>
       ) : null}
 
       <div className="grid grid-cols-2 gap-2 lg:grid-cols-4 xl:grid-cols-8">
@@ -380,7 +380,7 @@ function PlanItemCard({ item, plan }: { item: WorkPlanItem; plan: WorkPlan }) {
 }
 function DispatchHistory({ dispatches }: { dispatches: WorkPlanDispatch[] }) {
   return (
-    <Card className="rounded-[18px] border-white/[0.08] bg-white/[0.03] shadow-[0_14px_34px_rgba(0,0,0,0.24)] md:rounded-lg">
+    <Card id="dispatch-history" className="scroll-mt-24 rounded-[18px] border-white/[0.08] bg-white/[0.03] shadow-[0_14px_34px_rgba(0,0,0,0.24)] md:rounded-lg">
       <CardHeader className="space-y-0 p-3 md:p-6">
         <div className="flex min-w-0 items-start gap-2.5">
           <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] border border-orange-400/25 bg-orange-500/15 text-orange-300">

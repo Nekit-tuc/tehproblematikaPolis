@@ -21,6 +21,12 @@ export type WorkPlan = {
   items_count?: number;
 };
 
+export type WorkPlanningSummary = {
+  totalActive: number;
+  plannedActive: number;
+  unplannedActive: number;
+};
+
 export type PlanningTicket = TicketWithRelations & {
   isPlanned: boolean;
   plannedPlanId: string | null;
@@ -556,6 +562,76 @@ async function sendWorkPlanToWorkerGroup(input: {
     error: result.error,
   });
   return { sent: 0, failed: 1, skipped: 0 };
+}
+
+
+export async function getWorkPlanningSummary(): Promise<QueryResult<WorkPlanningSummary>> {
+  if (!hasSupabaseEnv()) return emptyWithError({ totalActive: 0, plannedActive: 0, unplannedActive: 0 });
+  const supabase = await createClient();
+  const activeStatuses: TicketStatus[] = ["new", "assigned", "in_progress", "waiting", "waiting_admin_confirmation", "pending_review"];
+
+  const [activeTicketsResult, plannedRowsResult] = await Promise.all([
+    measureAsync("work-planning:summary_active_tickets", () =>
+      supabase.from("tickets").select("id", { count: "exact" }).in("status", activeStatuses),
+    ),
+    measureAsync("work-planning:summary_planned_items", () =>
+      supabase
+        .from("work_plan_items")
+        .select("ticket_id, ticket:tickets!inner(status), work_plan:work_plans!inner(status)")
+        .in("work_plan.status", ["sent", "partially_done"])
+        .in("ticket.status", activeStatuses),
+    ),
+  ]);
+
+  if (activeTicketsResult.error) return { data: { totalActive: 0, plannedActive: 0, unplannedActive: 0 }, error: activeTicketsResult.error.message };
+  if (plannedRowsResult.error) return { data: { totalActive: activeTicketsResult.count ?? 0, plannedActive: 0, unplannedActive: activeTicketsResult.count ?? 0 }, error: plannedRowsResult.error.message };
+
+  const totalActive = activeTicketsResult.count ?? 0;
+  const plannedActive = new Set(((plannedRowsResult.data ?? []) as Array<{ ticket_id: string }>).map((row) => row.ticket_id)).size;
+  return { data: { totalActive, plannedActive, unplannedActive: Math.max(totalActive - plannedActive, 0) }, error: null };
+}
+
+export async function getWorkPlanActiveTicketCount(): Promise<QueryResult<number>> {
+  const summary = await getWorkPlanningSummary();
+  return { data: summary.data.plannedActive, error: summary.error };
+}
+
+export async function deleteWorkPlan(workPlanId: string, actorId: string): Promise<QueryResult<null>> {
+  if (!hasSupabaseEnv()) return { data: null, error: missingSupabaseMessage };
+  const itemsResult = await getWorkPlanItems(workPlanId);
+  if (itemsResult.error) return { data: null, error: itemsResult.error };
+  const supabase = await createClient();
+  const now = new Date().toISOString();
+  const activeResetStatuses: TicketStatus[] = ["assigned", "in_progress", "waiting_admin_confirmation"];
+
+  for (const item of itemsResult.data) {
+    const ticket = item.ticket;
+    if (!ticket) continue;
+    if (ticket.status !== "done") {
+      const update: Record<string, string | null> = {
+        assignee_worker_id: null,
+        assigned_at: null,
+        sent_to_worker_at: null,
+        updated_at: now,
+      };
+      if (activeResetStatuses.includes(ticket.status)) update.status = "new";
+      const { error: ticketError } = await supabase.from("tickets").update(update).eq("id", ticket.id);
+      if (ticketError) return { data: null, error: ticketError.message };
+      const { error: historyError } = await supabase.from("ticket_history").insert({
+        ticket_id: ticket.id,
+        actor_id: actorId,
+        action: "План видалено. Виконавця знято із заявки.",
+        metadata: { work_plan_id: workPlanId, previous_status: ticket.status, previous_worker_id: ticket.assignee_worker_id ?? null },
+      });
+      if (historyError) return { data: null, error: historyError.message };
+    }
+  }
+
+  await supabase.from("work_plan_dispatches").delete().eq("work_plan_id", workPlanId);
+  await supabase.from("work_plan_items").delete().eq("work_plan_id", workPlanId);
+  const { error } = await supabase.from("work_plans").delete().eq("id", workPlanId);
+  if (error) return { data: null, error: error.message };
+  return { data: null, error: null };
 }
 
 export async function sendWorkPlanToWorkers(

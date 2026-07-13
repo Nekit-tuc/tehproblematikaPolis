@@ -1,12 +1,22 @@
 {
-  "name": "Polissya Service Desk",
-  "short_name": "Polissya SD",
-  "description": "Внутрішня система керування технічними заявками",
+  "name": "Polissya Service Desk AI",
+  "short_name": "Service Desk",
+  "description": "Система технічних заявок Полісся Продукт",
   "start_url": "/dashboard",
   "display": "standalone",
-  "background_color": "#090909",
-  "theme_color": "#090909",
+  "background_color": "#050505",
+  "theme_color": "#ff7a18",
   "orientation": "portrait",
-  "categories": ["business", "productivity"],
-  "icons": []
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
 }

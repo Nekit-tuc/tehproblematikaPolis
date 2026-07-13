@@ -91,13 +91,31 @@ const ticketListSelect = `
   updated_at,
   object:objects(id, name, type, object_number, city, district, address, is_active, created_at),
   category:categories(id, name, description, is_active, created_at),
-  assignee:profiles!tickets_assigned_to_fkey(id, full_name, email, role, object_id, default_object_id, telegram_id, telegram_username, phone, is_active, created_at)
+  assignee:profiles!tickets_assigned_to_fkey(id, full_name, email, role, object_id, default_object_id, telegram_id, telegram_username, phone, is_active, created_at),
+  worker:workers(id, name, phone, telegram_username, telegram_id, is_active, notes, created_at, updated_at)
 `;
 
 type TicketQueryOptions = {
   limit?: number | null;
   status?: string;
   source?: string | string[];
+};
+
+export type TicketListFilters = {
+  status?: string;
+  category?: string;
+  priority?: string;
+  q?: string;
+  sort?: string;
+  page?: number;
+  limit?: number;
+};
+
+export type TicketPageResult = {
+  tickets: TicketWithRelations[];
+  total: number;
+  page: number;
+  limit: number;
 };
 
 export async function getTickets(options: TicketQueryOptions = {}): Promise<QueryResult<TicketWithRelations[]>> {
@@ -120,6 +138,49 @@ export async function getTickets(options: TicketQueryOptions = {}): Promise<Quer
 
 export async function getRecentTickets(limit = 8): Promise<QueryResult<TicketWithRelations[]>> {
   return getTickets({ limit });
+}
+
+
+function applyTicketAccess(query: any, profile: Profile) {
+  if (profile.role === "worker") return query.eq("assigned_to", profile.id);
+  if (profile.role === "store_manager") return profile.object_id ? query.eq("object_id", profile.object_id) : query.eq("created_by", profile.id);
+  return query;
+}
+
+function applyTicketFilters(query: any, filters: TicketListFilters) {
+  if (filters.status && filters.status !== "all") query = query.eq("status", filters.status);
+  if (filters.category && filters.category !== "all") query = query.eq("category_id", filters.category);
+  if (filters.priority && filters.priority !== "all") query = query.eq("priority", filters.priority);
+  const search = filters.q?.trim();
+  if (search) {
+    const escaped = search.replace(/[%_,]/g, "");
+    query = query.or(`number.ilike.%${escaped}%,title.ilike.%${escaped}%,description.ilike.%${escaped}%`);
+  }
+  return query;
+}
+
+export async function getTicketsPage(filters: TicketListFilters = {}): Promise<QueryResult<TicketPageResult>> {
+  const limit = Math.min(Math.max(filters.limit ?? 20, 1), 100);
+  const page = Math.max(filters.page ?? 1, 1);
+  if (!hasSupabaseEnv()) return emptyWithError({ tickets: [], total: 0, page, limit });
+  const profile = await getCurrentProfile();
+  if (!profile) return emptyWithError({ tickets: [], total: 0, page, limit });
+  const supabase = await createClient();
+  const from = (page - 1) * limit;
+  const to = from + limit - 1;
+
+  let query = supabase.from("tickets").select(ticketListSelect, { count: "exact" });
+  query = applyTicketAccess(query, profile);
+  query = applyTicketFilters(query, filters);
+  if (filters.sort === "priority_asc" || filters.sort === "priority_desc") {
+    query = query.order("priority", { ascending: filters.sort === "priority_asc" }).order("created_at", { ascending: false });
+  } else {
+    query = query.order("created_at", { ascending: false });
+  }
+  query = query.range(from, to);
+
+  const { data, count, error } = await measureAsync("tickets:page", () => query);
+  return { data: { tickets: (data ?? []) as unknown as TicketWithRelations[], total: count ?? 0, page, limit }, error: error?.message ?? null };
 }
 
 type CountQuery = PromiseLike<{ count: number | null; error: { message: string } | null }>;
@@ -151,18 +212,24 @@ export async function getDashboardStats(): Promise<QueryResult<{
   const [active, newTickets, inProgress, pendingReview, critical, done, objects] = await Promise.all([
     countTickets(supabase, "dashboard:count_active", (query) => query.not("status", "in", "(done,cancelled,rejected)")),
     countTickets(supabase, "dashboard:count_new", (query) => query.eq("status", "new")),
-    countTickets(supabase, "dashboard:count_in_progress", (query) => query.eq("status", "in_progress")),
+    measureAsync("dashboard:count_planned_in_progress", () =>
+      supabase
+        .from("work_plan_items")
+        .select("ticket_id, ticket:tickets!inner(status), work_plan:work_plans!inner(status)")
+        .in("work_plan.status", ["sent", "partially_done"])
+        .not("ticket.status", "in", "(done,cancelled,rejected)"),
+    ),
     countTickets(supabase, "dashboard:count_pending_review", (query) => query.eq("status", "pending_review")),
     countTickets(supabase, "dashboard:count_critical", (query) => query.eq("priority", "critical")),
     countTickets(supabase, "dashboard:count_done", (query) => query.eq("status", "done")),
     measureAsync("dashboard:count_objects", () => supabase.from("objects").select("id", { count: "exact", head: true }).eq("is_active", true)),
   ]);
-  const error = active.error ?? newTickets.error ?? inProgress.error ?? pendingReview.error ?? critical.error ?? done.error ?? objects.error?.message ?? null;
+  const error = active.error ?? newTickets.error ?? inProgress.error?.message ?? pendingReview.error ?? critical.error ?? done.error ?? objects.error?.message ?? null;
   return {
     data: {
       active: active.count,
       newTickets: newTickets.count,
-      inProgress: inProgress.count,
+      inProgress: new Set(((inProgress.data ?? []) as Array<{ ticket_id: string }>).map((row) => row.ticket_id)).size,
       pendingReview: pendingReview.count,
       critical: critical.count,
       done: done.count,

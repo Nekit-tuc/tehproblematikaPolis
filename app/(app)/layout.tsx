@@ -3,6 +3,7 @@ import { MobileShell } from "@/components/layout/mobile-shell";
 import { Topbar } from "@/components/layout/topbar";
 import { requireAuth } from "@/lib/auth/server";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
+import { getAttentionNotificationCount, getComputedNotifications } from "@/lib/supabase/notifications";
 import { createClient } from "@/lib/supabase/server";
 
 async function getAiTicketsCount(role: string) {
@@ -18,17 +19,23 @@ async function getAiTicketsCount(role: string) {
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const { profile } = await requireAuth();
-  const aiTicketsCount = await getAiTicketsCount(profile.role);
+  const [aiTicketsCount, notificationsResult, attentionCountResult] = await Promise.all([
+    getAiTicketsCount(profile.role),
+    getComputedNotifications(20),
+    getAttentionNotificationCount(),
+  ]);
+  const notifications = notificationsResult.data;
+  const notificationCount = attentionCountResult.data;
 
   return (
     <div className="min-h-screen bg-background">
-      <MobileShell profile={profile} aiTicketsCount={aiTicketsCount}>
+      <MobileShell profile={profile} aiTicketsCount={aiTicketsCount} notifications={notifications} notificationCount={notificationCount}>
         {children}
       </MobileShell>
       <div className="hidden md:flex">
         <Sidebar profile={profile} aiTicketsCount={aiTicketsCount} />
         <main className="min-w-0 flex-1">
-          <Topbar profile={profile} />
+          <Topbar profile={profile} notifications={notifications} notificationCount={notificationCount} />
           {children}
         </main>
       </div>

@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireRole } from "@/lib/auth/server";
-import { addTicketsToWorkPlan, createWorkPlan, getActivePlannedTickets } from "@/lib/supabase/work-plans";
+import { addTicketsToWorkPlan, createWorkPlan, deleteWorkPlan, getActivePlannedTickets } from "@/lib/supabase/work-plans";
 
 function text(formData: FormData, key: string) {
   const value = formData.get(key);
@@ -86,4 +86,18 @@ export async function createWorkPlanAction(formData: FormData) {
 
   revalidatePath("/work-planning");
   redirect("/work-planning?success=created");
+}
+
+export async function deleteWorkPlanAction(workPlanId: string) {
+  const { user } = await requireRole(["admin", "management", "tech_manager"]);
+  const result = await deleteWorkPlan(workPlanId, user.id);
+  if (result.error) {
+    console.error("[work-planning] delete failed", { workPlanId, error: result.error });
+    redirect(`/work-planning?error=${encodeURIComponent(result.error)}`);
+  }
+
+  revalidatePath("/work-planning");
+  revalidatePath("/tickets");
+  revalidatePath("/dashboard");
+  redirect("/work-planning?success=deleted");
 }
