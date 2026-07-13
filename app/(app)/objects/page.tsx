@@ -101,19 +101,19 @@ export default async function ObjectsPage({ searchParams }: { searchParams: Prom
   return (
     <div className="page-shell space-y-2.5 md:space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold">РћР±'С”РєС‚Рё РєРѕРјРїР°РЅС–С—</h1>
-        <p className="subtle">Р”РѕРІС–РґРЅРёРє РјР°РіР°Р·РёРЅС–РІ, СЃРєР»Р°РґС–РІ, РІРёСЂРѕР±РЅРёС†С‚РІР°, РѕС„С–СЃС–РІ С‚Р° С–РЅС€РёС… Р»РѕРєР°С†С–Р№.</p>
+        <h1 className="text-2xl font-semibold">Об'єкти компанії</h1>
+        <p className="subtle">Довідник магазинів, складів, виробництва, офісів та інших локацій.</p>
       </div>
-      {error ? <Alert title="РџРѕРјРёР»РєР° РґРѕРІС–РґРЅРёРєР° РѕР±'С”РєС‚С–РІ">{error}</Alert> : null}
-      {params.success === "created" ? <Alert title="РћР±'С”РєС‚ СЃС‚РІРѕСЂРµРЅРѕ">РќРѕРІРёР№ РѕР±'С”РєС‚ РґРѕРґР°РЅРѕ РґРѕ РґРѕРІС–РґРЅРёРєР°.</Alert> : null}
-      {params.success === "updated" ? <Alert title="РћР±'С”РєС‚ РѕРЅРѕРІР»РµРЅРѕ">Р—РјС–РЅРё Р·Р±РµСЂРµР¶РµРЅРѕ.</Alert> : null}
-      {params.success === "activated" ? <Alert title="РћР±'С”РєС‚ Р°РєС‚РёРІРѕРІР°РЅРѕ">РЎС‚Р°С‚СѓСЃ РѕР±'С”РєС‚Р° Р·РјС–РЅРµРЅРѕ РЅР° Р°РєС‚РёРІРЅРёР№.</Alert> : null}
-      {params.success === "deactivated" ? <Alert title="РћР±'С”РєС‚ РґРµР°РєС‚РёРІРѕРІР°РЅРѕ">РћР±'С”РєС‚ РїСЂРёС…РѕРІР°РЅРѕ Р· Р°РєС‚РёРІРЅРѕРіРѕ РґРѕРІС–РґРЅРёРєР° Р±РµР· РІРёРґР°Р»РµРЅРЅСЏ Р·Р°СЏРІРѕРє.</Alert> : null}
+      {error ? <Alert title="Помилка довідника об'єктів">{error}</Alert> : null}
+      {params.success === "created" ? <Alert title="Об'єкт створено">Новий об'єкт додано до довідника.</Alert> : null}
+      {params.success === "updated" ? <Alert title="Об'єкт оновлено">Зміни збережено.</Alert> : null}
+      {params.success === "activated" ? <Alert title="Об'єкт активовано">Статус об'єкта змінено на активний.</Alert> : null}
+      {params.success === "deactivated" ? <Alert title="Об'єкт деактивовано">Об'єкт приховано з активного довідника без видалення заявок.</Alert> : null}
 
       {canManage ? (
         <details className="mobile-card p-2.5 md:hidden">
           <summary className="flex min-h-9 cursor-pointer list-none items-center justify-between rounded-lg bg-orange-500 px-3 text-[11px] font-semibold text-stone-950">
-            Р”РѕРґР°С‚Рё РІ Р±Р°Р·Сѓ РЅРѕРІРёР№ РѕР±'С”РєС‚
+            Додати в базу новий об'єкт
             <span className="text-lg leading-none">+</span>
           </summary>
           <div className="mt-2 rounded-lg border border-white/10 bg-black/20 p-2">
@@ -125,8 +125,8 @@ export default async function ObjectsPage({ searchParams }: { searchParams: Prom
       {canManage ? (
         <Card className="hidden rounded-3xl border-white/10 bg-white/[0.04] md:block md:rounded-lg">
           <CardHeader>
-            <CardTitle>РќРѕРІРёР№ РѕР±'С”РєС‚</CardTitle>
-            <CardDescription>РћР±РѕРІ'СЏР·РєРѕРІС– РїРѕР»СЏ: РЅР°Р·РІР°, С‚РёРї, РЅРѕРјРµСЂ, РјС–СЃС‚Рѕ/СЂР°Р№РѕРЅ С‚Р° Р°РґСЂРµСЃР°.</CardDescription>
+            <CardTitle>Новий об'єкт</CardTitle>
+            <CardDescription>Обов'язкові поля: назва, тип, номер, місто/район та адреса.</CardDescription>
           </CardHeader>
           <CardContent>
             <CreateObjectForm managers={managers} nextObjectNumber={nextObjectNumber} districts={districts} />
@@ -136,70 +136,70 @@ export default async function ObjectsPage({ searchParams }: { searchParams: Prom
 
       <details className="mobile-card p-2 md:hidden">
         <summary className="flex min-h-9 cursor-pointer list-none items-center justify-between rounded-lg bg-white/[0.04] px-3 text-[12px] font-semibold text-orange-200">
-          Р¤С–Р»СЊС‚СЂРё
+          Фільтри
           <span className="text-xs text-stone-500">{filteredObjects.length}</span>
         </summary>
         <form className="mt-3 grid gap-3">
-          <Field label="РџРѕС€СѓРє"><Input name="q" defaultValue={params.q ?? ""} placeholder="РќР°Р·РІР°, РЅРѕРјРµСЂ, Р°РґСЂРµСЃР°, РјС–СЃС‚Рѕ" className="min-h-8 rounded-lg text-[10px]" /></Field>
-          <Field label="РўРёРї">
+          <Field label="Пошук"><Input name="q" defaultValue={params.q ?? ""} placeholder="Назва, номер, адреса, місто" className="min-h-8 rounded-lg text-[10px]" /></Field>
+          <Field label="Тип">
             <Select name="type" defaultValue={params.type ?? "all"}>
-              <option value="all">Р’СЃС–</option>
+              <option value="all">Всі</option>
               {objectTypes.map((type) => <option key={type} value={type}>{getObjectTypeLabel(type)}</option>)}
             </Select>
           </Field>
           <div className="grid grid-cols-2 gap-3">
-            <Field label="РЎС‚Р°С‚СѓСЃ">
+            <Field label="Статус">
               <Select name="status" defaultValue={params.status ?? "active"}>
-                <option value="active">РђРєС‚РёРІРЅС–</option>
-                <option value="inactive">РќРµР°РєС‚РёРІРЅС–</option>
-                <option value="all">Р’СЃС–</option>
+                <option value="active">Активні</option>
+                <option value="inactive">Неактивні</option>
+                <option value="all">Всі</option>
               </Select>
             </Field>
-            <Field label="Р Р°Р№РѕРЅ">
+            <Field label="Район">
               <Select name="district" defaultValue={params.district ?? "all"}>
-                <option value="all">Р’СЃС– СЂР°Р№РѕРЅРё</option>
+                <option value="all">Всі райони</option>
                 {districts.map((district) => <option key={district} value={district}>{district}</option>)}
               </Select>
             </Field>
           </div>
           {mobileView === "table" ? <input type="hidden" name="view" value="table" /> : null}
           <div className="grid grid-cols-2 gap-2">
-            <Button type="submit" className="min-h-8 rounded-lg text-[10px]">Р—Р°СЃС‚РѕСЃСѓРІР°С‚Рё</Button>
-            <Button variant="outline" asChild className="min-h-8 rounded-lg text-[10px]"><a href="/objects">РЎРєРёРЅСѓС‚Рё</a></Button>
+            <Button type="submit" className="min-h-8 rounded-lg text-[10px]">Застосувати</Button>
+            <Button variant="outline" asChild className="min-h-8 rounded-lg text-[10px]"><a href="/objects">Скинути</a></Button>
           </div>
         </form>
       </details>
 
       <Card className="hidden md:block">
         <CardHeader>
-          <CardTitle>Р¤С–Р»СЊС‚СЂРё</CardTitle>
-          <CardDescription>РџРѕС€СѓРє РїСЂР°С†СЋС” РїРѕ РЅР°Р·РІС–, РЅРѕРјРµСЂСѓ, Р°РґСЂРµСЃС– С‚Р° РјС–СЃС‚Сѓ.</CardDescription>
+          <CardTitle>Фільтри</CardTitle>
+          <CardDescription>Пошук працює по назві, номеру, адресі та місту.</CardDescription>
         </CardHeader>
         <CardContent>
           <form className="grid gap-4 md:grid-cols-5">
-            <Field label="РџРѕС€СѓРє"><Input name="q" defaultValue={params.q ?? ""} placeholder="РќР°Р·РІР°, РЅРѕРјРµСЂ, Р°РґСЂРµСЃР°, РјС–СЃС‚Рѕ" /></Field>
-            <Field label="РўРёРї">
+            <Field label="Пошук"><Input name="q" defaultValue={params.q ?? ""} placeholder="Назва, номер, адреса, місто" /></Field>
+            <Field label="Тип">
               <Select name="type" defaultValue={params.type ?? "all"}>
-                <option value="all">Р’СЃС–</option>
+                <option value="all">Всі</option>
                 {objectTypes.map((type) => <option key={type} value={type}>{getObjectTypeLabel(type)}</option>)}
               </Select>
             </Field>
-            <Field label="РЎС‚Р°С‚СѓСЃ">
+            <Field label="Статус">
               <Select name="status" defaultValue={params.status ?? "active"}>
-                <option value="active">РђРєС‚РёРІРЅС–</option>
-                <option value="inactive">РќРµР°РєС‚РёРІРЅС–</option>
-                <option value="all">Р’СЃС–</option>
+                <option value="active">Активні</option>
+                <option value="inactive">Неактивні</option>
+                <option value="all">Всі</option>
               </Select>
             </Field>
-            <Field label="Р Р°Р№РѕРЅ">
+            <Field label="Район">
               <Select name="district" defaultValue={params.district ?? "all"}>
-                <option value="all">Р’СЃС– СЂР°Р№РѕРЅРё</option>
+                <option value="all">Всі райони</option>
                 {districts.map((district) => <option key={district} value={district}>{district}</option>)}
               </Select>
             </Field>
             <div className="flex flex-col gap-2 md:flex-row md:items-end">
-              <Button type="submit" className="min-h-11 rounded-2xl md:min-h-0 md:rounded-md">Р—Р°СЃС‚РѕСЃСѓРІР°С‚Рё</Button>
-              <Button variant="outline" asChild className="min-h-11 rounded-2xl md:min-h-0 md:rounded-md"><a href="/objects">РЎРєРёРЅСѓС‚Рё</a></Button>
+              <Button type="submit" className="min-h-11 rounded-2xl md:min-h-0 md:rounded-md">Застосувати</Button>
+              <Button variant="outline" asChild className="min-h-11 rounded-2xl md:min-h-0 md:rounded-md"><a href="/objects">Скинути</a></Button>
             </div>
           </form>
         </CardContent>
@@ -207,33 +207,33 @@ export default async function ObjectsPage({ searchParams }: { searchParams: Prom
 
       <details className="mobile-card p-2 md:hidden">
         <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between rounded-2xl bg-white/[0.04] px-3 text-sm font-semibold text-orange-200">
-          Р’РёРіР»СЏРґ
-          <span className="text-xs text-stone-500">{mobileView === "table" ? "РўР°Р±Р»РёС†СЏ" : "РљР°СЂС‚РєРё"}</span>
+          Вигляд
+          <span className="text-xs text-stone-500">{mobileView === "table" ? "Таблиця" : "Картки"}</span>
         </summary>
         <div className="mt-3 grid grid-cols-2 gap-2">
           <Button asChild variant={mobileView === "cards" ? "default" : "outline"} size="sm" className="min-h-8 rounded-lg text-[10px]">
-            <a href={mobileHref({ view: undefined, page: 1 })}>РљР°СЂС‚РєРё</a>
+            <a href={mobileHref({ view: undefined, page: 1 })}>Картки</a>
           </Button>
           <Button asChild variant={mobileView === "table" ? "default" : "outline"} size="sm" className="min-h-8 rounded-lg text-[10px]">
-            <a href={mobileHref({ view: "table", page: 1 })}>РўР°Р±Р»РёС†СЏ</a>
+            <a href={mobileHref({ view: "table", page: 1 })}>Таблиця</a>
           </Button>
         </div>
       </details>
 
       <div className="space-y-3 md:hidden">
         {filteredObjects.length === 0 ? (
-          <div className="mobile-card p-3 text-[11px] text-stone-500">РћР±'С”РєС‚С–РІ Р·Р° С†РёРјРё С„С–Р»СЊС‚СЂР°РјРё РЅРµРјР°С”.</div>
+          <div className="mobile-card p-3 text-[11px] text-stone-500">Об'єктів за цими фільтрами немає.</div>
         ) : mobileView === "table" ? (
           <div className="max-w-full overflow-x-auto rounded-2xl border border-white/10 bg-white/[0.04]">
             <table className="w-full min-w-[720px] text-left text-xs">
               <thead className="bg-white/[0.04] text-muted-foreground">
                 <tr>
-                  <th className="px-3 py-3">в„–</th>
-                  <th className="px-3 py-3">РќР°Р·РІР°</th>
-                  <th className="px-3 py-3">РўРёРї</th>
-                  <th className="px-3 py-3">Р Р°Р№РѕРЅ</th>
-                  <th className="px-3 py-3">РђРґСЂРµСЃР°</th>
-                  <th className="px-3 py-3">РЎС‚Р°С‚СѓСЃ</th>
+                  <th className="px-3 py-3">№</th>
+                  <th className="px-3 py-3">Назва</th>
+                  <th className="px-3 py-3">Тип</th>
+                  <th className="px-3 py-3">Район</th>
+                  <th className="px-3 py-3">Адреса</th>
+                  <th className="px-3 py-3">Статус</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/10">
@@ -244,7 +244,7 @@ export default async function ObjectsPage({ searchParams }: { searchParams: Prom
                     <td className="px-3 py-3">{getObjectTypeLabel(object.type)}</td>
                     <td className="max-w-[140px] px-3 py-3"><div className="line-clamp-2 break-words">{getObjectDistrict(object) || "-"}</div></td>
                     <td className="max-w-[220px] px-3 py-3"><div className="line-clamp-2 break-words">{object.address}</div></td>
-                    <td className="px-3 py-3"><Badge tone={object.is_active ? "green" : "gray"}>{object.is_active ? "РђРєС‚РёРІРЅРёР№" : "РќРµР°РєС‚РёРІРЅРёР№"}</Badge></td>
+                    <td className="px-3 py-3"><Badge tone={object.is_active ? "green" : "gray"}>{object.is_active ? "Активний" : "Неактивний"}</Badge></td>
                   </tr>
                 ))}
               </tbody>
@@ -259,18 +259,18 @@ export default async function ObjectsPage({ searchParams }: { searchParams: Prom
               <div className="mobile-card flex items-center justify-between gap-2 p-3 text-sm">
                 {safePage > 1 ? (
                   <Button asChild variant="outline" size="sm" className="min-h-8 rounded-lg text-[10px]">
-                    <a href={mobileHref({ page: safePage - 1 })}>РќР°Р·Р°Рґ</a>
+                    <a href={mobileHref({ page: safePage - 1 })}>Назад</a>
                   </Button>
                 ) : (
-                  <Button variant="outline" size="sm" className="min-h-8 rounded-lg text-[10px]" disabled>РќР°Р·Р°Рґ</Button>
+                  <Button variant="outline" size="sm" className="min-h-8 rounded-lg text-[10px]" disabled>Назад</Button>
                 )}
-                <span className="text-stone-400">РЎС‚РѕСЂС–РЅРєР° {safePage} Р· {totalPages}</span>
+                <span className="text-stone-400">Сторінка {safePage} з {totalPages}</span>
                 {safePage < totalPages ? (
                   <Button asChild variant="outline" size="sm" className="min-h-8 rounded-lg text-[10px]">
-                    <a href={mobileHref({ page: safePage + 1 })}>Р”Р°Р»С–</a>
+                    <a href={mobileHref({ page: safePage + 1 })}>Далі</a>
                   </Button>
                 ) : (
-                  <Button variant="outline" size="sm" className="min-h-8 rounded-lg text-[10px]" disabled>Р”Р°Р»С–</Button>
+                  <Button variant="outline" size="sm" className="min-h-8 rounded-lg text-[10px]" disabled>Далі</Button>
                 )}
               </div>
             ) : null}
@@ -280,17 +280,17 @@ export default async function ObjectsPage({ searchParams }: { searchParams: Prom
 
       <Card className="hidden md:block">
         <CardHeader>
-          <CardTitle>Р”РѕРІС–РґРЅРёРє РѕР±'С”РєС‚С–РІ</CardTitle>
-          <CardDescription>Р—РЅР°Р№РґРµРЅРѕ: {filteredObjects.length}</CardDescription>
+          <CardTitle>Довідник об'єктів</CardTitle>
+          <CardDescription>Знайдено: {filteredObjects.length}</CardDescription>
         </CardHeader>
         <CardContent>
           {filteredObjects.length === 0 ? (
-            <p className="text-sm text-muted-foreground">РћР±'С”РєС‚С–РІ Р·Р° С†РёРјРё С„С–Р»СЊС‚СЂР°РјРё РЅРµРјР°С”.</p>
+            <p className="text-sm text-muted-foreground">Об'єктів за цими фільтрами немає.</p>
           ) : (
             <Table>
               <THead>
                 <TR>
-                  <TH>РќР°Р·РІР°</TH><TH>в„–</TH><TH>РўРёРї</TH><TH>РњС–СЃС‚Рѕ / СЂР°Р№РѕРЅ</TH><TH>РђРґСЂРµСЃР°</TH><TH>РљРµСЂСѓСЋС‡РёР№</TH><TH>РЎС‚Р°С‚СѓСЃ</TH>
+                  <TH>Назва</TH><TH>№</TH><TH>Тип</TH><TH>Місто / район</TH><TH>Адреса</TH><TH>Керуючий</TH><TH>Статус</TH>
                 </TR>
               </THead>
               <TBody>
@@ -321,51 +321,51 @@ function MobileObjectCard({ object, managers, canManage, districts }: { object: 
     <div className="mobile-card p-2.5">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="text-xs text-orange-300">в„– {getObjectNumber(object)}</div>
+          <div className="text-xs text-orange-300">№ {getObjectNumber(object)}</div>
           <h2 className="mt-1 text-base font-semibold">{object.name}</h2>
           <p className="mt-1 text-sm text-stone-400">{object.address}</p>
-          <p className="mt-1 text-xs text-stone-500">{object.city}{getObjectDistrict(object) ? ` В· ${getObjectDistrict(object)}` : ""}</p>
+          <p className="mt-1 text-xs text-stone-500">{object.city}{getObjectDistrict(object) ? ` · ${getObjectDistrict(object)}` : ""}</p>
         </div>
-        <Badge tone={object.is_active ? "green" : "gray"}>{object.is_active ? "РђРєС‚РёРІРЅРёР№" : "РќРµР°РєС‚РёРІРЅРёР№"}</Badge>
+        <Badge tone={object.is_active ? "green" : "gray"}>{object.is_active ? "Активний" : "Неактивний"}</Badge>
       </div>
       <div className="mt-2 grid grid-cols-2 gap-1.5 text-[10px]">
-        <Info label="РўРёРї" value={getObjectTypeLabel(object.type)} />
-        <Info label="РљРµСЂСѓСЋС‡РёР№" value={manager?.full_name ?? "-"} />
+        <Info label="Тип" value={getObjectTypeLabel(object.type)} />
+        <Info label="Керуючий" value={manager?.full_name ?? "-"} />
       </div>
       {canManage ? (
         <div className="mt-2 space-y-1.5">
           <form action={setObjectActiveAction.bind(null, object.id, !object.is_active)}>
             <Button type="submit" variant="outline" className="min-h-11 w-full rounded-2xl">
-              {object.is_active ? "Р—СЂРѕР±РёС‚Рё РЅРµР°РєС‚РёРІРЅРёРј" : "РђРєС‚РёРІСѓРІР°С‚Рё"}
+              {object.is_active ? "Зробити неактивним" : "Активувати"}
             </Button>
           </form>
           <details className="rounded-2xl border border-white/10 bg-black/20 p-3">
-            <summary className="cursor-pointer list-none text-sm font-medium text-orange-200">Р РµРґР°РіСѓРІР°С‚Рё</summary>
+            <summary className="cursor-pointer list-none text-sm font-medium text-orange-200">Редагувати</summary>
             <form action={updateObjectAction.bind(null, object.id)} className="mt-4 grid gap-3">
-              <Field label="РќР°Р·РІР°"><Input name="name" required defaultValue={object.name} /></Field>
-              <Field label="РўРёРї"><Select name="type" required defaultValue={object.type}>{objectTypes.map((type) => <option key={type} value={type}>{getObjectTypeLabel(type)}</option>)}</Select></Field>
-              <Field label="РќРѕРјРµСЂ"><Input name="object_number" required defaultValue={getObjectNumber(object)} /></Field>
-              <Field label="РњС–СЃС‚Рѕ"><Input name="city" required defaultValue={object.city} /></Field>
-              <Field label="Р Р°Р№РѕРЅ">
+              <Field label="Назва"><Input name="name" required defaultValue={object.name} /></Field>
+              <Field label="Тип"><Select name="type" required defaultValue={object.type}>{objectTypes.map((type) => <option key={type} value={type}>{getObjectTypeLabel(type)}</option>)}</Select></Field>
+              <Field label="Номер"><Input name="object_number" required defaultValue={getObjectNumber(object)} /></Field>
+              <Field label="Місто"><Input name="city" required defaultValue={object.city} /></Field>
+              <Field label="Район">
                 <Select name="district" defaultValue={getObjectDistrict(object)}>
-                  <option value="">РќРµ РІРёР±СЂР°РЅРѕ</option>
+                  <option value="">Не вибрано</option>
                   {districts.map((district) => <option key={district} value={district}>{district}</option>)}
                 </Select>
               </Field>
-              <Field label="Р†РЅС€РёР№ СЂР°Р№РѕРЅ"><Input name="other_district" /></Field>
-              <Field label="РђРґСЂРµСЃР°"><Input name="address" required defaultValue={object.address} /></Field>
-              <Field label="РђР»С–Р°СЃРё"><textarea name="aliases" defaultValue={object.aliases?.join("\n") ?? ""} className="min-h-28 w-full rounded-2xl border border-input bg-stone-950/30 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring" /></Field>
-              <Field label="РљРµСЂСѓСЋС‡РёР№">
+              <Field label="Інший район"><Input name="other_district" /></Field>
+              <Field label="Адреса"><Input name="address" required defaultValue={object.address} /></Field>
+              <Field label="Аліаси"><textarea name="aliases" defaultValue={object.aliases?.join("\n") ?? ""} className="min-h-28 w-full rounded-2xl border border-input bg-stone-950/30 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring" /></Field>
+              <Field label="Керуючий">
                 <Select name="manager_id" defaultValue={object.manager_id ?? ""}>
-                  <option value="">РќРµ РїСЂРёР·РЅР°С‡РµРЅРѕ</option>
+                  <option value="">Не призначено</option>
                   {managers.map((item) => <option key={item.id} value={item.id}>{item.full_name}</option>)}
                 </Select>
               </Field>
               <label className="flex items-center gap-2 text-sm">
                 <input name="is_active" type="checkbox" defaultChecked={object.is_active} className="h-4 w-4 accent-orange-500" />
-                РђРєС‚РёРІРЅРёР№
+                Активний
               </label>
-              <Button type="submit" className="min-h-8 rounded-lg text-[10px]">Р—Р±РµСЂРµРіС‚Рё</Button>
+              <Button type="submit" className="min-h-8 rounded-lg text-[10px]">Зберегти</Button>
             </form>
           </details>
         </div>
@@ -382,4 +382,3 @@ function Info({ label, value }: { label: string; value: string }) {
     </div>
   );
 }
-

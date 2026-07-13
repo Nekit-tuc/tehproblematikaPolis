@@ -19,10 +19,10 @@ import { assignWorkerToAiTicketAction, confirmAiTicketAction, rejectAiTicketActi
 const priorities: TicketPriority[] = ["low", "medium", "high", "critical"];
 
 const uaPriorityLabels: Record<TicketPriority, string> = {
-  low: "РќРёР·СЊРєРёР№",
-  medium: "РЎРµСЂРµРґРЅС–Р№",
-  high: "Р’РёСЃРѕРєРёР№",
-  critical: "РљСЂРёС‚РёС‡РЅРёР№",
+  low: "Низький",
+  medium: "Середній",
+  high: "Високий",
+  critical: "Критичний",
 };
 
 const ticketSelect = `
@@ -172,27 +172,27 @@ export default async function AiTicketsPage({ searchParams }: { searchParams: Pr
       <MobileTicketSwitch active="ai" aiCount={visibleTickets.length} />
       <details className="hidden">
         <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between rounded-2xl bg-white/[0.04] px-3 text-sm font-semibold text-orange-200">
-          Р’РёРіР»СЏРґ
-          <span className="text-xs text-stone-500">{mobileView === "table" ? "РўР°Р±Р»РёС†СЏ" : "РљР°СЂС‚РєРё"}</span>
+          Вигляд
+          <span className="text-xs text-stone-500">{mobileView === "table" ? "Таблиця" : "Картки"}</span>
         </summary>
         <div className="mt-3 grid grid-cols-2 gap-2">
           <Button asChild variant={mobileView === "cards" ? "default" : "outline"} size="sm" className="min-h-10 rounded-2xl">
-            <Link href={viewHref("cards")}>РљР°СЂС‚РєРё</Link>
+            <Link href={viewHref("cards")}>Картки</Link>
           </Button>
           <Button asChild variant={mobileView === "table" ? "default" : "outline"} size="sm" className="min-h-10 rounded-2xl">
-            <Link href={viewHref("table")}>РўР°Р±Р»РёС†СЏ</Link>
+            <Link href={viewHref("table")}>Таблиця</Link>
           </Button>
         </div>
       </details>
 
-      {error || workersResult.error ? <Alert title="РќРµ РІРґР°Р»РѕСЃСЏ Р·Р°РІР°РЅС‚Р°Р¶РёС‚Рё AI-Р·Р°СЏРІРєРё">{error?.message ?? workersResult.error}</Alert> : null}
-      {params.error ? <Alert title="РџРѕРјРёР»РєР°">{decodeURIComponent(params.error)}</Alert> : null}
-      {params.success === "confirmed" ? <Alert title="Р—Р°СЏРІРєСѓ РїС–РґС‚РІРµСЂРґР¶РµРЅРѕ">РЎС‚Р°С‚СѓСЃ Р·РјС–РЅРµРЅРѕ РЅР° РЅРѕРІСѓ Р·Р°СЏРІРєСѓ.</Alert> : null}
-      {params.success === "confirmed_sent" ? <Alert title="AI-Р·Р°СЏРІРєСѓ РїС–РґС‚РІРµСЂРґР¶РµРЅРѕ">AI-Р·Р°СЏРІРєСѓ РїС–РґС‚РІРµСЂРґР¶РµРЅРѕ, РІРёРєРѕРЅР°РІС†СЏ РїСЂРёР·РЅР°С‡РµРЅРѕ, Telegram РЅР°РґС–СЃР»Р°РЅРѕ.</Alert> : null}
-      {params.success === "confirmed_no_worker" ? <Alert title="AI-Р·Р°СЏРІРєСѓ РїС–РґС‚РІРµСЂРґР¶РµРЅРѕ">AI-Р·Р°СЏРІРєСѓ РїС–РґС‚РІРµСЂРґР¶РµРЅРѕ, Р°Р»Рµ РІРёРєРѕРЅР°РІС†СЏ РЅРµ Р·РЅР°Р№РґРµРЅРѕ.</Alert> : null}
-      {params.success === "rejected" ? <Alert title="Р—Р°СЏРІРєСѓ РІС–РґС…РёР»РµРЅРѕ">РЎС‚Р°С‚СѓСЃ Р·РјС–РЅРµРЅРѕ РЅР° РІС–РґС…РёР»РµРЅСѓ.</Alert> : null}
-      {params.success === "updated" ? <Alert title="Р—Р°СЏРІРєСѓ РѕРЅРѕРІР»РµРЅРѕ">РџСЂР°РІРєРё Р·Р±РµСЂРµР¶РµРЅРѕ, Р·Р°СЏРІРєР° Р»РёС€РёР»Р°СЃСЊ РЅР° РїРµСЂРµРІС–СЂС†С–.</Alert> : null}
-      {params.success === "worker_assigned" ? <Alert title="Р’РёРєРѕРЅР°РІС†СЏ РїСЂРёР·РЅР°С‡РµРЅРѕ">РџСЂРёРІ'СЏР·РєСѓ РІРёРєРѕРЅР°РІС†СЏ РґРѕ AI-Р·Р°СЏРІРєРё Р·Р±РµСЂРµР¶РµРЅРѕ.</Alert> : null}
+      {error || workersResult.error ? <Alert title="Не вдалося завантажити AI-заявки">{error?.message ?? workersResult.error}</Alert> : null}
+      {params.error ? <Alert title="Помилка">{decodeURIComponent(params.error)}</Alert> : null}
+      {params.success === "confirmed" ? <Alert title="Заявку підтверджено">Статус змінено на нову заявку.</Alert> : null}
+      {params.success === "confirmed_sent" ? <Alert title="AI-заявку підтверджено">AI-заявку підтверджено, виконавця призначено, Telegram надіслано.</Alert> : null}
+      {params.success === "confirmed_no_worker" ? <Alert title="AI-заявку підтверджено">AI-заявку підтверджено, але виконавця не знайдено.</Alert> : null}
+      {params.success === "rejected" ? <Alert title="Заявку відхилено">Статус змінено на відхилену.</Alert> : null}
+      {params.success === "updated" ? <Alert title="Заявку оновлено">Правки збережено, заявка лишилась на перевірці.</Alert> : null}
+      {params.success === "worker_assigned" ? <Alert title="Виконавця призначено">Прив'язку виконавця до AI-заявки збережено.</Alert> : null}
 
       <div className="flex max-w-full gap-1 overflow-x-auto pb-0.5 md:hidden">
         <Link href="/ai-tickets" className="shrink-0 rounded-full bg-orange-500 px-2.5 py-1 text-[10px] font-semibold text-black">Очікують</Link>
@@ -252,46 +252,46 @@ export default async function AiTicketsPage({ searchParams }: { searchParams: Pr
 
       <Card className="hidden rounded-3xl border-white/10 bg-white/[0.04] md:block md:rounded-lg">
         <CardHeader>
-          <CardTitle>Р¤С–Р»СЊС‚СЂРё</CardTitle>
-          <CardDescription>Р—РЅР°Р№РґРµРЅРѕ: {visibleTickets.length}</CardDescription>
+          <CardTitle>Фільтри</CardTitle>
+          <CardDescription>Знайдено: {visibleTickets.length}</CardDescription>
         </CardHeader>
         <CardContent>
           <form className="grid gap-4 md:grid-cols-3 xl:grid-cols-6">
-            <Field label="РџРѕС€СѓРє">
-              <Input name="q" defaultValue={params.q ?? ""} placeholder="РќР°Р·РІР°, РѕРїРёСЃ, РѕР±'С”РєС‚" />
+            <Field label="Пошук">
+              <Input name="q" defaultValue={params.q ?? ""} placeholder="Назва, опис, об'єкт" />
             </Field>
-            <Field label="РћР±'С”РєС‚">
+            <Field label="Об'єкт">
               <Select name="object" defaultValue={params.object ?? "all"}>
-                <option value="all">Р’СЃС– РѕР±'С”РєС‚Рё</option>
+                <option value="all">Всі об'єкти</option>
                 {objects.map((object) => <option key={object.id} value={object.id}>{object.name}</option>)}
               </Select>
             </Field>
-            <Field label="РљР°С‚РµРіРѕСЂС–СЏ">
+            <Field label="Категорія">
               <Select name="category" defaultValue={params.category ?? "all"}>
-                <option value="all">Р’СЃС– РєР°С‚РµРіРѕСЂС–С—</option>
+                <option value="all">Всі категорії</option>
                 {categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
               </Select>
             </Field>
-            <Field label="РџСЂС–РѕСЂРёС‚РµС‚">
+            <Field label="Пріоритет">
               <Select name="priority" defaultValue={params.priority ?? "all"}>
-                <option value="all">Р’СЃС–</option>
+                <option value="all">Всі</option>
                 {priorities.map((priority) => <option key={priority} value={priority}>{uaPriorityLabels[priority]}</option>)}
               </Select>
             </Field>
             <Field label="Confidence">
               <Select name="confidence" defaultValue={params.confidence ?? "all"}>
-                <option value="all">Р’СЃС–</option>
-                <option value="low">РќРёР·СЊРєРёР№</option>
-                <option value="medium">РЎРµСЂРµРґРЅС–Р№</option>
-                <option value="high">Р’РёСЃРѕРєРёР№</option>
+                <option value="all">Всі</option>
+                <option value="low">Низький</option>
+                <option value="medium">Середній</option>
+                <option value="high">Високий</option>
               </Select>
             </Field>
-            <Field label="Р”Р°С‚Р°">
+            <Field label="Дата">
               <Input type="date" name="date" defaultValue={params.date ?? ""} />
             </Field>
             <div className="flex flex-col gap-2 md:col-span-3 md:flex-row md:items-end xl:col-span-6">
-              <Button type="submit" className="min-h-11 rounded-2xl md:min-h-0 md:rounded-md">Р—Р°СЃС‚РѕСЃСѓРІР°С‚Рё</Button>
-              <Button variant="outline" asChild className="min-h-11 rounded-2xl md:min-h-0 md:rounded-md"><Link href="/ai-tickets">РЎРєРёРЅСѓС‚Рё</Link></Button>
+              <Button type="submit" className="min-h-11 rounded-2xl md:min-h-0 md:rounded-md">Застосувати</Button>
+              <Button variant="outline" asChild className="min-h-11 rounded-2xl md:min-h-0 md:rounded-md"><Link href="/ai-tickets">Скинути</Link></Button>
             </div>
           </form>
         </CardContent>
@@ -299,20 +299,20 @@ export default async function AiTicketsPage({ searchParams }: { searchParams: Pr
 
       {visibleTickets.length === 0 ? (
         <Card className="rounded-3xl border-white/10 bg-white/[0.04]">
-          <CardContent className="pt-6 text-sm text-muted-foreground">AI-Р·Р°СЏРІРѕРє РЅР° РїС–РґС‚РІРµСЂРґР¶РµРЅРЅСЏ РЅРµРјР°С”.</CardContent>
+          <CardContent className="pt-6 text-sm text-muted-foreground">AI-заявок на підтвердження немає.</CardContent>
         </Card>
       ) : mobileView === "table" ? (
         <div className="max-w-full overflow-x-auto rounded-2xl border border-white/10 bg-white/[0.04]">
           <table className="w-full min-w-[720px] text-left text-[11px]">
             <thead className="bg-white/[0.04] text-muted-foreground">
               <tr>
-                <th className="px-3 py-3">в„–</th>
-                <th className="px-3 py-3">Р—Р°СЏРІРєР°</th>
-                <th className="px-3 py-3">РћР±'С”РєС‚</th>
-                <th className="px-3 py-3">РљР°С‚РµРіРѕСЂС–СЏ</th>
-                <th className="px-3 py-3">РџСЂС–РѕСЂРёС‚РµС‚</th>
+                <th className="px-3 py-3">№</th>
+                <th className="px-3 py-3">Заявка</th>
+                <th className="px-3 py-3">Об'єкт</th>
+                <th className="px-3 py-3">Категорія</th>
+                <th className="px-3 py-3">Пріоритет</th>
                 <th className="px-3 py-3">AI</th>
-                <th className="px-3 py-3 text-right">Р”С–С—</th>
+                <th className="px-3 py-3 text-right">Дії</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/10">
@@ -325,7 +325,7 @@ export default async function AiTicketsPage({ searchParams }: { searchParams: Pr
                   <td className="px-2.5 py-2"><Badge tone="gray">{uaPriorityLabels[ticket.priority]}</Badge></td>
                   <td className="px-2.5 py-2"><Badge tone={confidenceTone(ticket.ai_confidence)}>{confidenceLabel(ticket.ai_confidence)}</Badge></td>
                   <td className="px-2.5 py-2 text-right">
-                    <Button asChild size="sm" variant="outline" className="rounded-2xl"><Link href={`/tickets/${ticket.id}`}>Р’С–РґРєСЂРёС‚Рё</Link></Button>
+                    <Button asChild size="sm" variant="outline" className="rounded-2xl"><Link href={`/tickets/${ticket.id}`}>Відкрити</Link></Button>
                   </td>
                 </tr>
               ))}
@@ -415,11 +415,11 @@ function AiTicketCard({
 
         {siblingTickets.length > 0 ? (
           <div className="rounded-md border border-border bg-stone-950/30 p-3">
-            <div className="mb-2 text-sm font-medium">РџРѕРІ'СЏР·Р°РЅС– AI-Р·Р°СЏРІРєРё Р· С†СЊРѕРіРѕ РїРѕРІС–РґРѕРјР»РµРЅРЅСЏ</div>
+            <div className="mb-2 text-sm font-medium">Пов'язані AI-заявки з цього повідомлення</div>
             <div className="grid gap-2">
               {siblingTickets.map((relatedTicket) => (
                 <Link key={relatedTicket.id} href={`/tickets/${relatedTicket.id}`} className="text-sm text-orange-200 hover:underline">
-                  {relatedTicket.number} В· {relatedTicket.title}
+                  {relatedTicket.number} · {relatedTicket.title}
                 </Link>
               ))}
             </div>
@@ -439,44 +439,44 @@ function AiTicketCard({
         <details className="rounded-lg border border-white/10 bg-stone-950/20 p-2 md:rounded-md md:p-3">
           <summary className="cursor-pointer text-[10px] font-medium text-orange-200 md:text-sm">Редагувати перед підтвердженням</summary>
           <form action={updateAiTicketAction.bind(null, ticket.id)} className="mt-3 grid gap-3 md:grid-cols-2 md:gap-4">
-            <Field label="РќР°Р·РІР°">
+            <Field label="Назва">
               <Input name="title" required defaultValue={ticket.title} />
             </Field>
-            <Field label="РћР±'С”РєС‚">
+            <Field label="Об'єкт">
               <Select name="object_id" required defaultValue={ticket.object_id}>
                 {objects.map((object) => <option key={object.id} value={object.id}>{object.name}</option>)}
               </Select>
             </Field>
-            <Field label="РљР°С‚РµРіРѕСЂС–СЏ">
+            <Field label="Категорія">
               <Select name="category_id" required defaultValue={ticket.category_id}>
                 {categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
               </Select>
             </Field>
-            <Field label="РџСЂС–РѕСЂРёС‚РµС‚">
+            <Field label="Пріоритет">
               <Select name="priority" required defaultValue={ticket.priority}>
                 {priorities.map((priority) => <option key={priority} value={priority}>{uaPriorityLabels[priority]}</option>)}
               </Select>
             </Field>
-            <Field label="Р РµРєРѕРјРµРЅРґРѕРІР°РЅРёР№ РїС–РґСЂРѕР·РґС–Р»">
+            <Field label="Рекомендований підрозділ">
               <Input name="recommended_department" defaultValue={ticket.recommended_department ?? ""} />
             </Field>
             <div className="md:col-span-2">
-              <Field label="РћРїРёСЃ">
+              <Field label="Опис">
                 <Textarea name="description" required defaultValue={ticket.description} className="min-h-32" />
               </Field>
             </div>
             <div className="md:col-span-2 rounded-md border border-border bg-stone-950/30 p-3">
-              <div className="text-xs text-muted-foreground">AI-РѕСЂРёРіС–РЅР°Р»</div>
+              <div className="text-xs text-muted-foreground">AI-оригінал</div>
               <p className="mt-2 max-w-full whitespace-pre-wrap break-words text-sm">{ticket.original_message_text ?? "-"}</p>
             </div>
             {ticket.ai_raw_result ? (
               <details className="md:col-span-2 rounded-md border border-border bg-stone-950/30 p-3">
-                <summary className="cursor-pointer text-sm text-orange-200">РџРѕРєР°Р·Р°С‚Рё JSON</summary>
+                <summary className="cursor-pointer text-sm text-orange-200">Показати JSON</summary>
                 <pre className="mt-3 max-h-80 max-w-full overflow-x-auto overflow-y-auto whitespace-pre-wrap break-words rounded-2xl bg-black/30 p-3 text-xs">{JSON.stringify(ticket.ai_raw_result, null, 2)}</pre>
               </details>
             ) : null}
             <div className="md:col-span-2">
-              <SubmitButton type="submit" pendingText="Р—Р±РµСЂС–РіР°С”С‚СЊСЃСЏ..." showOverlay>Р—Р±РµСЂРµРіС‚Рё РїСЂР°РІРєРё</SubmitButton>
+              <SubmitButton type="submit" pendingText="Зберігається..." showOverlay>Зберегти правки</SubmitButton>
             </div>
           </form>
         </details>

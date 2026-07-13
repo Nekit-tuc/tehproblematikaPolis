@@ -35,11 +35,11 @@ type SearchParams = {
 const planningStatuses: TicketStatus[] = ["new", "assigned", "in_progress", "waiting_admin_confirmation"];
 
 const planStatusLabels: Record<WorkPlanStatus, string> = {
-  draft: "Р§РµСЂРЅРµС‚РєР°",
-  sent: "РќР°РґС–СЃР»Р°РЅРѕ",
-  partially_done: "Р§Р°СЃС‚РєРѕРІРѕ РІРёРєРѕРЅР°РЅРѕ",
-  done: "Р’РёРєРѕРЅР°РЅРѕ",
-  cancelled: "РЎРєР°СЃРѕРІР°РЅРѕ",
+  draft: "Чернетка",
+  sent: "Надіслано",
+  partially_done: "Частково виконано",
+  done: "Виконано",
+  cancelled: "Скасовано",
 };
 
 function filtersFromParams(params: SearchParams): PlanningFilters {
@@ -68,8 +68,8 @@ function statusTone(status: TicketStatus) {
 }
 
 function assignmentLabel(workerId?: string | null, workersById?: Map<string, WorkerWithCategories>) {
-  if (!workerId) return "РќРµ РїСЂРёР·РЅР°С‡РµРЅРѕ";
-  return workersById?.get(workerId)?.name ?? "Р’РёРєРѕРЅР°РІРµС†СЊ РЅРµ Р·РЅР°Р№РґРµРЅРёР№";
+  if (!workerId) return "Не призначено";
+  return workersById?.get(workerId)?.name ?? "Виконавець не знайдений";
 }
 
 function planPeriodLabel(ticket: PlanningTicket) {
@@ -79,7 +79,7 @@ function planPeriodLabel(ticket: PlanningTicket) {
 
 function plannedLabel(ticket: PlanningTicket) {
   if (!ticket.isPlanned) return null;
-  return ticket.plannedPlanTitle || planPeriodLabel(ticket) || "РђРєС‚РёРІРЅРёР№ РїР»Р°РЅ";
+  return ticket.plannedPlanTitle || planPeriodLabel(ticket) || "Активний план";
 }
 
 function safeDecode(value: string) {
@@ -95,7 +95,7 @@ function displayWorkPlanningError(value?: string | null) {
   const message = safeDecode(value);
   const lower = message.toLowerCase();
   if (lower.includes("row-level security") || lower.includes("violates row-level security")) {
-    return "РќРµ РІРґР°Р»РѕСЃСЏ СЃС‚РІРѕСЂРёС‚Рё РїР»Р°РЅ. РџРµСЂРµРІС–СЂС‚Рµ РїСЂР°РІР° РґРѕСЃС‚СѓРїСѓ Р°Р±Рѕ RLS.";
+    return "Не вдалося створити план. Перевірте права доступу або RLS.";
   }
   if (message.length > 180) return `${message.slice(0, 177)}...`;
   return message;
@@ -135,46 +135,46 @@ export default async function WorkPlanningPage({ searchParams }: { searchParams:
     <div className="page-shell space-y-2.5 pb-20 md:space-y-6 md:pb-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-[23px] font-semibold leading-none tracking-[-0.03em] md:text-2xl">РџР»Р°РЅСѓРІР°РЅРЅСЏ СЂРѕР±С–С‚</h1>
-          <p className="subtle">Р“СЂСѓРїСѓРІР°РЅРЅСЏ Р·Р°СЏРІРѕРє РїРѕ РїС–РґСЂРѕР·РґС–Р»Р°С…, РІРёРєРѕРЅР°РІС†СЏС… С– С‚РёР¶РЅРµРІРёС… РїР»Р°РЅР°С….</p>
+          <h1 className="text-[23px] font-semibold leading-none tracking-[-0.03em] md:text-2xl">Планування робіт</h1>
+          <p className="subtle">Групування заявок по підрозділах, виконавцях і тижневих планах.</p>
         </div>
-        <Badge tone="orange">{ticketCount} Р·Р°СЏРІРѕРє РґРѕСЃС‚СѓРїРЅРѕ</Badge>
+        <Badge tone="orange">{ticketCount} заявок доступно</Badge>
       </div>
 
       {pageError ? (
         <div className="min-w-0 max-w-full overflow-hidden break-words whitespace-normal">
-          <Alert title="РќРµ РІРґР°Р»РѕСЃСЏ Р·Р°РІР°РЅС‚Р°Р¶РёС‚Рё РїР»Р°РЅСѓРІР°РЅРЅСЏ">
+          <Alert title="Не вдалося завантажити планування">
             <span className="break-words whitespace-normal">{pageError}</span>
           </Alert>
         </div>
       ) : null}
       {createError ? (
         <div className="min-w-0 max-w-full overflow-hidden break-words whitespace-normal">
-          <Alert title="РџР»Р°РЅ РЅРµ СЃС‚РІРѕСЂРµРЅРѕ">
+          <Alert title="План не створено">
             <span className="break-words whitespace-normal">{createError}</span>
           </Alert>
         </div>
       ) : null}
       {params.success === "created" ? (
         <div className="min-w-0 max-w-full overflow-hidden break-words whitespace-normal">
-          <Alert title="РџР»Р°РЅ СЃС‚РІРѕСЂРµРЅРѕ">
-            <span className="break-words whitespace-normal">Р§РµСЂРЅРµС‚РєСѓ РїР»Р°РЅСѓ СЂРѕР±С–С‚ Р·Р±РµСЂРµР¶РµРЅРѕ. Р—Р°СЏРІРєРё Р·Р°Р»РёС€РёР»РёСЃСЏ РѕРєСЂРµРјРёРјРё С– РЅРµ Р·РјС–РЅРёР»Рё СЃС‚Р°С‚СѓСЃ.</span>
+          <Alert title="План створено">
+            <span className="break-words whitespace-normal">Чернетку плану робіт збережено. Заявки залишилися окремими і не змінили статус.</span>
           </Alert>
         </div>
       ) : null}
 
       <details className="mobile-card p-3 md:hidden">
         <summary className="flex min-h-9 cursor-pointer list-none items-center justify-between rounded-lg bg-white/[0.04] px-3 text-[12px] font-semibold text-orange-200">
-          <span className="flex items-center gap-2"><Filter className="h-4 w-4" />Р¤С–Р»СЊС‚СЂРё</span>
-          <span className="text-xs text-stone-500">{ticketCount} Р·РЅР°Р№РґРµРЅРѕ</span>
+          <span className="flex items-center gap-2"><Filter className="h-4 w-4" />Фільтри</span>
+          <span className="text-xs text-stone-500">{ticketCount} знайдено</span>
         </summary>
         <FilterForm params={params} categories={categoriesResult.data} objects={objectsResult.data} workers={workersResult.data} compact />
       </details>
 
       <Card className="hidden md:block">
         <CardHeader>
-          <CardTitle>Р¤С–Р»СЊС‚СЂРё</CardTitle>
-          <CardDescription>РџРѕРєР°Р·СѓСЋС‚СЊСЃСЏ РїС–РґС‚РІРµСЂРґР¶РµРЅС– РЅРµР·Р°РІРµСЂС€РµРЅС– Р·Р°СЏРІРєРё: РЅРѕРІС–, РїСЂРёР·РЅР°С‡РµРЅС–, РІ СЂРѕР±РѕС‚С– С‚Р° РЅР° РїС–РґС‚РІРµСЂРґР¶РµРЅРЅС– РІРёРєРѕРЅР°РЅРЅСЏ.</CardDescription>
+          <CardTitle>Фільтри</CardTitle>
+          <CardDescription>Показуються підтверджені незавершені заявки: нові, призначені, в роботі та на підтвердженні виконання.</CardDescription>
         </CardHeader>
         <CardContent>
           <FilterForm params={params} categories={categoriesResult.data} objects={objectsResult.data} workers={workersResult.data} />
@@ -182,57 +182,57 @@ export default async function WorkPlanningPage({ searchParams }: { searchParams:
       </Card>
 
       <div className="flex gap-2 overflow-x-auto pb-1">
-        <TabLink href={buildTabHref("category", params)} active={view === "category"}>РџРѕ РєР°С‚РµРіРѕСЂС–СЏС…</TabLink>
-        <TabLink href={buildTabHref("worker", params)} active={view === "worker"}>РџРѕ РІРёРєРѕРЅР°РІС†СЏС…</TabLink>
-        <TabLink href={buildTabHref("object", params)} active={view === "object"}>РџРѕ РѕР±'С”РєС‚Р°С…</TabLink>
+        <TabLink href={buildTabHref("category", params)} active={view === "category"}>По категоріях</TabLink>
+        <TabLink href={buildTabHref("worker", params)} active={view === "worker"}>По виконавцях</TabLink>
+        <TabLink href={buildTabHref("object", params)} active={view === "object"}>По об'єктах</TabLink>
       </div>
 
       {view !== "category" ? (
         <Card className="rounded-[17px] border-white/10 bg-white/[0.04] md:rounded-lg">
-          <CardContent className="pt-6 text-sm text-muted-foreground">Р‘СѓРґРµ РґРѕРґР°РЅРѕ РЅР° РЅР°СЃС‚СѓРїРЅРѕРјСѓ РµС‚Р°РїС–.</CardContent>
+          <CardContent className="pt-6 text-sm text-muted-foreground">Буде додано на наступному етапі.</CardContent>
         </Card>
       ) : (
         <>
         {!createMode ? (
           <Button asChild className="min-h-8 w-full rounded-lg text-[10px] md:hidden">
-            <Link href="/work-planning?create=1">РЎС‚РІРѕСЂРёС‚Рё С‚РёР¶РЅРµРІРёР№ РїР»Р°РЅ</Link>
+            <Link href="/work-planning?create=1">Створити тижневий план</Link>
           </Button>
         ) : null}
         <form action={createWorkPlanAction} className={cn("space-y-6", !createMode && "hidden md:block")}>
           <Card className="rounded-[17px] border-orange-500/20 bg-orange-950/10 md:rounded-lg">
             <CardHeader>
-              <CardTitle className="flex items-center gap-2"><FolderKanban className="h-5 w-5 text-orange-300" />РЎС‚РІРѕСЂРёС‚Рё С‚РёР¶РЅРµРІРёР№ РїР»Р°РЅ</CardTitle>
-              <CardDescription>РћР±РµСЂС–С‚СЊ Р·Р°СЏРІРєРё РЅРёР¶С‡Рµ, РІРєР°Р¶С–С‚СЊ РїРµСЂС–РѕРґ С– СЃС‚РІРѕСЂС–С‚СЊ С‡РµСЂРЅРµС‚РєСѓ РїР»Р°РЅСѓ. Telegram-СЂРѕР·СЃРёР»РєР° Р±СѓРґРµ РЅР° РµС‚Р°РїС– 2.</CardDescription>
+              <CardTitle className="flex items-center gap-2"><FolderKanban className="h-5 w-5 text-orange-300" />Створити тижневий план</CardTitle>
+              <CardDescription>Оберіть заявки нижче, вкажіть період і створіть чернетку плану. Telegram-розсилка буде на етапі 2.</CardDescription>
             </CardHeader>
             <CardContent className="grid gap-3 md:grid-cols-4">
-              <Field label="РќР°Р·РІР° РїР»Р°РЅСѓ">
-                <Input name="title" required placeholder="РќР°РїСЂРёРєР»Р°Рґ: РџР»Р°РЅ СЂРѕР±С–С‚ РЅР° С‚РёР¶РґРµРЅСЊ" />
+              <Field label="Назва плану">
+                <Input name="title" required placeholder="Наприклад: План робіт на тиждень" />
               </Field>
-              <Field label="РџРµСЂС–РѕРґ Р·">
+              <Field label="Період з">
                 <Input name="period_start" type="date" required />
               </Field>
-              <Field label="РџРµСЂС–РѕРґ РїРѕ">
+              <Field label="Період по">
                 <Input name="period_end" type="date" required />
               </Field>
               <div className="flex items-end">
-                <SubmitButton type="submit" pendingText="РЎС‚РІРѕСЂСЋС”С‚СЊСЃСЏ..." showOverlay className="min-h-8 w-full rounded-lg text-[10px] md:min-h-0 md:rounded-md md:text-sm">
-                  РЎС‚РІРѕСЂРёС‚Рё РїР»Р°РЅ
+                <SubmitButton type="submit" pendingText="Створюється..." showOverlay className="min-h-8 w-full rounded-lg text-[10px] md:min-h-0 md:rounded-md md:text-sm">
+                  Створити план
                 </SubmitButton>
               </div>
               <div className="md:col-span-4">
-                <Field label="РџСЂРёРјС–С‚РєР°">
-                  <Textarea name="notes" placeholder="Р”РѕРґР°С‚РєРѕРІРёР№ РєРѕРЅС‚РµРєСЃС‚ РґР»СЏ РїР»Р°РЅСѓ" className="min-h-20" />
+                <Field label="Примітка">
+                  <Textarea name="notes" placeholder="Додатковий контекст для плану" className="min-h-20" />
                 </Field>
               </div>
               <Button asChild variant="outline" className="min-h-8 rounded-lg text-[10px] md:hidden">
-                <Link href="/work-planning">РЎРєР°СЃСѓРІР°С‚Рё</Link>
+                <Link href="/work-planning">Скасувати</Link>
               </Button>
             </CardContent>
           </Card>
 
           {groupsResult.data.length === 0 ? (
             <Card className="rounded-[17px] border-white/10 bg-white/[0.04] md:rounded-lg">
-              <CardContent className="pt-6 text-sm text-muted-foreground">Р—Р°СЏРІРѕРє РґР»СЏ РїР»Р°РЅСѓРІР°РЅРЅСЏ Р·Р° РїРѕС‚РѕС‡РЅРёРјРё С„С–Р»СЊС‚СЂР°РјРё РЅРµРјР°С”.</CardContent>
+              <CardContent className="pt-6 text-sm text-muted-foreground">Заявок для планування за поточними фільтрами немає.</CardContent>
             </Card>
           ) : (
             <div className="space-y-4">
@@ -247,23 +247,23 @@ export default async function WorkPlanningPage({ searchParams }: { searchParams:
 
       <Card className="rounded-[17px] border-white/10 bg-white/[0.04] md:rounded-lg">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2"><CalendarDays className="h-5 w-5 text-orange-300" />РџР»Р°РЅРё СЂРѕР±С–С‚</CardTitle>
-          <CardDescription>РћСЃС‚Р°РЅРЅС– С‡РµСЂРЅРµС‚РєРё С‚Р° РїР»Р°РЅРё. Р”РµС‚Р°Р»СЊРЅР° СЃС‚РѕСЂС–РЅРєР° РїР»Р°РЅСѓ Р±СѓРґРµ РґРѕРґР°РЅР° РѕРєСЂРµРјРёРј РµС‚Р°РїРѕРј.</CardDescription>
+          <CardTitle className="flex items-center gap-2"><CalendarDays className="h-5 w-5 text-orange-300" />Плани робіт</CardTitle>
+          <CardDescription>Останні чернетки та плани. Детальна сторінка плану буде додана окремим етапом.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           {plansResult.data.length === 0 ? (
-            <p className="text-sm text-muted-foreground">РџР»Р°РЅС–РІ СЂРѕР±С–С‚ РїРѕРєРё РЅРµРјР°С”.</p>
+            <p className="text-sm text-muted-foreground">Планів робіт поки немає.</p>
           ) : plansResult.data.map((plan) => (
             <div key={plan.id} className="grid gap-3 rounded-2xl border border-border bg-stone-950/30 p-3 text-sm md:grid-cols-[1.4fr_1fr_120px_120px_auto] md:items-center md:rounded-lg">
               <div className="min-w-0">
                 <div className="break-words font-medium text-stone-100">{plan.title}</div>
-                <div className="mt-1 text-xs text-muted-foreground">РЎС‚РІРѕСЂРµРЅРѕ: {formatDate(plan.created_at)}</div>
+                <div className="mt-1 text-xs text-muted-foreground">Створено: {formatDate(plan.created_at)}</div>
               </div>
               <div className="text-muted-foreground">{plan.period_start} - {plan.period_end}</div>
               <Badge tone={plan.status === "draft" ? "orange" : plan.status === "done" ? "green" : "gray"}>{planStatusLabels[plan.status]}</Badge>
-              <div className="text-muted-foreground">{plan.items_count ?? 0} Р·Р°СЏРІРѕРє</div>
+              <div className="text-muted-foreground">{plan.items_count ?? 0} заявок</div>
               <Button asChild variant="outline" className="min-h-8 rounded-lg text-[10px] md:min-h-0 md:rounded-md md:text-sm">
-                <Link href={`/work-planning/${plan.id}`}>РџРµСЂРµРіР»СЏРЅСѓС‚Рё</Link>
+                <Link href={`/work-planning/${plan.id}`}>Переглянути</Link>
               </Button>
             </div>
           ))}
@@ -289,42 +289,42 @@ function FilterForm({
   return (
     <form className={cn("grid gap-3", compact ? "mt-3" : "md:grid-cols-4 xl:grid-cols-7")}>
       <input type="hidden" name="view" value={params.view ?? "category"} />
-      <Field label="РџРµСЂС–РѕРґ Р·"><Input name="from" type="date" defaultValue={params.from ?? ""} /></Field>
-      <Field label="РџРµСЂС–РѕРґ РїРѕ"><Input name="to" type="date" defaultValue={params.to ?? ""} /></Field>
-      <Field label="РљР°С‚РµРіРѕСЂС–СЏ">
+      <Field label="Період з"><Input name="from" type="date" defaultValue={params.from ?? ""} /></Field>
+      <Field label="Період по"><Input name="to" type="date" defaultValue={params.to ?? ""} /></Field>
+      <Field label="Категорія">
         <Select name="categoryId" defaultValue={params.categoryId ?? "all"}>
-          <option value="all">Р’СЃС–</option>
+          <option value="all">Всі</option>
           {categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
         </Select>
       </Field>
-      <Field label="Р’РёРєРѕРЅР°РІРµС†СЊ">
+      <Field label="Виконавець">
         <Select name="workerId" defaultValue={params.workerId ?? "all"}>
-          <option value="all">Р’СЃС–</option>
+          <option value="all">Всі</option>
           {workers.map((worker) => <option key={worker.id} value={worker.id}>{worker.name}</option>)}
         </Select>
       </Field>
-      <Field label="РЎС‚Р°С‚СѓСЃ">
+      <Field label="Статус">
         <Select name="status" defaultValue={params.status ?? ""}>
-          <option value="">Р’СЃС–</option>
+          <option value="">Всі</option>
           {planningStatuses.map((status) => <option key={status} value={status}>{statusLabels[status]}</option>)}
         </Select>
       </Field>
-      <Field label="РћР±'С”РєС‚">
+      <Field label="Об'єкт">
         <Select name="objectId" defaultValue={params.objectId ?? "all"}>
-          <option value="all">Р’СЃС–</option>
+          <option value="all">Всі</option>
           {objects.map((object) => <option key={object.id} value={object.id}>{object.name}</option>)}
         </Select>
       </Field>
-      <Field label="РџСЂРёР·РЅР°С‡РµРЅРЅСЏ">
+      <Field label="Призначення">
         <Select name="assignment" defaultValue={params.assignment ?? "all"}>
-          <option value="all">Р’СЃС–</option>
-          <option value="without_worker">Р‘РµР· РІРёРєРѕРЅР°РІС†СЏ</option>
-          <option value="with_worker">Р— РІРёРєРѕРЅР°РІС†РµРј</option>
+          <option value="all">Всі</option>
+          <option value="without_worker">Без виконавця</option>
+          <option value="with_worker">З виконавцем</option>
         </Select>
       </Field>
       <div className="grid grid-cols-2 gap-2 md:col-span-full md:flex">
-        <SubmitButton type="submit" pendingText="Р—Р°СЃС‚РѕСЃРѕРІСѓС”С‚СЊСЃСЏ..." className="min-h-8 rounded-lg text-[10px] md:min-h-0 md:rounded-md md:text-sm">Р—Р°СЃС‚РѕСЃСѓРІР°С‚Рё</SubmitButton>
-        <Button asChild variant="outline" className="min-h-8 rounded-lg text-[10px] md:min-h-0 md:rounded-md md:text-sm"><Link href="/work-planning">РЎРєРёРЅСѓС‚Рё</Link></Button>
+        <SubmitButton type="submit" pendingText="Застосовується..." className="min-h-8 rounded-lg text-[10px] md:min-h-0 md:rounded-md md:text-sm">Застосувати</SubmitButton>
+        <Button asChild variant="outline" className="min-h-8 rounded-lg text-[10px] md:min-h-0 md:rounded-md md:text-sm"><Link href="/work-planning">Скинути</Link></Button>
       </div>
     </form>
   );
@@ -336,7 +336,7 @@ function CategoryGroup({ title, tickets, workersById }: { title: string; tickets
       <CardHeader className="p-3 md:p-6">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <CardTitle className="break-words text-[13px] md:text-lg">{title}</CardTitle>
-          <Badge tone="orange">{tickets.length} Р·Р°СЏРІРѕРє</Badge>
+          <Badge tone="orange">{tickets.length} заявок</Badge>
         </div>
       </CardHeader>
       <CardContent className="p-3 pt-0 md:p-6 md:pt-0">
@@ -345,12 +345,12 @@ function CategoryGroup({ title, tickets, workersById }: { title: string; tickets
             <thead className="bg-white/[0.04] text-xs uppercase tracking-wide text-muted-foreground">
               <tr>
                 <th className="w-12 px-3 py-3">#</th>
-                <th className="px-3 py-3">РќРѕРјРµСЂ</th>
-                <th className="px-3 py-3">РћР±'С”РєС‚ / РѕРїРёСЃ</th>
-                <th className="px-3 py-3">РџСЂС–РѕСЂРёС‚РµС‚</th>
-                <th className="px-3 py-3">РЎС‚Р°С‚СѓСЃ / РїР»Р°РЅ</th>
-                <th className="px-3 py-3">Р’РёРєРѕРЅР°РІРµС†СЊ</th>
-                <th className="px-3 py-3 text-right">Р”С–СЏ</th>
+                <th className="px-3 py-3">Номер</th>
+                <th className="px-3 py-3">Об'єкт / опис</th>
+                <th className="px-3 py-3">Пріоритет</th>
+                <th className="px-3 py-3">Статус / план</th>
+                <th className="px-3 py-3">Виконавець</th>
+                <th className="px-3 py-3 text-right">Дія</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -375,7 +375,7 @@ function TicketPlanningRow({ ticket, workersById }: { ticket: PlanningTicket; wo
           value={ticket.id}
           type="checkbox"
           disabled={ticket.isPlanned}
-          aria-label={`Р”РѕРґР°С‚Рё Р·Р°СЏРІРєСѓ ${ticket.number} РґРѕ РїР»Р°РЅСѓ`}
+          aria-label={`Додати заявку ${ticket.number} до плану`}
           className="h-5 w-5 accent-orange-500 disabled:cursor-not-allowed disabled:opacity-40"
         />
       </td>
@@ -392,7 +392,7 @@ function TicketPlanningRow({ ticket, workersById }: { ticket: PlanningTicket; wo
           <Badge tone={statusTone(ticket.status)}>{statusLabels[ticket.status]}</Badge>
           {planned ? (
             <div className="min-w-0">
-              <Badge tone="orange">Р—Р°РїР»Р°РЅРѕРІР°РЅРѕ</Badge>
+              <Badge tone="orange">Заплановано</Badge>
               <div className="mt-1 line-clamp-2 break-words text-[11px] leading-snug text-orange-100/80">
                 {planned}
               </div>
@@ -403,7 +403,7 @@ function TicketPlanningRow({ ticket, workersById }: { ticket: PlanningTicket; wo
       <td className="max-w-[160px] break-words px-3 py-3 align-top text-xs text-muted-foreground">{assignmentLabel(ticket.assignee_worker_id, workersById)}</td>
       <td className="px-3 py-3 align-top text-right">
         <Button asChild variant="outline" size="sm" className="min-h-8 rounded-lg text-[10px] md:min-h-0 md:rounded-md md:text-sm">
-          <Link href={`/tickets/${ticket.id}`}>Р’С–РґРєСЂРёС‚Рё</Link>
+          <Link href={`/tickets/${ticket.id}`}>Відкрити</Link>
         </Button>
       </td>
     </tr>
@@ -431,4 +431,3 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 function Select({ children, ...props }: React.SelectHTMLAttributes<HTMLSelectElement>) {
   return <select {...props} className="h-10 w-full rounded-md border border-input bg-stone-950/30 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring">{children}</select>;
 }
-

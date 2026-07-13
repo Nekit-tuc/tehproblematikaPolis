@@ -20,17 +20,17 @@ type PageProps = {
 };
 
 const planStatusLabels: Record<WorkPlanStatus, string> = {
-  draft: "Р§РµСЂРЅРµС‚РєР°",
-  sent: "РќР°РґС–СЃР»Р°РЅРѕ",
-  partially_done: "Р§Р°СЃС‚РєРѕРІРѕ РІРёРєРѕРЅР°РЅРѕ",
-  done: "Р’РёРєРѕРЅР°РЅРѕ",
-  cancelled: "РЎРєР°СЃРѕРІР°РЅРѕ",
+  draft: "Чернетка",
+  sent: "Надіслано",
+  partially_done: "Частково виконано",
+  done: "Виконано",
+  cancelled: "Скасовано",
 };
 
 const dispatchStatusLabels: Record<string, string> = {
-  sent: "РќР°РґС–СЃР»Р°РЅРѕ",
-  failed: "РџРѕРјРёР»РєР°",
-  skipped_no_telegram: "Р‘РµР· Telegram",
+  sent: "Надіслано",
+  failed: "Помилка",
+  skipped_no_telegram: "Без Telegram",
 };
 
 function safeDecode(value?: string | null) {
@@ -44,12 +44,12 @@ function safeDecode(value?: string | null) {
 
 function successMessage(value?: string) {
   if (!value) return null;
-  if (value === "updated") return "РџР»Р°РЅ РѕРЅРѕРІР»РµРЅРѕ.";
-  if (value === "item_removed") return "Р—Р°СЏРІРєСѓ РїСЂРёР±СЂР°РЅРѕ Р· РїР»Р°РЅСѓ.";
-  if (value === "cancelled") return "РџР»Р°РЅ СЃРєР°СЃРѕРІР°РЅРѕ.";
+  if (value === "updated") return "План оновлено.";
+  if (value === "item_removed") return "Заявку прибрано з плану.";
+  if (value === "cancelled") return "План скасовано.";
   if (value.startsWith("sent_")) {
     const [, sent, failed, skipped] = value.split("_");
-    return `Р РѕР·СЃРёР»РєСѓ Р·Р°РІРµСЂС€РµРЅРѕ. РќР°РґС–СЃР»Р°РЅРѕ: ${sent ?? 0}, РїРѕРјРёР»РѕРє: ${failed ?? 0}, Р±РµР· Telegram: ${skipped ?? 0}.`;
+    return `Розсилку завершено. Надіслано: ${sent ?? 0}, помилок: ${failed ?? 0}, без Telegram: ${skipped ?? 0}.`;
   }
   return null;
 }
@@ -58,7 +58,7 @@ function groupItems(items: WorkPlanItem[]) {
   const groups = new Map<string, { title: string; items: WorkPlanItem[] }>();
   for (const item of items) {
     const key = item.worker_id ?? "unassigned";
-    const title = item.worker?.name ?? "Р‘РµР· РІРёРєРѕРЅР°РІС†СЏ";
+    const title = item.worker?.name ?? "Без виконавця";
     const group = groups.get(key) ?? { title, items: [] };
     group.items.push(item);
     groups.set(key, group);
@@ -95,7 +95,7 @@ export default async function WorkPlanDetailPage({ params, searchParams }: PageP
   if (!plan) {
     return (
       <div className="page-shell pb-28 md:pb-6">
-        <Alert title="РџР»Р°РЅ РЅРµ Р·РЅР°Р№РґРµРЅРѕ">РџРµСЂРµРІС–СЂС‚Рµ РїРѕСЃРёР»Р°РЅРЅСЏ Р°Р±Рѕ РїРѕРІРµСЂРЅС–С‚СЊСЃСЏ РґРѕ СЃРїРёСЃРєСѓ РїР»Р°РЅС–РІ.</Alert>
+        <Alert title="План не знайдено">Перевірте посилання або поверніться до списку планів.</Alert>
       </div>
     );
   }
@@ -108,19 +108,19 @@ export default async function WorkPlanDetailPage({ params, searchParams }: PageP
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <Button asChild variant="outline" size="sm" className="mb-2 min-h-8 rounded-lg text-[10px] md:rounded-md md:text-sm">
-            <Link href="/work-planning"><ArrowLeft className="h-4 w-4" />Р”Рѕ РїР»Р°РЅСѓРІР°РЅРЅСЏ</Link>
+            <Link href="/work-planning"><ArrowLeft className="h-4 w-4" />До планування</Link>
           </Button>
           <h1 className="break-words text-[23px] font-semibold leading-tight tracking-[-0.03em] md:text-2xl">{plan.title}</h1>
           <p className="subtle">{plan.period_start} - {plan.period_end}</p>
         </div>
         <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
           <Button asChild variant="outline" className="min-h-8 rounded-lg text-[10px] md:min-h-0 md:rounded-md md:text-sm">
-            <Link href={`/work-planning/${plan.id}/export`}><Download className="h-4 w-4" />Р•РєСЃРїРѕСЂС‚ РїР»Р°РЅСѓ</Link>
+            <Link href={`/work-planning/${plan.id}/export`}><Download className="h-4 w-4" />Експорт плану</Link>
           </Button>
           {isDraft ? (
             <form action={sendWorkPlanAction.bind(null, plan.id)}>
-              <SubmitButton className="min-h-8 w-full rounded-lg text-[10px] md:min-h-0 md:w-auto md:rounded-md md:text-sm" pendingText="РќР°РґСЃРёР»Р°С”С‚СЊСЃСЏ...">
-                <Send className="h-4 w-4" />РќР°РґС–СЃР»Р°С‚Рё РїР»Р°РЅ РІРёРєРѕРЅР°РІС†СЏРј
+              <SubmitButton className="min-h-8 w-full rounded-lg text-[10px] md:min-h-0 md:w-auto md:rounded-md md:text-sm" pendingText="Надсилається...">
+                <Send className="h-4 w-4" />Надіслати план виконавцям
               </SubmitButton>
             </form>
           ) : null}
@@ -129,38 +129,38 @@ export default async function WorkPlanDetailPage({ params, searchParams }: PageP
 
       {error ? (
         <div className="min-w-0 max-w-full overflow-hidden break-words whitespace-normal">
-          <Alert title="Р”С–СЋ РЅРµ РІРёРєРѕРЅР°РЅРѕ"><span className="break-words whitespace-normal">{error}</span></Alert>
+          <Alert title="Дію не виконано"><span className="break-words whitespace-normal">{error}</span></Alert>
         </div>
       ) : null}
       {success ? (
         <div className="min-w-0 max-w-full overflow-hidden break-words whitespace-normal">
-          <Alert title="Р“РѕС‚РѕРІРѕ"><span className="break-words whitespace-normal">{success}</span></Alert>
+          <Alert title="Готово"><span className="break-words whitespace-normal">{success}</span></Alert>
         </div>
       ) : null}
 
       <div className="grid gap-3 md:grid-cols-5">
-        <Metric label="РЎС‚Р°С‚СѓСЃ" value={planStatusLabels[plan.status]} tone={statusTone(plan.status)} />
-        <Metric label="Р—Р°СЏРІРѕРє" value={String(items.length)} />
-        <Metric label="Р’РёРєРѕРЅР°РІС†С–РІ" value={String(workerCount(items))} />
-        <Metric label="РЎС‚РІРѕСЂРµРЅРѕ" value={formatDate(plan.created_at)} />
-        <Metric label="РќР°РґС–СЃР»Р°РЅРѕ" value={plan.sent_at ? formatDate(plan.sent_at) : "-"} />
+        <Metric label="Статус" value={planStatusLabels[plan.status]} tone={statusTone(plan.status)} />
+        <Metric label="Заявок" value={String(items.length)} />
+        <Metric label="Виконавців" value={String(workerCount(items))} />
+        <Metric label="Створено" value={formatDate(plan.created_at)} />
+        <Metric label="Надіслано" value={plan.sent_at ? formatDate(plan.sent_at) : "-"} />
       </div>
 
       {isDraft ? <DraftEditor plan={plan} /> : null}
 
       <Card className="rounded-[17px] border-white/10 bg-white/[0.04] md:rounded-lg">
         <CardHeader>
-          <CardTitle>Р—Р°СЏРІРєРё Сѓ РїР»Р°РЅС–</CardTitle>
-          <CardDescription>Р—РіСЂСѓРїРѕРІР°РЅРѕ РїРѕ РІРёРєРѕРЅР°РІС†СЏС…. Р“СЂСѓРїР° Р±РµР· РІРёРєРѕРЅР°РІС†СЏ РЅРµ РЅР°РґСЃРёР»Р°С”С‚СЊСЃСЏ РІ Telegram.</CardDescription>
+          <CardTitle>Заявки у плані</CardTitle>
+          <CardDescription>Згруповано по виконавцях. Група без виконавця не надсилається в Telegram.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           {grouped.length === 0 ? (
-            <p className="text-sm text-muted-foreground">РЈ РїР»Р°РЅС– РЅРµРјР°С” Р·Р°СЏРІРѕРє.</p>
+            <p className="text-sm text-muted-foreground">У плані немає заявок.</p>
           ) : grouped.map((group) => (
             <div key={group.key} className="space-y-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h2 className="break-words text-sm font-semibold text-orange-200">{group.title}</h2>
-                <Badge tone={group.key === "unassigned" ? "gray" : "orange"}>{group.items.length} Р·Р°СЏРІРѕРє</Badge>
+                <Badge tone={group.key === "unassigned" ? "gray" : "orange"}>{group.items.length} заявок</Badge>
               </div>
               <div className="grid gap-2">
                 {group.items.map((item) => <PlanItemCard key={item.id} item={item} plan={plan} />)}
@@ -179,32 +179,32 @@ function DraftEditor({ plan }: { plan: WorkPlan }) {
   return (
     <Card className="rounded-[17px] border-orange-500/20 bg-orange-950/10 md:rounded-lg">
       <CardHeader>
-        <CardTitle>Р РµРґР°РіСѓРІР°РЅРЅСЏ С‡РµСЂРЅРµС‚РєРё</CardTitle>
-        <CardDescription>РџС–СЃР»СЏ РЅР°РґСЃРёР»Р°РЅРЅСЏ СЃРєР»Р°Рґ С– РїР°СЂР°РјРµС‚СЂРё РїР»Р°РЅСѓ СЃС‚Р°РЅСѓС‚СЊ РґРѕСЃС‚СѓРїРЅС– С‚С–Р»СЊРєРё РґР»СЏ РїРµСЂРµРіР»СЏРґСѓ.</CardDescription>
+        <CardTitle>Редагування чернетки</CardTitle>
+        <CardDescription>Після надсилання склад і параметри плану стануть доступні тільки для перегляду.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         <form action={updateWorkPlanAction.bind(null, plan.id)} className="grid gap-3 md:grid-cols-4">
-          <Field label="РќР°Р·РІР°">
+          <Field label="Назва">
             <Input name="title" defaultValue={plan.title} required />
           </Field>
-          <Field label="РџРµСЂС–РѕРґ Р·">
+          <Field label="Період з">
             <Input name="period_start" type="date" defaultValue={plan.period_start} required />
           </Field>
-          <Field label="РџРµСЂС–РѕРґ РїРѕ">
+          <Field label="Період по">
             <Input name="period_end" type="date" defaultValue={plan.period_end} required />
           </Field>
           <div className="flex items-end">
-            <SubmitButton className="min-h-8 w-full rounded-lg text-[10px] md:min-h-0 md:rounded-md md:text-sm" pendingText="Р—Р±РµСЂС–РіР°С”С‚СЊСЃСЏ...">Р—Р±РµСЂРµРіС‚Рё</SubmitButton>
+            <SubmitButton className="min-h-8 w-full rounded-lg text-[10px] md:min-h-0 md:rounded-md md:text-sm" pendingText="Зберігається...">Зберегти</SubmitButton>
           </div>
           <div className="md:col-span-4">
-            <Field label="РџСЂРёРјС–С‚РєР°">
+            <Field label="Примітка">
               <Textarea name="notes" defaultValue={plan.notes ?? ""} className="min-h-20" />
             </Field>
           </div>
         </form>
         <form action={cancelWorkPlanAction.bind(null, plan.id)}>
-          <SubmitButton variant="destructive" className="min-h-8 w-full rounded-lg text-[10px] md:w-auto md:rounded-md md:text-sm" pendingText="РЎРєР°СЃРѕРІСѓС”С‚СЊСЃСЏ...">
-            РЎРєР°СЃСѓРІР°С‚Рё РїР»Р°РЅ
+          <SubmitButton variant="destructive" className="min-h-8 w-full rounded-lg text-[10px] md:w-auto md:rounded-md md:text-sm" pendingText="Скасовується...">
+            Скасувати план
           </SubmitButton>
         </form>
       </CardContent>
@@ -227,14 +227,14 @@ function PlanItemCard({ item, plan }: { item: WorkPlanItem; plan: WorkPlan }) {
       <div className="grid gap-2 md:flex md:justify-end">
         {ticket ? (
           <Button asChild variant="outline" size="sm" className="min-h-8 rounded-lg text-[10px] md:min-h-0 md:rounded-md md:text-sm">
-            <Link href={`/tickets/${ticket.id}`}>Р’С–РґРєСЂРёС‚Рё Р·Р°СЏРІРєСѓ</Link>
+            <Link href={`/tickets/${ticket.id}`}>Відкрити заявку</Link>
           </Button>
         ) : null}
         {plan.status === "draft" && ticket ? (
           <form action={removeWorkPlanItemAction.bind(null, plan.id)}>
             <input type="hidden" name="ticket_id" value={ticket.id} />
             <SubmitButton variant="outline" size="sm" className="min-h-8 w-full rounded-lg text-[10px] md:min-h-0 md:w-auto md:rounded-md md:text-sm" pendingText="...">
-              РџСЂРёР±СЂР°С‚Рё
+              Прибрати
             </SubmitButton>
           </form>
         ) : null}
@@ -247,15 +247,15 @@ function DispatchHistory({ dispatches }: { dispatches: WorkPlanDispatch[] }) {
   return (
     <Card className="rounded-[17px] border-white/10 bg-white/[0.04] md:rounded-lg">
       <CardHeader>
-        <CardTitle>Р†СЃС‚РѕСЂС–СЏ РЅР°РґСЃРёР»Р°РЅСЊ</CardTitle>
-        <CardDescription>Р РµР·СѓР»СЊС‚Р°С‚Рё СЂСѓС‡РЅРѕС— Telegram-СЂРѕР·СЃРёР»РєРё РїР»Р°РЅСѓ РІРёРєРѕРЅР°РІС†СЏРј.</CardDescription>
+        <CardTitle>Історія надсилань</CardTitle>
+        <CardDescription>Результати ручної Telegram-розсилки плану виконавцям.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-2">
         {dispatches.length === 0 ? (
-          <p className="text-sm text-muted-foreground">РџР»Р°РЅ С‰Рµ РЅРµ РЅР°РґСЃРёР»Р°Р»Рё.</p>
+          <p className="text-sm text-muted-foreground">План ще не надсилали.</p>
         ) : dispatches.map((dispatch) => (
           <div key={dispatch.id} className="grid gap-2 rounded-2xl border border-border bg-stone-950/30 p-3 text-sm md:grid-cols-[1fr_140px_160px_1.4fr] md:items-center md:rounded-lg">
-            <div className="break-words font-medium text-stone-100">{dispatch.worker?.name ?? "Р’РёРєРѕРЅР°РІРµС†СЊ РЅРµ Р·РЅР°Р№РґРµРЅРёР№"}</div>
+            <div className="break-words font-medium text-stone-100">{dispatch.worker?.name ?? "Виконавець не знайдений"}</div>
             <Badge tone={statusTone(dispatch.status)}>{dispatchStatusLabels[dispatch.status] ?? dispatch.status}</Badge>
             <div className="text-xs text-muted-foreground">{formatDate(dispatch.sent_at)}</div>
             <div className="break-words text-xs text-muted-foreground">{dispatch.error ?? dispatch.message_id ?? "-"}</div>
@@ -281,4 +281,3 @@ function Metric({ label, value, tone = "gray" }: { label: string; value: string;
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return <div className="space-y-2"><Label>{label}</Label>{children}</div>;
 }
-
