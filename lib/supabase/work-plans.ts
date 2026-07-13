@@ -510,6 +510,54 @@ async function createDispatchRow(input: {
   });
 }
 
+const WORK_PLAN_SEND_CONCURRENCY = 4;
+
+type WorkerSendResult = {
+  sent: number;
+  failed: number;
+  skipped: number;
+};
+
+async function sendWorkPlanToWorkerGroup(input: {
+  workPlanId: string;
+  plan: WorkPlan;
+  workerId: string;
+  items: WorkPlanItem[];
+}): Promise<WorkerSendResult> {
+  const { workPlanId, plan, workerId, items } = input;
+  const worker = items[0]?.worker;
+  if (!worker) {
+    await createDispatchRow({ workPlanId, workerId, status: "failed", error: "Виконавця не знайдено." });
+    return { sent: 0, failed: 1, skipped: 0 };
+  }
+
+  if (!worker.telegram_id) {
+    await createDispatchRow({ workPlanId, workerId, status: "skipped_no_telegram", error: "У виконавця не підключено Telegram." });
+    return { sent: 0, failed: 0, skipped: 1 };
+  }
+
+  const result = await sendWorkPlanToWorker(worker, plan, items);
+  if (result.ok) {
+    await createDispatchRow({
+      workPlanId,
+      workerId,
+      telegramChatId: worker.telegram_id,
+      status: "sent",
+      messageId: result.messageIds.join(","),
+    });
+    return { sent: 1, failed: 0, skipped: 0 };
+  }
+
+  await createDispatchRow({
+    workPlanId,
+    workerId,
+    telegramChatId: worker.telegram_id,
+    status: "failed",
+    error: result.error,
+  });
+  return { sent: 0, failed: 1, skipped: 0 };
+}
+
 export async function sendWorkPlanToWorkers(
   workPlanId: string,
   options: { mode?: SendWorkPlanMode } = {},
@@ -519,18 +567,16 @@ export async function sendWorkPlanToWorkers(
   const planResult = await getWorkPlanById(workPlanId);
   if (planResult.error) return { data: null, error: planResult.error };
   if (!planResult.data) return { data: null, error: "План не знайдено." };
-  if (mode === "initial" && planResult.data.status !== "draft") {
+  const plan = planResult.data;
+  if (mode === "initial" && plan.status !== "draft") {
     return { data: null, error: "Первинне надсилання доступне тільки для чернетки плану." };
   }
-  if (mode !== "initial" && (planResult.data.status === "draft" || planResult.data.status === "cancelled")) {
+  if (mode !== "initial" && (plan.status === "draft" || plan.status === "cancelled")) {
     return { data: null, error: "Повторне надсилання доступне тільки для вже надісланого активного плану." };
   }
 
   const dispatchesResult = await getWorkPlanDispatches(workPlanId);
   if (dispatchesResult.error) return { data: null, error: dispatchesResult.error };
-  if (mode === "initial" && dispatchesResult.data.length > 0) {
-    return { data: null, error: "Для цього плану вже є історія надсилань." };
-  }
 
   const itemsResult = await getWorkPlanItems(workPlanId);
   if (itemsResult.error) return { data: null, error: itemsResult.error };
@@ -544,39 +590,25 @@ export async function sendWorkPlanToWorkers(
   let failed = 0;
   let skipped = 0;
 
-  for (const [workerId, items] of targetGroups.entries()) {
-    const worker = items[0]?.worker;
-    if (!worker) {
-      failed += 1;
-      await createDispatchRow({ workPlanId, workerId, status: "failed", error: "Виконавця не знайдено." });
-      continue;
-    }
+  const workerEntries = Array.from(targetGroups.entries());
+  for (let index = 0; index < workerEntries.length; index += WORK_PLAN_SEND_CONCURRENCY) {
+    const batch = workerEntries.slice(index, index + WORK_PLAN_SEND_CONCURRENCY);
+    const results = await Promise.allSettled(
+      batch.map(([workerId, items]) => sendWorkPlanToWorkerGroup({ workPlanId, plan, workerId, items })),
+    );
 
-    if (!worker.telegram_id) {
-      skipped += 1;
-      await createDispatchRow({ workPlanId, workerId, status: "skipped_no_telegram", error: "У виконавця не підключено Telegram." });
-      continue;
-    }
+    for (const [resultIndex, result] of results.entries()) {
+      if (result.status === "fulfilled") {
+        sent += result.value.sent;
+        failed += result.value.failed;
+        skipped += result.value.skipped;
+        continue;
+      }
 
-    const result = await sendWorkPlanToWorker(worker, planResult.data, items);
-    if (result.ok) {
-      sent += 1;
-      await createDispatchRow({
-        workPlanId,
-        workerId,
-        telegramChatId: worker.telegram_id,
-        status: "sent",
-        messageId: result.messageIds.join(","),
-      });
-    } else {
       failed += 1;
-      await createDispatchRow({
-        workPlanId,
-        workerId,
-        telegramChatId: worker.telegram_id,
-        status: "failed",
-        error: result.error,
-      });
+      const [workerId] = batch[resultIndex];
+      const message = result.reason instanceof Error ? result.reason.message : String(result.reason);
+      await createDispatchRow({ workPlanId, workerId, status: "failed", error: message });
     }
   }
 

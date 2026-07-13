@@ -37,10 +37,16 @@ function token() {
   return value;
 }
 
-const telegramTimeoutMs = Number(process.env.TELEGRAM_TIMEOUT_MS ?? 8000);
+const DEFAULT_TELEGRAM_TIMEOUT_MS = 8000;
+
+function telegramTimeout() {
+  const value = Number(process.env.TELEGRAM_TIMEOUT_MS ?? DEFAULT_TELEGRAM_TIMEOUT_MS);
+  return Number.isFinite(value) && value > 0 ? value : DEFAULT_TELEGRAM_TIMEOUT_MS;
+}
 
 async function telegramRequest<T>(method: string, body: Record<string, unknown>) {
   const startedAt = performance.now();
+  const telegramTimeoutMs = telegramTimeout();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), telegramTimeoutMs);
   try {

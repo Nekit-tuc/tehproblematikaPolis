@@ -49,14 +49,20 @@ function successMessage(value?: string) {
   if (value === "item_removed") return "Заявку прибрано з плану.";
   if (value === "cancelled") return "План скасовано.";
   if (value.startsWith("sent_") || value.startsWith("retry_") || value.startsWith("resend_")) {
-    const [mode, sent, failed, skipped] = value.split("_");
+    const [mode, sentRaw, failedRaw, skippedRaw] = value.split("_");
+    const sent = Number(sentRaw ?? 0);
+    const failed = Number(failedRaw ?? 0);
+    const skipped = Number(skippedRaw ?? 0);
     const prefix = mode === "retry"
       ? "Повтор невдалих завершено"
       : mode === "resend"
         ? "Повторну розсилку всім завершено"
         : "Розсилку завершено";
-    if (mode === "retry" && sent === "0" && failed === "0" && skipped === "0") return "Немає невдалих відправок для повтору.";
-    return `${prefix}. Надіслано: ${sent ?? 0}, помилок: ${failed ?? 0}, без Telegram: ${skipped ?? 0}.`;
+    if (mode === "retry" && sent === 0 && failed === 0 && skipped === 0) return "Немає невдалих надсилань для повтору.";
+    if (sent > 0 && failed === 0 && skipped === 0) return mode === "sent" ? "План надіслано виконавцям." : `${prefix}. Надіслано: ${sent}.`;
+    if (sent === 0 && failed === 0 && skipped > 0) return "План не надіслано: у виконавців не підключено Telegram.";
+    if (sent > 0 && (failed > 0 || skipped > 0)) return `План частково надіслано: надіслано ${sent}, помилки ${failed}, немає Telegram ${skipped}.`;
+    return `${prefix}. Надіслано: ${sent}, помилок: ${failed}, без Telegram: ${skipped}.`;
   }
   return null;
 }

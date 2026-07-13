@@ -109,7 +109,7 @@ export async function handleWorkerDoneCallback(callback: TelegramCallbackQuery) 
   }
 
   if (action.used_at) {
-    await answerCallbackQuery(callback.id, "Ця дія вже була виконана.");
+    await answerCallbackQuery(callback.id, "Ця кнопка вже була використана або неактуальна. Скористайтесь останнім повідомленням з планом.");
     logWorkerCallback({
       handled: true,
       stage: "already_used",
@@ -126,7 +126,7 @@ export async function handleWorkerDoneCallback(callback: TelegramCallbackQuery) 
   }
 
   if (action.expires_at && new Date(action.expires_at).getTime() < Date.now()) {
-    await answerCallbackQuery(callback.id, "Кнопка недійсна або застаріла.");
+    await answerCallbackQuery(callback.id, "Дія вже неактуальна. Скористайтесь останнім повідомленням з планом.");
     logWorkerCallback({
       handled: true,
       stage: "expired",
@@ -303,4 +303,3 @@ export async function handleWorkerDoneCallback(callback: TelegramCallbackQuery) 
 
   return { handled: true, ok: true, reason: "worker_done_completed" } as const;
 }
-
