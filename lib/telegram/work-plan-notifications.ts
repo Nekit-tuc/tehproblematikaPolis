@@ -1,4 +1,4 @@
-import { priorityLabels } from "@/lib/labels";
+﻿import { priorityLabels } from "@/lib/labels";
 import { sendTelegramMessage } from "@/lib/telegram/client";
 import type { WorkPlan, WorkPlanItem } from "@/lib/supabase/work-plans";
 import type { Worker } from "@/types/domain";

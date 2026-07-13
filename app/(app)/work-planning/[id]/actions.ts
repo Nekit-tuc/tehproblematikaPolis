@@ -1,9 +1,9 @@
-"use server";
+﻿"use server";
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireRole } from "@/lib/auth/server";
-import { cancelWorkPlan, removeWorkPlanItem, sendWorkPlanToWorkers, updateWorkPlan } from "@/lib/supabase/work-plans";
+import { cancelWorkPlan, removeWorkPlanItem, sendWorkPlanToWorkers, updateWorkPlan, type SendWorkPlanMode } from "@/lib/supabase/work-plans";
 
 function text(formData: FormData, key: string) {
   const value = formData.get(key);
@@ -22,6 +22,19 @@ function publicError(message?: string | null) {
   if (!message) return "Дію не виконано.";
   if (message.length > 180) return "Дію не виконано. Деталі записано в логах сервера.";
   return message;
+}
+
+async function sendPlanWithMode(workPlanId: string, mode: SendWorkPlanMode, successPrefix: string) {
+  await requireRole(["admin", "management", "tech_manager"]);
+  const result = await sendWorkPlanToWorkers(workPlanId, { mode });
+  if (result.error || !result.data) {
+    console.error("[work-planning] send failed", { workPlanId, mode, error: result.error });
+    fail(workPlanId, publicError(result.error));
+  }
+
+  revalidatePath("/work-planning");
+  revalidatePath(`/work-planning/${workPlanId}`);
+  success(workPlanId, `${successPrefix}_${result.data.sent}_${result.data.failed}_${result.data.skipped}`);
 }
 
 export async function updateWorkPlanAction(workPlanId: string, formData: FormData) {
@@ -76,14 +89,13 @@ export async function cancelWorkPlanAction(workPlanId: string) {
 }
 
 export async function sendWorkPlanAction(workPlanId: string) {
-  await requireRole(["admin", "management", "tech_manager"]);
-  const result = await sendWorkPlanToWorkers(workPlanId);
-  if (result.error || !result.data) {
-    console.error("[work-planning] send failed", { workPlanId, error: result.error });
-    fail(workPlanId, publicError(result.error));
-  }
+  await sendPlanWithMode(workPlanId, "initial", "sent");
+}
 
-  revalidatePath("/work-planning");
-  revalidatePath(`/work-planning/${workPlanId}`);
-  success(workPlanId, `sent_${result.data.sent}_${result.data.failed}_${result.data.skipped}`);
+export async function retryFailedWorkPlanDispatchAction(workPlanId: string) {
+  await sendPlanWithMode(workPlanId, "retry_failed", "retry");
+}
+
+export async function resendWorkPlanToAllAction(workPlanId: string) {
+  await sendPlanWithMode(workPlanId, "resend_all", "resend");
 }

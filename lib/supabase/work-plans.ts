@@ -53,6 +53,7 @@ export type WorkPlanItem = {
 };
 
 export type WorkPlanDispatchStatus = "sent" | "failed" | "skipped_no_telegram";
+export type SendWorkPlanMode = "initial" | "retry_failed" | "resend_all";
 
 export type WorkPlanDispatch = {
   id: string;
@@ -461,6 +462,33 @@ function groupedItemsByWorker(items: WorkPlanItem[]) {
   return groups;
 }
 
+function latestDispatchByWorker(dispatches: WorkPlanDispatch[]) {
+  const latest = new Map<string, WorkPlanDispatch>();
+  for (const dispatch of dispatches) {
+    if (!dispatch.worker_id || latest.has(dispatch.worker_id)) continue;
+    latest.set(dispatch.worker_id, dispatch);
+  }
+  return latest;
+}
+
+function filterWorkerGroupsByMode(
+  workerGroups: Map<string, WorkPlanItem[]>,
+  dispatches: WorkPlanDispatch[],
+  mode: SendWorkPlanMode,
+) {
+  if (mode === "initial" || mode === "resend_all") return workerGroups;
+
+  const latest = latestDispatchByWorker(dispatches);
+  const retryGroups = new Map<string, WorkPlanItem[]>();
+  for (const [workerId, items] of workerGroups.entries()) {
+    const lastDispatch = latest.get(workerId);
+    if (!lastDispatch || lastDispatch.status === "failed" || lastDispatch.status === "skipped_no_telegram") {
+      retryGroups.set(workerId, items);
+    }
+  }
+  return retryGroups;
+}
+
 async function createDispatchRow(input: {
   workPlanId: string;
   workerId: string;
@@ -480,27 +508,41 @@ async function createDispatchRow(input: {
   });
 }
 
-export async function sendWorkPlanToWorkers(workPlanId: string): Promise<QueryResult<{ sent: number; failed: number; skipped: number } | null>> {
+export async function sendWorkPlanToWorkers(
+  workPlanId: string,
+  options: { mode?: SendWorkPlanMode } = {},
+): Promise<QueryResult<{ sent: number; failed: number; skipped: number } | null>> {
+  const mode = options.mode ?? "initial";
   if (!hasSupabaseEnv()) return { data: null, error: missingSupabaseMessage };
   const planResult = await getWorkPlanById(workPlanId);
   if (planResult.error) return { data: null, error: planResult.error };
   if (!planResult.data) return { data: null, error: "План не знайдено." };
-  if (planResult.data.status !== "draft") return { data: null, error: "Повторна відправка плану недоступна для цього статусу." };
+  if (mode === "initial" && planResult.data.status !== "draft") {
+    return { data: null, error: "Первинне надсилання доступне тільки для чернетки плану." };
+  }
+  if (mode !== "initial" && (planResult.data.status === "draft" || planResult.data.status === "cancelled")) {
+    return { data: null, error: "Повторне надсилання доступне тільки для вже надісланого активного плану." };
+  }
 
   const dispatchesResult = await getWorkPlanDispatches(workPlanId);
   if (dispatchesResult.error) return { data: null, error: dispatchesResult.error };
-  if (dispatchesResult.data.length > 0) return { data: null, error: "Для цього плану вже є історія надсилань." };
+  if (mode === "initial" && dispatchesResult.data.length > 0) {
+    return { data: null, error: "Для цього плану вже є історія надсилань." };
+  }
 
   const itemsResult = await getWorkPlanItems(workPlanId);
   if (itemsResult.error) return { data: null, error: itemsResult.error };
   const workerGroups = groupedItemsByWorker(itemsResult.data);
   if (workerGroups.size === 0) return { data: null, error: "У плані немає заявок із призначеними виконавцями." };
 
+  const targetGroups = filterWorkerGroupsByMode(workerGroups, dispatchesResult.data, mode);
+  if (targetGroups.size === 0) return { data: { sent: 0, failed: 0, skipped: 0 }, error: null };
+
   let sent = 0;
   let failed = 0;
   let skipped = 0;
 
-  for (const [workerId, items] of workerGroups.entries()) {
+  for (const [workerId, items] of targetGroups.entries()) {
     const worker = items[0]?.worker;
     if (!worker) {
       failed += 1;
@@ -536,7 +578,7 @@ export async function sendWorkPlanToWorkers(workPlanId: string): Promise<QueryRe
     }
   }
 
-  if (sent > 0) {
+  if (mode === "initial" && sent > 0) {
     const supabase = await createClient();
     const now = new Date().toISOString();
     const { error } = await supabase

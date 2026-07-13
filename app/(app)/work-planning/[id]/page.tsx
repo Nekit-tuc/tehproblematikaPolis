@@ -1,5 +1,6 @@
 ﻿import Link from "next/link";
-import { ArrowLeft, Download, Send } from "lucide-react";
+import { ArrowLeft, Download, RefreshCw, Send } from "lucide-react";
+import { ConfirmSubmitButton } from "@/components/tickets/confirm-submit-button";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -12,7 +13,7 @@ import { requireRole } from "@/lib/auth/server";
 import { priorityLabels, statusLabels } from "@/lib/labels";
 import { getWorkPlanById, getWorkPlanDispatches, getWorkPlanItems, type WorkPlan, type WorkPlanDispatch, type WorkPlanItem, type WorkPlanStatus } from "@/lib/supabase/work-plans";
 import { cn, formatDate } from "@/lib/utils";
-import { cancelWorkPlanAction, removeWorkPlanItemAction, sendWorkPlanAction, updateWorkPlanAction } from "./actions";
+import { cancelWorkPlanAction, removeWorkPlanItemAction, resendWorkPlanToAllAction, retryFailedWorkPlanDispatchAction, sendWorkPlanAction, updateWorkPlanAction } from "./actions";
 
 type PageProps = {
   params: Promise<{ id: string }>;
@@ -47,9 +48,15 @@ function successMessage(value?: string) {
   if (value === "updated") return "План оновлено.";
   if (value === "item_removed") return "Заявку прибрано з плану.";
   if (value === "cancelled") return "План скасовано.";
-  if (value.startsWith("sent_")) {
-    const [, sent, failed, skipped] = value.split("_");
-    return `Розсилку завершено. Надіслано: ${sent ?? 0}, помилок: ${failed ?? 0}, без Telegram: ${skipped ?? 0}.`;
+  if (value.startsWith("sent_") || value.startsWith("retry_") || value.startsWith("resend_")) {
+    const [mode, sent, failed, skipped] = value.split("_");
+    const prefix = mode === "retry"
+      ? "Повтор невдалих завершено"
+      : mode === "resend"
+        ? "Повторну розсилку всім завершено"
+        : "Розсилку завершено";
+    if (mode === "retry" && sent === "0" && failed === "0" && skipped === "0") return "Немає невдалих відправок для повтору.";
+    return `${prefix}. Надіслано: ${sent ?? 0}, помилок: ${failed ?? 0}, без Telegram: ${skipped ?? 0}.`;
   }
   return null;
 }
@@ -68,6 +75,15 @@ function groupItems(items: WorkPlanItem[]) {
 
 function workerCount(items: WorkPlanItem[]) {
   return new Set(items.map((item) => item.worker_id).filter(Boolean)).size;
+}
+
+function retryableDispatchCount(dispatches: WorkPlanDispatch[]) {
+  const latest = new Map<string, WorkPlanDispatch>();
+  for (const dispatch of dispatches) {
+    if (!dispatch.worker_id || latest.has(dispatch.worker_id)) continue;
+    latest.set(dispatch.worker_id, dispatch);
+  }
+  return Array.from(latest.values()).filter((dispatch) => dispatch.status === "failed" || dispatch.status === "skipped_no_telegram").length;
 }
 
 function statusTone(status: string) {
@@ -101,6 +117,8 @@ export default async function WorkPlanDetailPage({ params, searchParams }: PageP
   }
 
   const isDraft = plan.status === "draft";
+  const canResend = plan.status === "sent" || plan.status === "partially_done" || plan.status === "done";
+  const retryableCount = retryableDispatchCount(dispatches);
   const grouped = groupItems(items);
 
   return (
@@ -113,7 +131,7 @@ export default async function WorkPlanDetailPage({ params, searchParams }: PageP
           <h1 className="break-words text-[23px] font-semibold leading-tight tracking-[-0.03em] md:text-2xl">{plan.title}</h1>
           <p className="subtle">{plan.period_start} - {plan.period_end}</p>
         </div>
-        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:justify-end">
           <Button asChild variant="outline" className="min-h-8 rounded-lg text-[10px] md:min-h-0 md:rounded-md md:text-sm">
             <Link href={`/work-planning/${plan.id}/export`}><Download className="h-4 w-4" />Експорт плану</Link>
           </Button>
@@ -122,6 +140,29 @@ export default async function WorkPlanDetailPage({ params, searchParams }: PageP
               <SubmitButton className="min-h-8 w-full rounded-lg text-[10px] md:min-h-0 md:w-auto md:rounded-md md:text-sm" pendingText="Надсилається...">
                 <Send className="h-4 w-4" />Надіслати план виконавцям
               </SubmitButton>
+            </form>
+          ) : null}
+          {canResend && retryableCount > 0 ? (
+            <form action={retryFailedWorkPlanDispatchAction.bind(null, plan.id)}>
+              <SubmitButton className="min-h-8 w-full rounded-lg text-[10px] md:min-h-0 md:w-auto md:rounded-md md:text-sm" pendingText="Повторюється...">
+                <RefreshCw className="h-4 w-4" />Повторити невдалі
+              </SubmitButton>
+              <p className="mt-1 max-w-xs text-[10px] leading-4 text-muted-foreground">
+                Повторить відправку тільки виконавцям, кому план не надіслався.
+              </p>
+            </form>
+          ) : null}
+          {canResend ? (
+            <form action={resendWorkPlanToAllAction.bind(null, plan.id)}>
+              <ConfirmSubmitButton
+                type="submit"
+                variant="outline"
+                className="min-h-8 w-full rounded-lg text-[10px] md:min-h-0 md:w-auto md:rounded-md md:text-sm"
+                pendingText="Надсилається..."
+                message="План уже надсилався. Ви точно хочете повторно надіслати його всім виконавцям?"
+              >
+                <Send className="h-4 w-4" />Надіслати повторно всім
+              </ConfirmSubmitButton>
             </form>
           ) : null}
         </div>
@@ -253,12 +294,13 @@ function DispatchHistory({ dispatches }: { dispatches: WorkPlanDispatch[] }) {
       <CardContent className="space-y-2">
         {dispatches.length === 0 ? (
           <p className="text-sm text-muted-foreground">План ще не надсилали.</p>
-        ) : dispatches.map((dispatch) => (
-          <div key={dispatch.id} className="grid gap-2 rounded-2xl border border-border bg-stone-950/30 p-3 text-sm md:grid-cols-[1fr_140px_160px_1.4fr] md:items-center md:rounded-lg">
+        ) : dispatches.map((dispatch, index) => (
+          <div key={dispatch.id} className="grid gap-2 rounded-2xl border border-border bg-stone-950/30 p-3 text-sm md:grid-cols-[90px_1fr_140px_160px_1.4fr] md:items-center md:rounded-lg">
+            <div className="text-xs font-medium text-orange-200">Спроба {dispatches.length - index}</div>
             <div className="break-words font-medium text-stone-100">{dispatch.worker?.name ?? "Виконавець не знайдений"}</div>
             <Badge tone={statusTone(dispatch.status)}>{dispatchStatusLabels[dispatch.status] ?? dispatch.status}</Badge>
             <div className="text-xs text-muted-foreground">{formatDate(dispatch.sent_at)}</div>
-            <div className="break-words text-xs text-muted-foreground">{dispatch.error ?? dispatch.message_id ?? "-"}</div>
+            <div className="line-clamp-3 break-words text-xs text-muted-foreground">{dispatch.error ?? dispatch.message_id ?? "-"}</div>
           </div>
         ))}
       </CardContent>
