@@ -1,5 +1,6 @@
 ﻿import { priorityLabels } from "@/lib/labels";
 import { sendTelegramMessage } from "@/lib/telegram/client";
+import { createWorkerDoneToken } from "@/lib/telegram/worker-notifications";
 import type { WorkPlan, WorkPlanItem } from "@/lib/supabase/work-plans";
 import type { Worker } from "@/types/domain";
 
@@ -11,89 +12,113 @@ type SendWorkPlanResult =
   | { ok: true; messageIds: string[] }
   | { ok: false; error: string };
 
-function appUrl() {
-  return (process.env.NEXT_PUBLIC_APP_URL ?? "").replace(/\/$/, "");
-}
+const MAX_ITEMS_PER_MESSAGE = 8;
+const DESCRIPTION_LIMIT = 160;
 
 function compact(value?: string | null) {
   return value?.trim() || "-";
 }
 
-function planUrl(planId: string) {
-  const url = appUrl();
-  return url ? `${url}/work-planning/${planId}` : undefined;
+function truncate(value?: string | null, limit = DESCRIPTION_LIMIT) {
+  const text = compact(value).replace(/\s+/g, " ");
+  if (text.length <= limit) return text;
+  return `${text.slice(0, limit - 1).trim()}…`;
 }
 
-function ticketsUrl() {
-  const url = appUrl();
-  return url ? `${url}/tickets` : undefined;
-}
-
-function itemText(item: WorkPlanItem, index: number) {
-  const ticket = item.ticket;
-  return [
-    `${index + 1}. ${compact(ticket?.number)}`,
-    `Об'єкт: ${compact(ticket?.object?.name)}`,
-    `Категорія: ${compact(ticket?.category?.name ?? item.category)}`,
-    `Пріоритет: ${ticket?.priority ? priorityLabels[ticket.priority] : "-"}`,
-    `Робота: ${compact(ticket?.title || ticket?.description)}`,
-  ].join("\n");
-}
-
-function splitMessage(header: string, itemBlocks: string[], footer: string) {
-  const chunks: string[] = [];
-  let current = header;
-  for (const block of itemBlocks) {
-    const next = `${current}\n\n${block}`;
-    if (next.length > 3400) {
-      chunks.push(current);
-      current = block;
-    } else {
-      current = next;
-    }
+function categorySummary(items: WorkPlanItem[]) {
+  const categories = new Set<string>();
+  for (const item of items) {
+    const category = item.ticket?.category?.name ?? item.category;
+    if (category) categories.add(category);
   }
-  const withFooter = `${current}\n\n${footer}`;
-  if (withFooter.length > 3800) {
-    chunks.push(current);
-    chunks.push(footer);
-  } else {
-    chunks.push(withFooter);
+  return categories.size === 1 ? Array.from(categories)[0] : null;
+}
+
+function chunkItems(items: WorkPlanItem[]) {
+  const chunks: WorkPlanItem[][] = [];
+  for (let index = 0; index < items.length; index += MAX_ITEMS_PER_MESSAGE) {
+    chunks.push(items.slice(index, index + MAX_ITEMS_PER_MESSAGE));
   }
   return chunks;
 }
 
-export function buildWorkPlanTelegramMessage(plan: WorkPlan, worker: Worker, items: WorkPlanItem[]) {
-  const header = [
-    "План робіт на тиждень",
+function itemText(item: WorkPlanItem, index: number, includeCategory: boolean) {
+  const ticket = item.ticket;
+  const lines = [
+    `${index + 1}. ${compact(ticket?.number)}`,
+    `Об'єкт: ${compact(ticket?.object?.name)}`,
+  ];
+  if (includeCategory) lines.push(`Категорія: ${compact(ticket?.category?.name ?? item.category)}`);
+  lines.push(
+    `Пріоритет: ${ticket?.priority ? priorityLabels[ticket.priority] : "-"}`,
+    `Опис: ${truncate(ticket?.description || ticket?.title)}`,
+  );
+  return lines.join("\n");
+}
+
+function buildChunkText(plan: WorkPlan, worker: Worker, chunk: WorkPlanItem[], chunkIndex: number, totalChunks: number) {
+  const category = categorySummary(chunk);
+  return [
+    `План робіт на тиждень${totalChunks > 1 ? ` - частина ${chunkIndex + 1}/${totalChunks}` : ""}`,
     "",
     `Період: ${plan.period_start} - ${plan.period_end}`,
     `Виконавець: ${worker.name}`,
-  ].join("\n");
-  const blocks = items.map((item, index) => itemText(item, index));
-  return splitMessage(header, blocks, "Дякую за роботу!");
+    category ? `Категорія: ${category}` : null,
+    "",
+    "Заявки:",
+    "",
+    chunk.map((item, index) => itemText(item, index, !category)).join("\n\n"),
+    "",
+    "Натискайте “Виконав” окремо по кожній заявці після завершення роботи.",
+  ].filter(Boolean).join("\n");
+}
+
+export function buildWorkPlanTelegramMessage(plan: WorkPlan, worker: Worker, items: WorkPlanItem[]) {
+  const chunks = chunkItems(items);
+  return chunks.map((chunk, index) => buildChunkText(plan, worker, chunk, index, chunks.length));
+}
+
+async function createKeyboard(worker: Worker, chunk: WorkPlanItem[]) {
+  const rows: Array<Array<{ text: string; callback_data: string }>> = [];
+  for (const item of chunk) {
+    const ticket = item.ticket;
+    if (!ticket?.id) continue;
+    const tokenResult = await createWorkerDoneToken(ticket.id, worker.id);
+    if (!tokenResult.token) {
+      return { rows: [], error: tokenResult.error ?? "Не вдалося створити Telegram token для заявки." };
+    }
+    const callbackData = `wd:${tokenResult.token}`;
+    rows.push([{ text: `✅ ${ticket.number ?? "Заявка"} Виконав`, callback_data: callbackData }]);
+    console.info("[work-plan-dispatch]", {
+      result: "button_created",
+      workerId: worker.id,
+      ticketId: ticket.id,
+      callbackDataLength: Buffer.byteLength(callbackData, "utf8"),
+    });
+  }
+  return { rows, error: null };
 }
 
 export async function sendWorkPlanToWorker(worker: Worker, plan: WorkPlan, items: WorkPlanItem[]): Promise<SendWorkPlanResult> {
   if (!worker.telegram_id) return { ok: false, error: "У виконавця не підключено Telegram." };
-  const parts = buildWorkPlanTelegramMessage(plan, worker, items);
+  const chunks = chunkItems(items);
+  if (chunks.length === 0) return { ok: false, error: "У плані немає заявок для надсилання." };
   const messageIds: string[] = [];
-  const keyboard = [
-    [
-      ...(planUrl(plan.id) ? [{ text: "Відкрити план", url: planUrl(plan.id) }] : []),
-      ...(ticketsUrl() ? [{ text: "Перейти до заявок", url: ticketsUrl() }] : []),
-    ],
-  ].filter((row) => row.length > 0);
 
   try {
-    for (const [index, part] of parts.entries()) {
-      const result = await sendTelegramMessage(worker.telegram_id, part, index === parts.length - 1 ? keyboard : undefined) as TelegramSendMessageResult;
+    for (const [index, chunk] of chunks.entries()) {
+      const keyboard = await createKeyboard(worker, chunk);
+      if (keyboard.error) return { ok: false, error: keyboard.error };
+      const text = buildChunkText(plan, worker, chunk, index, chunks.length);
+      const result = await sendTelegramMessage(worker.telegram_id, text, keyboard.rows) as TelegramSendMessageResult;
       messageIds.push(String(result.message_id));
     }
     console.info("[work-plan-dispatch]", {
       result: "sent",
       workerId: worker.id,
       workPlanId: plan.id,
-      parts: parts.length,
+      chunks: chunks.length,
+      tickets: items.length,
     });
     return { ok: true, messageIds };
   } catch (error) {

@@ -184,11 +184,13 @@ export async function handleWorkerDoneCallback(callback: TelegramCallbackQuery) 
     return { handled: true, ok: false, reason: "worker_not_found" } as const;
   }
 
-  if (ticket.status === "done") {
-    await answerCallbackQuery(callback.id, "Заявка вже завершена.");
+  if (ticket.status === "waiting_admin_confirmation" || ticket.status === "done") {
+    const now = new Date().toISOString();
+    await supabase.from("worker_ticket_actions").update({ used_at: now }).eq("id", action.id);
+    await answerCallbackQuery(callback.id, "Заявка вже позначена як виконана або підтверджена.");
     logWorkerCallback({
       handled: true,
-      stage: "already_completed",
+      stage: "already_marked_done",
       callbackDataPrefix,
       callbackDataLength,
       tokenPreview: tokenPreview(token),
@@ -197,9 +199,9 @@ export async function handleWorkerDoneCallback(callback: TelegramCallbackQuery) 
       workerId,
       previousStatus: ticket.status,
       newStatus: ticket.status,
-      result: "ticket_already_completed",
+      result: "ticket_already_marked_done",
     });
-    return { handled: true, ok: false, reason: "ticket_already_completed" } as const;
+    return { handled: true, ok: false, reason: "ticket_already_marked_done" } as const;
   }
 
   if (ticket.assignee_worker_id !== workerId) {
@@ -269,7 +271,7 @@ export async function handleWorkerDoneCallback(callback: TelegramCallbackQuery) 
   await supabase.from("ticket_history").insert({
     ticket_id: ticketId,
     actor_id: null,
-    action: "Виконавець позначив заявку як виконану",
+    action: "Виконавець позначив заявку як виконану через Telegram",
     metadata: {
       worker_id: workerId,
       telegram_user_id: String(callback.from.id),
@@ -279,7 +281,7 @@ export async function handleWorkerDoneCallback(callback: TelegramCallbackQuery) 
     },
   });
 
-  await answerCallbackQuery(callback.id, "Заявку позначено як виконану. Очікується підтвердження адміністратора.");
+  await answerCallbackQuery(callback.id, `Заявку ${ticket.number ?? ""} позначено як виконану. Очікується підтвердження адміністратора.`);
   if (callback.message?.chat.id) {
     await sendTelegramMessage(callback.message.chat.id, "Виконання зафіксовано. Очікується підтвердження адміністратора.");
   }
@@ -301,3 +303,4 @@ export async function handleWorkerDoneCallback(callback: TelegramCallbackQuery) 
 
   return { handled: true, ok: true, reason: "worker_done_completed" } as const;
 }
+

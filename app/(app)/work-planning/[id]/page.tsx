@@ -77,6 +77,19 @@ function workerCount(items: WorkPlanItem[]) {
   return new Set(items.map((item) => item.worker_id).filter(Boolean)).size;
 }
 
+function planProgress(items: WorkPlanItem[]) {
+  const total = items.length;
+  const waitingConfirmation = items.filter((item) => item.ticket?.status === "waiting_admin_confirmation").length;
+  const done = items.filter((item) => item.ticket?.status === "done").length;
+  const finished = waitingConfirmation + done;
+  return {
+    total,
+    waitingConfirmation,
+    done,
+    remaining: Math.max(total - finished, 0),
+  };
+}
+
 function retryableDispatchCount(dispatches: WorkPlanDispatch[]) {
   const latest = new Map<string, WorkPlanDispatch>();
   for (const dispatch of dispatches) {
@@ -120,6 +133,7 @@ export default async function WorkPlanDetailPage({ params, searchParams }: PageP
   const canResend = plan.status === "sent" || plan.status === "partially_done" || plan.status === "done";
   const retryableCount = retryableDispatchCount(dispatches);
   const grouped = groupItems(items);
+  const progress = planProgress(items);
 
   return (
     <div className="page-shell space-y-2.5 pb-20 md:space-y-6 md:pb-8">
@@ -179,10 +193,13 @@ export default async function WorkPlanDetailPage({ params, searchParams }: PageP
         </div>
       ) : null}
 
-      <div className="grid gap-3 md:grid-cols-5">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
         <Metric label="Статус" value={planStatusLabels[plan.status]} tone={statusTone(plan.status)} />
         <Metric label="Заявок" value={String(items.length)} />
         <Metric label="Виконавців" value={String(workerCount(items))} />
+        <Metric label="Очікує підтвердження" value={String(progress.waitingConfirmation)} tone="orange" />
+        <Metric label="Виконано" value={String(progress.done)} tone="green" />
+        <Metric label="Залишилось" value={String(progress.remaining)} />
         <Metric label="Створено" value={formatDate(plan.created_at)} />
         <Metric label="Надіслано" value={plan.sent_at ? formatDate(plan.sent_at) : "-"} />
       </div>
@@ -255,6 +272,11 @@ function DraftEditor({ plan }: { plan: WorkPlan }) {
 
 function PlanItemCard({ item, plan }: { item: WorkPlanItem; plan: WorkPlan }) {
   const ticket = item.ticket;
+  const completionNote = ticket?.status === "waiting_admin_confirmation"
+    ? `Позначено виконавцем: ${ticket.worker_completed_at ? formatDate(ticket.worker_completed_at) : "-"}`
+    : ticket?.status === "done"
+      ? "Підтверджено адміністратором"
+      : null;
   return (
     <div className={cn("grid gap-3 rounded-2xl border border-border bg-stone-950/30 p-3 text-sm md:grid-cols-[120px_1fr_130px_120px_160px] md:items-center md:rounded-lg")}>
       <div className="font-semibold text-orange-200">{ticket?.number ?? "-"}</div>
@@ -262,6 +284,7 @@ function PlanItemCard({ item, plan }: { item: WorkPlanItem; plan: WorkPlan }) {
         <div className="break-words font-medium text-stone-100">{ticket?.object?.name ?? "-"}</div>
         <div className="mt-1 line-clamp-2 break-words text-xs text-muted-foreground">{ticket?.title || ticket?.description || "-"}</div>
         <div className="mt-1 text-xs text-muted-foreground">{ticket?.category?.name ?? item.category ?? "-"}</div>
+        {completionNote ? <div className="mt-1 break-words text-xs font-medium text-orange-200">{completionNote}</div> : null}
       </div>
       <Badge tone={ticket?.priority === "high" || ticket?.priority === "critical" ? "orange" : "gray"}>{ticket?.priority ? priorityLabels[ticket.priority] : "-"}</Badge>
       <Badge tone="gray">{ticket?.status ? statusLabels[ticket.status] : "-"}</Badge>

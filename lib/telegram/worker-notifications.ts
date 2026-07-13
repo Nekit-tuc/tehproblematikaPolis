@@ -28,7 +28,7 @@ function createActionToken() {
   return randomBytes(9).toString("base64url");
 }
 
-async function createWorkerDoneToken(ticketId: string, workerId: string) {
+export async function createWorkerDoneToken(ticketId: string, workerId: string) {
   const supabase = createAdminClient();
 
   for (let attempt = 1; attempt <= 3; attempt += 1) {
