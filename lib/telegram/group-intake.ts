@@ -3,6 +3,7 @@ import { findResolvedCompanyObject, resolveObjectFromMessage, type ObjectResolve
 import { buildPendingReviewTicketDraft } from "@/lib/ai/ticket-builder";
 import { normalizeStoreText, type StoreMatchResult } from "@/lib/stores/match-store";
 import { loadMatcherObjectsFromSupabase } from "@/lib/stores/object-source";
+import { sendNewAiTicketPush } from "@/lib/push/send-push-notification";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { generateTicketNumber, isDuplicateTicketNumberError, TICKET_NUMBER_RETRY_LIMIT } from "@/lib/tickets/numbering";
 import { defaultTicketCategory } from "@/lib/ai/category-taxonomy";
@@ -69,6 +70,37 @@ async function requesterForTelegramUser(supabase: ReturnType<typeof createAdminC
     .limit(1)
     .maybeSingle();
   return (data as Profile | null) ?? null;
+}
+
+
+async function sendAiTicketPushSafely({
+  ticket,
+  workItem,
+  object,
+}: {
+  ticket: { id: string; number: string };
+  workItem: AiWorkItem;
+  object: CompanyObject;
+}) {
+  try {
+    const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 3500));
+    const result = await Promise.race([
+      sendNewAiTicketPush({
+        id: ticket.id,
+        title: workItem.title,
+        description: workItem.description,
+        objectName: object.name,
+      }),
+      timeout,
+    ]);
+    if (result === null) {
+      console.warn("[push] AI ticket push timed out", { ticketId: ticket.id });
+      return;
+    }
+    console.info("[push] AI ticket push finished", { ticketId: ticket.id, ...result });
+  } catch (error) {
+    console.error("[push] failed to send AI ticket push", { ticketId: ticket.id, error: error instanceof Error ? error.message : String(error) });
+  }
 }
 
 async function createPendingTicket({
@@ -166,6 +198,8 @@ async function createPendingTicket({
       recommended_department: workItem.recommendedDepartment,
     },
   });
+
+  await sendAiTicketPushSafely({ ticket, workItem, object });
 
   return ticket as { id: string; number: string };
 }

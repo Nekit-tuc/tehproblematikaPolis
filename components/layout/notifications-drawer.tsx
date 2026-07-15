@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { AlertTriangle, Bell, Bot, CheckCircle, ClipboardPlus, Send, Trash2, X } from "lucide-react";
+import { PushNotificationManager } from "@/components/push/push-notification-manager";
 import { Button } from "@/components/ui/button";
 import { cn, formatDate } from "@/lib/utils";
 import type { AppNotification } from "@/lib/supabase/notifications";
@@ -70,6 +71,7 @@ export function NotificationsDrawer({ notifications, count = 0 }: { notification
         </div>
         <div className="min-h-0 flex-1 overscroll-contain overflow-y-auto p-3 pb-6">
           <div className="space-y-2">
+            <PushNotificationManager />
             {notifications.length === 0 ? (
               <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.03] p-4 text-center text-[12px] text-zinc-400">
                 Нових сповіщень немає
