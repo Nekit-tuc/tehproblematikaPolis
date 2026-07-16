@@ -1,3 +1,4 @@
+import { sendWorkerCompletedPush } from "@/lib/push/send-push-notification";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { answerCallbackQuery, sendTelegramMessage, type TelegramCallbackQuery } from "@/lib/telegram/client";
 
@@ -14,12 +15,16 @@ type WorkerTicketAction = {
 type WorkerTicket = {
   id: string;
   number: string;
+  title?: string | null;
+  description?: string | null;
   status: string;
   assignee_worker_id?: string | null;
+  object?: { name?: string | null; address?: string | null } | { name?: string | null; address?: string | null }[] | null;
 };
 
 type WorkerRecord = {
   id: string;
+  name?: string | null;
   telegram_id?: string | null;
 };
 
@@ -30,6 +35,20 @@ function tokenPreview(token: string) {
 
 function logWorkerCallback(payload: Record<string, unknown>) {
   console.info("[worker-done-callback]", payload);
+}
+async function sendWorkerCompletedPushSafely(ticket: WorkerTicket, worker: WorkerRecord) {
+  try {
+    await Promise.race([
+      sendWorkerCompletedPush(ticket, worker),
+      new Promise((resolve) => setTimeout(resolve, 3000)),
+    ]);
+  } catch (error) {
+    console.error("[push] worker completed push failed", {
+      ticketId: ticket.id,
+      workerId: worker.id,
+      error: error instanceof Error ? error.message.slice(0, 240) : String(error).slice(0, 240),
+    });
+  }
 }
 
 export async function handleWorkerDoneCallback(callback: TelegramCallbackQuery) {
@@ -143,8 +162,8 @@ export async function handleWorkerDoneCallback(callback: TelegramCallbackQuery) 
   }
 
   const [{ data: ticketRow, error: ticketError }, { data: workerRow, error: workerError }] = await Promise.all([
-    supabase.from("tickets").select("id,number,status,assignee_worker_id").eq("id", ticketId).maybeSingle(),
-    supabase.from("workers").select("id,telegram_id").eq("id", workerId).maybeSingle(),
+    supabase.from("tickets").select("id,number,title,description,status,assignee_worker_id,object:objects(name,address)").eq("id", ticketId).maybeSingle(),
+    supabase.from("workers").select("id,name,telegram_id").eq("id", workerId).maybeSingle(),
   ]);
 
   const ticket = ticketRow as WorkerTicket | null;
@@ -285,6 +304,8 @@ export async function handleWorkerDoneCallback(callback: TelegramCallbackQuery) 
   if (callback.message?.chat.id) {
     await sendTelegramMessage(callback.message.chat.id, "Виконання зафіксовано. Очікується підтвердження адміністратора.");
   }
+
+  await sendWorkerCompletedPushSafely(ticket, worker);
 
   logWorkerCallback({
     handled: true,

@@ -23,6 +23,21 @@ type AiTicketPushInput = {
   description?: string | null;
   objectName?: string | null;
 };
+type Relation<T> = T | T[] | null | undefined;
+
+type WorkerCompletedPushTicket = {
+  id: string;
+  number?: string | null;
+  title?: string | null;
+  description?: string | null;
+  object?: Relation<{ name?: string | null; address?: string | null }>;
+  objectName?: string | null;
+};
+
+type WorkerCompletedPushWorker = {
+  id: string;
+  name?: string | null;
+};
 
 function pushConfigured() {
   return Boolean(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY && process.env.VAPID_SUBJECT);
@@ -58,6 +73,15 @@ function cleanText(value: string | null | undefined, fallback: string) {
 
 function truncate(value: string, max = 110) {
   return value.length > max ? `${value.slice(0, max - 1)}…` : value;
+}
+function firstRelation<T>(value: Relation<T>): T | null {
+  if (Array.isArray(value)) return value[0] ?? null;
+  return value ?? null;
+}
+
+function ticketObjectLabel(ticket: WorkerCompletedPushTicket) {
+  const object = firstRelation(ticket.object);
+  return cleanText(ticket.objectName || object?.name || object?.address, "Заявка");
 }
 
 async function updatePushSuccess(subscriptionId: string) {
@@ -182,6 +206,36 @@ export async function sendNewAiTicketPush(ticket: AiTicketPushInput) {
     url: "/ai-tickets",
     tag: "ai-ticket",
   });
+}
+
+export async function sendWorkerCompletedPush(ticket: WorkerCompletedPushTicket, worker?: WorkerCompletedPushWorker | null) {
+  const ticketNumber = cleanText(ticket.number, "Заявка");
+  const objectLabel = ticketObjectLabel(ticket);
+  const body = truncate(`${ticketNumber} · ${objectLabel} — очікує підтвердження`, 120);
+
+  try {
+    const result = await sendPushToAdmins({
+      title: "Роботу виконано",
+      body,
+      url: `/tickets/${ticket.id}`,
+      tag: `ticket-completed-${ticket.id}`,
+    });
+    console.info("[push] worker completed push result", {
+      ticketId: ticket.id,
+      workerId: worker?.id ?? null,
+      sent: result.sent,
+      failed: result.failed,
+      total: result.total,
+    });
+    return result;
+  } catch (error) {
+    console.error("[push] worker completed push failed", {
+      ticketId: ticket.id,
+      workerId: worker?.id ?? null,
+      error: safeErrorMessage(error),
+    });
+    return { sent: 0, failed: 1, total: 0 };
+  }
 }
 
 export function isPushConfigured() {
