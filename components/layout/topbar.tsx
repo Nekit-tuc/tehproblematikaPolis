@@ -1,7 +1,5 @@
-import { LogOut, Search } from "lucide-react";
-import { logoutAction } from "@/app/login/actions";
+import { Search } from "lucide-react";
 import { NotificationsDrawer } from "@/components/layout/notifications-drawer";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { roleLabels } from "@/lib/labels";
 import type { AppNotification } from "@/lib/supabase/notifications";
@@ -28,11 +26,6 @@ export function Topbar({
           <div className="text-sm font-medium">{profile.full_name}</div>
           <div className="text-xs text-muted-foreground">{roleLabels[profile.role]}</div>
         </div>
-        <form action={logoutAction}>
-          <Button variant="outline" size="icon" aria-label="Вийти">
-            <LogOut className="h-4 w-4" />
-          </Button>
-        </form>
       </div>
     </header>
   );

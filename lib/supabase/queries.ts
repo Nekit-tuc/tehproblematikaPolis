@@ -3,6 +3,7 @@ import { hasSupabaseEnv, missingSupabaseMessage } from "@/lib/supabase/env";
 import { getCurrentProfile } from "@/lib/auth/server";
 import { canViewTicket } from "@/lib/auth/permissions";
 import { measureAsync } from "@/lib/performance";
+import { getLatestArchivedWeeklyPeriod } from "@/lib/supabase/weekly-control";
 import type { Category, CompanyObject, Profile, TicketCommentWithAuthor, TicketHistory, TicketPhotoWithUrl, TicketWithRelations } from "@/types/domain";
 
 export type QueryResult<T> = { data: T; error: string | null };
@@ -238,6 +239,300 @@ export async function getDashboardStats(): Promise<QueryResult<{
     error,
   };
 }
+
+
+export type WeeklyDashboardDay = {
+  iso: string;
+  dayLabel: string;
+  dateLabel: string;
+  count: number;
+  hasProblematic: boolean;
+};
+
+export type WeeklyDashboardPlanCategory = {
+  category: string;
+  tickets: number;
+  workers: number;
+};
+
+export type WeeklyDashboardHotTicket = Pick<TicketWithRelations, "id" | "number" | "title" | "status" | "priority" | "created_at" | "object" | "category">;
+
+export type WeeklyDashboardCommandCenter = {
+  period: {
+    weekNumber: number;
+    monthLabel: string;
+    startIso: string;
+    endIso: string;
+    previousStartIso: string;
+    previousEndIso: string;
+    nextStartIso: string;
+    nextEndIso: string;
+  };
+  kpi: {
+    currentWeekTicketCount: number;
+    inWorkCount: number;
+    completedThisWeekCount: number;
+    problematicCount: number;
+    pendingAiCount: number;
+    waitingAdminConfirmationCount: number;
+  };
+  calendarDays: WeeklyDashboardDay[];
+  highPriorityTickets: WeeklyDashboardHotTicket[];
+  highPriorityTotal: number;
+  previousWeekSummary: {
+    created: number;
+    completed: number;
+    carriedOver: number;
+    periodId: string | null;
+  };
+  problemSummary: {
+    repeated: number;
+    carriedOver: number;
+    overdue: number;
+    waitingConfirmation: number;
+  };
+  dailyCounts: WeeklyDashboardDay[];
+  nextPlanSummary: {
+    totalTickets: number;
+    totalWorkers: number;
+    categories: WeeklyDashboardPlanCategory[];
+    hasPlan: boolean;
+  };
+};
+
+const inactiveTicketStatuses = ["done", "cancelled", "rejected"];
+const inWorkTicketStatuses = ["assigned", "in_progress", "waiting", "waiting_admin_confirmation"];
+const dayLabels = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Нд"];
+const monthFormatter = new Intl.DateTimeFormat("uk-UA", { month: "long", year: "numeric" });
+
+function startOfWeek(date: Date) {
+  const value = new Date(date);
+  const day = value.getDay() || 7;
+  value.setHours(0, 0, 0, 0);
+  value.setDate(value.getDate() - day + 1);
+  return value;
+}
+
+function addDays(date: Date, days: number) {
+  const value = new Date(date);
+  value.setDate(value.getDate() + days);
+  return value;
+}
+
+function endOfDay(date: Date) {
+  const value = new Date(date);
+  value.setHours(23, 59, 59, 999);
+  return value;
+}
+
+function isoDate(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function weekNumber(date: Date) {
+  const target = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNumber = target.getUTCDay() || 7;
+  target.setUTCDate(target.getUTCDate() + 4 - dayNumber);
+  const yearStart = new Date(Date.UTC(target.getUTCFullYear(), 0, 1));
+  return Math.ceil((((target.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+}
+
+function isInactiveStatus(status: string | null | undefined) {
+  return inactiveTicketStatuses.includes(status ?? "");
+}
+
+function isInWorkStatus(status: string | null | undefined) {
+  return inWorkTicketStatuses.includes(status ?? "");
+}
+
+function isHighPriority(priority: string | null | undefined) {
+  return priority === "critical" || priority === "high";
+}
+
+function priorityWeight(priority: string | null | undefined) {
+  if (priority === "critical") return 4;
+  if (priority === "high") return 3;
+  if (priority === "medium") return 2;
+  return 1;
+}
+
+function daysAgo(days: number) {
+  const value = new Date();
+  value.setDate(value.getDate() - days);
+  return value;
+}
+
+function plannedCategoryName(row: any) {
+  const ticket = Array.isArray(row.ticket) ? row.ticket[0] : row.ticket;
+  const category = Array.isArray(ticket?.category) ? ticket.category[0] : ticket?.category;
+  return row.category || category?.name || "Без категорії";
+}
+
+function plannedPlan(row: any) {
+  return Array.isArray(row.work_plan) ? row.work_plan[0] : row.work_plan;
+}
+
+async function queryTicketsForProfile(supabase: Awaited<ReturnType<typeof createClient>>, profile: Profile, label: string, build: (query: any) => any) {
+  let query = supabase.from("tickets").select(ticketListSelect);
+  query = applyTicketAccess(query, profile);
+  query = build(query);
+  const { data, error } = await measureAsync(label, () => query);
+  return { data: (data ?? []) as unknown as TicketWithRelations[], error: error?.message ?? null };
+}
+
+export async function getWeeklyDashboardCommandCenter(): Promise<QueryResult<WeeklyDashboardCommandCenter>> {
+  const empty: WeeklyDashboardCommandCenter = {
+    period: {
+      weekNumber: weekNumber(new Date()),
+      monthLabel: monthFormatter.format(new Date()),
+      startIso: isoDate(startOfWeek(new Date())),
+      endIso: isoDate(addDays(startOfWeek(new Date()), 6)),
+      previousStartIso: isoDate(addDays(startOfWeek(new Date()), -7)),
+      previousEndIso: isoDate(addDays(startOfWeek(new Date()), -1)),
+      nextStartIso: isoDate(addDays(startOfWeek(new Date()), 7)),
+      nextEndIso: isoDate(addDays(startOfWeek(new Date()), 13)),
+    },
+    kpi: { currentWeekTicketCount: 0, inWorkCount: 0, completedThisWeekCount: 0, problematicCount: 0, pendingAiCount: 0, waitingAdminConfirmationCount: 0 },
+    calendarDays: [],
+    highPriorityTickets: [],
+    highPriorityTotal: 0,
+    previousWeekSummary: { created: 0, completed: 0, carriedOver: 0, periodId: null },
+    problemSummary: { repeated: 0, carriedOver: 0, overdue: 0, waitingConfirmation: 0 },
+    dailyCounts: [],
+    nextPlanSummary: { totalTickets: 0, totalWorkers: 0, categories: [], hasPlan: false },
+  };
+
+  if (!hasSupabaseEnv()) return emptyWithError(empty);
+  const profile = await getCurrentProfile();
+  if (!profile) return emptyWithError(empty);
+
+  const supabase = await createClient();
+  const now = new Date();
+  const weekStart = startOfWeek(now);
+  const weekEnd = endOfDay(addDays(weekStart, 6));
+  const previousWeekStart = addDays(weekStart, -7);
+  const previousWeekEnd = endOfDay(addDays(weekStart, -1));
+  const nextWeekStart = addDays(weekStart, 7);
+  const nextWeekEnd = endOfDay(addDays(weekStart, 13));
+  const overdueBoundary = daysAgo(7);
+
+  const [currentWeek, previousWeek, activeTickets, completedByDate, planItems] = await Promise.all([
+    queryTicketsForProfile(supabase, profile, "dashboard-weekly:current_week", (query) => query.gte("created_at", weekStart.toISOString()).lte("created_at", weekEnd.toISOString()).order("created_at", { ascending: false }).limit(500)),
+    queryTicketsForProfile(supabase, profile, "dashboard-weekly:previous_week", (query) => query.gte("created_at", previousWeekStart.toISOString()).lte("created_at", previousWeekEnd.toISOString()).order("created_at", { ascending: false }).limit(500)),
+    queryTicketsForProfile(supabase, profile, "dashboard-weekly:active", (query) => query.not("status", "in", "(done,cancelled,rejected)").order("created_at", { ascending: false }).limit(500)),
+    queryTicketsForProfile(supabase, profile, "dashboard-weekly:completed", (query) => query.eq("status", "done").gte("completed_at", weekStart.toISOString()).lte("completed_at", weekEnd.toISOString()).order("completed_at", { ascending: false }).limit(500)),
+    measureAsync("dashboard-weekly:plan_items", () => supabase
+      .from("work_plan_items")
+      .select("ticket_id, worker_id, category, ticket:tickets(status,category:categories(name)), work_plan:work_plans!inner(id,title,status,period_start,period_end)")
+      .in("work_plan.status", ["draft", "sent", "partially_done"])
+      .limit(700)),
+  ]);
+
+  const currentTickets = currentWeek.data;
+  const previousTickets = previousWeek.data;
+  const active = activeTickets.data;
+  const completedIds = new Set<string>();
+  for (const ticket of completedByDate.data) completedIds.add(ticket.id);
+  for (const ticket of currentTickets) if (ticket.status === "done") completedIds.add(ticket.id);
+
+  const activePlanRows = ((planItems.data ?? []) as any[]).filter((row) => {
+    const plan = plannedPlan(row);
+    return plan && ["draft", "sent", "partially_done"].includes(plan.status);
+  });
+  const plannedTicketIds = new Set(activePlanRows.map((row) => row.ticket_id).filter(Boolean));
+  const inWorkIds = new Set(active.filter((ticket) => isInWorkStatus(ticket.status)).map((ticket) => ticket.id));
+  for (const ticketId of plannedTicketIds) inWorkIds.add(ticketId);
+
+  const overdueTickets = active.filter((ticket) => new Date(ticket.created_at) < overdueBoundary);
+  const waitingConfirmation = active.filter((ticket) => ticket.status === "waiting_admin_confirmation");
+  const problematicCount = new Set([...overdueTickets.map((ticket) => ticket.id), ...waitingConfirmation.map((ticket) => ticket.id)]).size;
+  const hotTickets = active
+    .filter((ticket) => isHighPriority(ticket.priority))
+    .sort((a, b) => priorityWeight(b.priority) - priorityWeight(a.priority) || new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+  const calendarDays = Array.from({ length: 7 }, (_, index) => {
+    const date = addDays(weekStart, index);
+    const iso = isoDate(date);
+    const ticketsForDay = currentTickets.filter((ticket) => isoDate(new Date(ticket.created_at)) === iso);
+    return {
+      iso,
+      dayLabel: dayLabels[index],
+      dateLabel: String(date.getDate()),
+      count: ticketsForDay.length,
+      hasProblematic: ticketsForDay.some((ticket) => isHighPriority(ticket.priority) || ticket.status === "waiting_admin_confirmation"),
+    };
+  });
+
+  const nextWeekPlanRows = activePlanRows.filter((row) => {
+    const plan = plannedPlan(row);
+    if (!plan?.period_start) return false;
+    const start = new Date(plan.period_start);
+    return start >= nextWeekStart && start <= nextWeekEnd;
+  });
+  const effectivePlanRows = nextWeekPlanRows.length > 0 ? nextWeekPlanRows : activePlanRows.filter((row) => plannedPlan(row)?.status === "draft");
+  const categoryMap = new Map<string, { tickets: Set<string>; workers: Set<string> }>();
+  for (const row of effectivePlanRows) {
+    const category = plannedCategoryName(row);
+    const group = categoryMap.get(category) ?? { tickets: new Set<string>(), workers: new Set<string>() };
+    if (row.ticket_id) group.tickets.add(row.ticket_id);
+    if (row.worker_id) group.workers.add(row.worker_id);
+    categoryMap.set(category, group);
+  }
+  const nextPlanCategories = Array.from(categoryMap.entries())
+    .map(([category, value]) => ({ category, tickets: value.tickets.size, workers: value.workers.size }))
+    .sort((a, b) => b.tickets - a.tickets)
+    .slice(0, 4);
+
+  const latestArchive = await getLatestArchivedWeeklyPeriod();
+  const archivedSummary = latestArchive.data?.summary_json as { totalCreated?: number; totalCompleted?: number; totalCarriedOver?: number; totalUnresolved?: number } | undefined;
+  const error = currentWeek.error ?? previousWeek.error ?? activeTickets.error ?? completedByDate.error ?? planItems.error?.message ?? null;
+  return {
+    data: {
+      period: {
+        weekNumber: weekNumber(now),
+        monthLabel: monthFormatter.format(now),
+        startIso: isoDate(weekStart),
+        endIso: isoDate(weekEnd),
+        previousStartIso: isoDate(previousWeekStart),
+        previousEndIso: isoDate(previousWeekEnd),
+        nextStartIso: isoDate(nextWeekStart),
+        nextEndIso: isoDate(nextWeekEnd),
+      },
+      kpi: {
+        currentWeekTicketCount: currentTickets.length,
+        inWorkCount: inWorkIds.size,
+        completedThisWeekCount: completedIds.size,
+        problematicCount,
+        pendingAiCount: active.filter((ticket) => ticket.status === "pending_review").length,
+        waitingAdminConfirmationCount: waitingConfirmation.length,
+      },
+      calendarDays,
+      highPriorityTickets: hotTickets.slice(0, 3),
+      highPriorityTotal: hotTickets.length,
+      previousWeekSummary: {
+        created: archivedSummary?.totalCreated ?? previousTickets.length,
+        completed: archivedSummary?.totalCompleted ?? previousTickets.filter((ticket) => ticket.status === "done").length,
+        carriedOver: archivedSummary?.totalCarriedOver ?? archivedSummary?.totalUnresolved ?? active.filter((ticket) => new Date(ticket.created_at) < weekStart).length,
+        periodId: latestArchive.data?.id ?? null,
+      },
+      problemSummary: {
+        repeated: 0,
+        carriedOver: active.filter((ticket) => new Date(ticket.created_at) < weekStart).length,
+        overdue: overdueTickets.length,
+        waitingConfirmation: waitingConfirmation.length,
+      },
+      dailyCounts: calendarDays,
+      nextPlanSummary: {
+        totalTickets: new Set(effectivePlanRows.map((row) => row.ticket_id).filter(Boolean)).size,
+        totalWorkers: new Set(effectivePlanRows.map((row) => row.worker_id).filter(Boolean)).size,
+        categories: nextPlanCategories,
+        hasPlan: effectivePlanRows.length > 0,
+      },
+    },
+    error,
+  };
+}
+
 
 export async function getTicket(id: string): Promise<QueryResult<TicketWithRelations | null>> {
   if (!hasSupabaseEnv()) return { data: null, error: missingSupabaseMessage };

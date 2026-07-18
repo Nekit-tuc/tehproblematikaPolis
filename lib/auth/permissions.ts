@@ -8,6 +8,7 @@ export function canAccessRoute(role: UserRole, pathname: string) {
   if (pathname.startsWith("/users")) return role === "management";
   if (pathname.startsWith("/reports")) return role === "management" || role === "tech_manager";
   if (pathname.startsWith("/work-planning")) return role === "management" || role === "tech_manager";
+  if (pathname.startsWith("/weekly-control")) return role === "management" || role === "tech_manager";
   if (pathname.startsWith("/workers")) return role === "management" || role === "tech_manager";
   if (pathname.startsWith("/ai-test")) return role === "management" || role === "tech_manager";
   if (pathname.startsWith("/ai-tickets")) return role === "management" || role === "tech_manager";

@@ -1,4 +1,6 @@
 import type React from "react";
+import { LogOut } from "lucide-react";
+import { logoutAction } from "@/app/login/actions";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -85,6 +87,26 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
               </TBody>
             </Table>
           )}
+        </CardContent>
+      </Card>
+
+      <Card className="rounded-[17px] border-red-500/20 bg-red-500/[0.05] md:rounded-[17px]">
+        <CardHeader className="space-y-1 pb-3">
+          <div className="flex items-center gap-2">
+            <LogOut className="h-4 w-4 text-red-300" />
+            <CardTitle className="text-[14px] text-stone-100">Сесія</CardTitle>
+          </div>
+          <CardDescription className="max-w-full whitespace-normal break-words text-[11px] leading-relaxed text-stone-400">
+            Вийти з поточного акаунта на цьому пристрої. Після виходу потрібно буде знову увійти в систему.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form action={logoutAction}>
+            <Button type="submit" variant="destructive" size="sm" className="h-9 rounded-2xl px-3 text-[11px]">
+              <LogOut className="h-3.5 w-3.5" />
+              Вийти з акаунта
+            </Button>
+          </form>
         </CardContent>
       </Card>
     </div>

@@ -3,8 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type React from "react";
-import { Bot, BriefcaseBusiness, Building2, CalendarDays, ClipboardList, FileSpreadsheet, Home, LogOut, Settings, Users, X } from "lucide-react";
-import { logoutAction } from "@/app/login/actions";
+import { Bot, BriefcaseBusiness, Building2, CalendarDays, ClipboardList, FileSpreadsheet, Home, Settings, Users, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { roleLabels } from "@/lib/labels";
 import { cn } from "@/lib/utils";
@@ -16,6 +15,7 @@ const nav = [
   { href: "/objects", label: "Об'єкти", icon: Building2, roles: ["admin", "management", "tech_manager"] },
   { href: "/workers", label: "Виконавці", icon: BriefcaseBusiness, roles: ["admin", "management", "tech_manager"] },
   { href: "/work-planning", label: "Планування", icon: CalendarDays, roles: ["admin", "management", "tech_manager"] },
+  { href: "/weekly-control", label: "Тижневий контроль", icon: ClipboardList, roles: ["admin", "management", "tech_manager"] },
   { href: "/users", label: "Користувачі", icon: Users, roles: ["admin", "management"] },
   { href: "/reports", label: "Excel-звіти", icon: FileSpreadsheet, roles: ["admin", "management", "tech_manager"] },
   { href: "/ai-test", label: "AI-тест", icon: Bot, roles: ["admin", "management", "tech_manager"] },
@@ -78,13 +78,6 @@ export function MobileDrawer({
             );
           })}
         </nav>
-
-        <form action={logoutAction} className="absolute inset-x-4 bottom-5">
-          <Button variant="outline" className="h-12 w-full rounded-2xl border-white/10 bg-white/[0.03]">
-            <LogOut className="h-4 w-4" />
-            Вийти
-          </Button>
-        </form>
       </aside>
     </div>
   );
