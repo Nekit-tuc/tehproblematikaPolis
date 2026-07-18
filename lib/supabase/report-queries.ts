@@ -1,4 +1,5 @@
 import { getCategories, getObjects, getTickets, type QueryResult } from "@/lib/supabase/queries";
+import { createClient } from "@/lib/supabase/server";
 import { getWorkers } from "@/lib/supabase/worker-queries";
 import { getWeeklyPeriodDetails, type WeeklyPeriodDetails, type WeeklyPeriodTicket } from "@/lib/supabase/weekly-control";
 import type { Category, CompanyObject, TicketPriority, TicketStatus, TicketWithRelations, WorkerWithCategories } from "@/types/domain";
@@ -112,6 +113,50 @@ export type ReportsDashboardData = {
 
 const inactiveStatuses = new Set(["done", "cancelled", "rejected"]);
 
+type PlannedTicketAssignment = {
+  ticket: TicketWithRelations;
+  workerId: string | null;
+  workerName: string | null;
+};
+
+const plannedTicketSelect = `
+  ticket_id,
+  worker_id,
+  worker:workers(id,name),
+  ticket:tickets!inner(
+    id,
+    number,
+    title,
+    description,
+    status,
+    priority,
+    object_id,
+    category_id,
+    created_by,
+    assigned_to,
+    assignee_worker_id,
+    due_at,
+    completed_at,
+    assigned_at,
+    sent_to_worker_at,
+    worker_completed_at,
+    admin_confirmed_at,
+    admin_rating,
+    admin_feedback,
+    source,
+    telegram_source_group_id,
+    ai_confidence,
+    recommended_department,
+    created_at,
+    updated_at,
+    object:objects(id, name, type, object_number, city, district, address, is_active, created_at),
+    category:categories(id, name, description, is_active, created_at),
+    assignee:profiles!tickets_assigned_to_fkey(id, full_name, email, role, object_id, default_object_id, telegram_id, telegram_username, phone, is_active, created_at),
+    worker:workers(id, name, phone, telegram_username, telegram_id, is_active, notes, created_at, updated_at)
+  ),
+  work_plan:work_plans!inner(id,status,period_start,period_end)
+`;
+
 function pad(value: number) {
   return String(value).padStart(2, "0");
 }
@@ -208,7 +253,7 @@ function ticketCreatedInRange(ticket: TicketWithRelations, from: Date, to: Date)
 }
 
 function completionDate(ticket: TicketWithRelations) {
-  return ticket.completed_at ?? ticket.admin_confirmed_at ?? ticket.worker_completed_at ?? (ticket.status === "done" ? ticket.updated_at : null);
+  return ticket.admin_confirmed_at ?? ticket.worker_completed_at ?? ticket.completed_at ?? (ticket.status === "done" ? ticket.updated_at : null);
 }
 
 function ticketCompletedInRange(ticket: TicketWithRelations, from: Date, to: Date) {
@@ -216,6 +261,63 @@ function ticketCompletedInRange(ticket: TicketWithRelations, from: Date, to: Dat
   if (!value || ticket.status !== "done") return false;
   const date = new Date(value);
   return date >= from && date <= to;
+}
+
+function uniqueTickets(tickets: TicketWithRelations[]) {
+  const map = new Map<string, TicketWithRelations>();
+  for (const ticket of tickets) if (ticket.id) map.set(ticket.id, ticket);
+  return Array.from(map.values());
+}
+
+function plannedWorkerName(row: unknown) {
+  const value = (row as { worker?: { name?: string | null } | Array<{ name?: string | null }> | null }).worker;
+  if (Array.isArray(value)) return value[0]?.name ?? null;
+  return value?.name ?? null;
+}
+
+function plannedTicket(row: unknown) {
+  const value = (row as { ticket?: TicketWithRelations | TicketWithRelations[] | null }).ticket;
+  return Array.isArray(value) ? value[0] ?? null : value ?? null;
+}
+
+async function getPlannedAssignmentsForPeriod(from: string, to: string): Promise<QueryResult<PlannedTicketAssignment[]>> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("work_plan_items")
+    .select(plannedTicketSelect)
+    .lte("work_plan.period_start", to)
+    .gte("work_plan.period_end", from)
+    .limit(2000);
+  const rows = ((data ?? []) as unknown[]).map((row) => {
+    const ticket = plannedTicket(row);
+    if (!ticket) return null;
+    return {
+      ticket,
+      workerId: (row as { worker_id?: string | null }).worker_id ?? ticket.assignee_worker_id ?? null,
+      workerName: plannedWorkerName(row) ?? ticket.worker?.name ?? null,
+    } satisfies PlannedTicketAssignment;
+  }).filter((row): row is PlannedTicketAssignment => Boolean(row));
+  return { data: rows, error: error?.message ?? null };
+}
+
+function plannedWorkerMap(assignments: PlannedTicketAssignment[]) {
+  const map = new Map<string, Set<string>>();
+  for (const assignment of assignments) {
+    if (!assignment.workerId) continue;
+    const set = map.get(assignment.ticket.id) ?? new Set<string>();
+    set.add(assignment.workerId);
+    map.set(assignment.ticket.id, set);
+  }
+  return map;
+}
+
+function hydratePlannedWorkerNames(tickets: TicketWithRelations[], assignments: PlannedTicketAssignment[]) {
+  const names = new Map(assignments.filter((item) => item.workerId && item.workerName).map((item) => [item.workerId!, item.workerName!]));
+  return tickets.map((ticket) => {
+    if (ticket.worker?.name || !ticket.assignee_worker_id) return ticket;
+    const plannedName = names.get(ticket.assignee_worker_id);
+    return plannedName ? { ...ticket, worker: { id: ticket.assignee_worker_id, name: plannedName } as TicketWithRelations["worker"] } : ticket;
+  });
 }
 
 function isUnresolved(ticket: TicketWithRelations) {
@@ -323,10 +425,10 @@ function mostFrequentCategory(tickets: TicketWithRelations[]) {
   return topCategories(tickets)[0]?.name ?? null;
 }
 
-function buildObjectRows(objects: CompanyObject[], tickets: TicketWithRelations[]): ObjectReportRow[] {
+function buildObjectRows(objects: CompanyObject[], tickets: TicketWithRelations[], completedTicketIds?: Set<string>): ObjectReportRow[] {
   const rows = objects.map((object) => {
     const scoped = tickets.filter((ticket) => ticket.object_id === object.id);
-    const completed = scoped.filter((ticket) => ticket.status === "done");
+    const completed = scoped.filter((ticket) => completedTicketIds ? completedTicketIds.has(ticket.id) : ticket.status === "done");
     const unresolved = scoped.filter(isUnresolved);
     const problematic = scoped.filter(isProblematic);
     const completionDays = completed.map((ticket) => daysBetween(ticket.created_at, completionDate(ticket))).filter((value): value is number => typeof value === "number");
@@ -351,14 +453,14 @@ function initials(name: string) {
   return name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "?";
 }
 
-function ticketBelongsToWorker(ticket: TicketWithRelations, worker: WorkerWithCategories) {
-  return ticket.assignee_worker_id === worker.id;
+function ticketBelongsToWorker(ticket: TicketWithRelations, worker: WorkerWithCategories, plannedByTicket?: Map<string, Set<string>>) {
+  return ticket.assignee_worker_id === worker.id || Boolean(plannedByTicket?.get(ticket.id)?.has(worker.id));
 }
 
-function buildWorkerRows(workers: WorkerWithCategories[], tickets: TicketWithRelations[]): WorkerReportRow[] {
+function buildWorkerRows(workers: WorkerWithCategories[], tickets: TicketWithRelations[], completedTicketIds?: Set<string>, plannedByTicket?: Map<string, Set<string>>): WorkerReportRow[] {
   return workers.map((worker) => {
-    const scoped = tickets.filter((ticket) => ticketBelongsToWorker(ticket, worker));
-    const completed = scoped.filter((ticket) => ticket.status === "done");
+    const scoped = tickets.filter((ticket) => ticketBelongsToWorker(ticket, worker, plannedByTicket));
+    const completed = scoped.filter((ticket) => completedTicketIds ? completedTicketIds.has(ticket.id) : ticket.status === "done");
     const unresolved = scoped.filter(isUnresolved);
     const waitingConfirmation = scoped.filter((ticket) => ticket.status === "waiting_admin_confirmation");
     const completionDays = completed.map((ticket) => daysBetween(ticket.created_at, completionDate(ticket))).filter((value): value is number => typeof value === "number");
@@ -379,10 +481,10 @@ function buildWorkerRows(workers: WorkerWithCategories[], tickets: TicketWithRel
   }).sort((a, b) => b.completed - a.completed || b.assigned - a.assigned || a.name.localeCompare(b.name, "uk-UA"));
 }
 
-function buildCategoryRows(categories: Category[], tickets: TicketWithRelations[]): CategoryReportRow[] {
+function buildCategoryRows(categories: Category[], tickets: TicketWithRelations[], completedTicketIds?: Set<string>): CategoryReportRow[] {
   return categories.map((category) => {
     const scoped = tickets.filter((ticket) => ticket.category_id === category.id);
-    const completed = scoped.filter((ticket) => ticket.status === "done");
+    const completed = scoped.filter((ticket) => completedTicketIds ? completedTicketIds.has(ticket.id) : ticket.status === "done");
     const unresolved = scoped.filter(isUnresolved);
     const problematic = scoped.filter(isProblematic);
     const objects = new Map<string, ReportsTopRow>();
@@ -623,34 +725,42 @@ export async function getReportsDashboardData(periodParam?: string, customFrom?:
   const periodRange = getReportsPeriodRange(periodParam, customFrom, customTo);
   const fromDate = atStartOfDay(new Date(`${periodRange.from}T00:00:00`));
   const toDate = atEndOfDay(new Date(`${periodRange.to}T00:00:00`));
-  const [ticketsResult, objectsResult, categoriesResult, workersResult] = await Promise.all([
+  const [ticketsResult, objectsResult, categoriesResult, workersResult, plannedResult] = await Promise.all([
     getTickets({ limit: null }),
     getObjects(),
     getCategories(),
     getWorkers(),
+    getPlannedAssignmentsForPeriod(periodRange.from, periodRange.to),
   ]);
 
   const tickets = ticketsResult.data;
   const createdInPeriod = tickets.filter((ticket) => ticketCreatedInRange(ticket, fromDate, toDate));
   const completedInPeriod = tickets.filter((ticket) => ticketCompletedInRange(ticket, fromDate, toDate));
-  const unresolvedInPeriod = createdInPeriod.filter(isUnresolved);
-  const waitingConfirmation = createdInPeriod.filter((ticket) => ticket.status === "waiting_admin_confirmation");
-  const problematicInPeriod = createdInPeriod.filter(isProblematic);
-  const categoryTopRows = topCategories(createdInPeriod);
-  const objectTopRows = topObjects(createdInPeriod);
-  const workerTopRows = topWorkers(createdInPeriod);
-  const completionRate = percent(completedInPeriod.length, createdInPeriod.length);
+  const plannedAssignments = plannedResult.data;
+  const plannedTickets = hydratePlannedWorkerNames(plannedAssignments.map((assignment) => assignment.ticket), plannedAssignments);
+  const periodTickets = uniqueTickets([...createdInPeriod, ...completedInPeriod, ...plannedTickets]);
+  const completedTicketIds = new Set(completedInPeriod.map((ticket) => ticket.id));
+  const plannedTicketIds = new Set(plannedTickets.map((ticket) => ticket.id));
+  const plannedByTicket = plannedWorkerMap(plannedAssignments);
+  const unresolvedInPeriod = periodTickets.filter((ticket) => (ticketCreatedInRange(ticket, fromDate, toDate) || plannedTicketIds.has(ticket.id)) && isUnresolved(ticket));
+  const waitingConfirmation = periodTickets.filter((ticket) => ticket.status === "waiting_admin_confirmation" && (plannedTicketIds.has(ticket.id) || ticketCreatedInRange(ticket, fromDate, toDate) || (ticket.worker_completed_at ? new Date(ticket.worker_completed_at) >= fromDate && new Date(ticket.worker_completed_at) <= toDate : false)));
+  const problematicInPeriod = periodTickets.filter((ticket) => isProblematic(ticket) || (plannedTicketIds.has(ticket.id) && isUnresolved(ticket)));
+  const categoryTopRows = topCategories(periodTickets);
+  const objectTopRows = topObjects(problematicInPeriod.length ? problematicInPeriod : periodTickets);
+  const workerRows = buildWorkerRows(workersResult.data, periodTickets, completedTicketIds, plannedByTicket);
+  const workerTopRows = workerRows.filter((row) => row.assigned > 0).slice(0, 5).map((row) => ({ id: row.id, name: row.name, count: row.assigned, completed: row.completed, unresolved: row.unresolved }));
+  const completionRate = percent(completedInPeriod.length, periodTickets.length);
   const exportParams = new URLSearchParams({ from: periodRange.from, to: periodRange.to });
   const highUnresolved = unresolvedInPeriod.filter((ticket) => ticket.priority === "critical" || ticket.priority === "high").length;
 
   const completedRows = completedInPeriod.map(toTicketRow);
-  const unresolvedRows = createdInPeriod.filter(isUnresolved).map(toTicketRow);
+  const unresolvedRows = unresolvedInPeriod.map(toTicketRow);
   const waitingRows = waitingConfirmation.map(toTicketRow);
 
   return {
     data: {
       periodRange,
-      totalTickets: createdInPeriod.length,
+      totalTickets: periodTickets.length,
       completedTickets: completedInPeriod.length,
       unresolvedTickets: unresolvedInPeriod.length,
       problematicTickets: problematicInPeriod.length,
@@ -659,23 +769,23 @@ export async function getReportsDashboardData(periodParam?: string, customFrom?:
       topProblemObjects: objectTopRows,
       topCategories: categoryTopRows,
       topWorkers: workerTopRows,
-      weeklyTrend: buildTrend(tickets, fromDate, toDate),
-      directorSummaryText: buildDirectorSummary(createdInPeriod.length, completedInPeriod.length, unresolvedInPeriod.length, categoryTopRows[0], objectTopRows[0]),
+      weeklyTrend: buildTrend(periodTickets, fromDate, toDate),
+      directorSummaryText: buildDirectorSummary(periodTickets.length, completedInPeriod.length, unresolvedInPeriod.length, categoryTopRows[0], objectTopRows[0]),
       directorRecommendations: buildDirectorRecommendations(completionRate, problematicInPeriod.length, unresolvedInPeriod.length, highUnresolved),
       objectCount: objectsResult.data.length,
       workerCount: workersResult.data.length,
       categoryCount: categoriesResult.data.length,
       exportHref: `/reports/export?${exportParams.toString()}`,
       tickets: {
-        all: createdInPeriod.map(toTicketRow),
+        all: periodTickets.map(toTicketRow),
         completed: completedRows,
         unresolved: unresolvedRows,
         waitingConfirmation: waitingRows,
       },
-      objectRows: buildObjectRows(objectsResult.data, createdInPeriod),
-      workerRows: buildWorkerRows(workersResult.data, createdInPeriod),
-      categoryRows: buildCategoryRows(categoriesResult.data, createdInPeriod),
+      objectRows: buildObjectRows(objectsResult.data, periodTickets, completedTicketIds),
+      workerRows,
+      categoryRows: buildCategoryRows(categoriesResult.data, periodTickets, completedTicketIds),
     },
-    error: ticketsResult.error ?? objectsResult.error ?? categoriesResult.error ?? workersResult.error,
+    error: ticketsResult.error ?? objectsResult.error ?? categoriesResult.error ?? workersResult.error ?? plannedResult.error,
   };
 }
