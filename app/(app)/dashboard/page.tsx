@@ -240,17 +240,28 @@ function NextPlanCard({ categories, totalTickets, totalWorkers, hasPlan }: { cat
 }
 
 function PreviousWeekCard({ startIso, endIso, created, completed, carriedOver, periodId }: { startIso: string; endIso: string; created: number; completed: number; carriedOver: number; periodId: string | null }) {
+  const archiveHref = periodId ? `/weekly-control/${periodId}` : "/weekly-control";
+  const weeklyReportHref = periodId ? `/reports/weekly?periodId=${periodId}` : "/reports/weekly?period=previous_week";
+  const directorReportHref = periodId ? `/reports/director?periodId=${periodId}` : "/reports/director?period=previous_week";
   return (
-    <Link href={periodId ? `/weekly-control/${periodId}` : "/weekly-control"} className={glassCardClass("block p-3 active:bg-white/[0.05]")}>
-      <CardTitleLine icon={ClipboardList} title="Архів попереднього тижня" tone="text-stone-300" />
+    <article className={glassCardClass("p-3") }>
+      <CardTitleLine icon={ClipboardList} title="\u0410\u0440\u0445\u0456\u0432 \u043F\u043E\u043F\u0435\u0440\u0435\u0434\u043D\u044C\u043E\u0433\u043E \u0442\u0438\u0436\u043D\u044F" tone="text-stone-300" />
       <p className="mt-1 text-[10px] text-stone-500">{formatDate(startIso)} - {formatDate(endIso)}</p>
       <div className="mt-3 grid grid-cols-3 gap-2">
-        <MiniStat label="Створено" value={created} />
-        <MiniStat label="Виконано" value={completed} />
-        <MiniStat label="Перенесено" value={carriedOver} />
+        <MiniStat label="\u0421\u0442\u0432\u043E\u0440\u0435\u043D\u043E" value={created} />
+        <MiniStat label="\u0412\u0438\u043A\u043E\u043D\u0430\u043D\u043E" value={completed} />
+        <MiniStat label="\u041F\u0435\u0440\u0435\u043D\u0435\u0441\u0435\u043D\u043E" value={carriedOver} />
       </div>
-      <CardFooterText>Звіт переглянути</CardFooterText>
-    </Link>
+      <div className="mt-3 grid gap-2">
+        <Link href={archiveHref} className="flex items-center justify-between rounded-2xl bg-black/20 px-2.5 py-2 text-[11px] font-medium text-stone-200 active:bg-white/[0.05]">
+          <span>{"\u0412\u0456\u0434\u043A\u0440\u0438\u0442\u0438 \u0430\u0440\u0445\u0456\u0432"}</span><ArrowRight className="h-3.5 w-3.5" />
+        </Link>
+        <div className="grid grid-cols-2 gap-2">
+          <Link href={weeklyReportHref} className="rounded-2xl border border-white/[0.08] bg-white/[0.035] px-2.5 py-2 text-center text-[10px] font-medium text-orange-200 active:bg-white/[0.06]">{"\u0422\u0438\u0436\u043D\u0435\u0432\u0438\u0439 \u0437\u0432\u0456\u0442"}</Link>
+          <Link href={directorReportHref} className="rounded-2xl border border-white/[0.08] bg-white/[0.035] px-2.5 py-2 text-center text-[10px] font-medium text-orange-200 active:bg-white/[0.06]">{"\u0414\u043B\u044F \u0434\u0438\u0440\u0435\u043A\u0442\u043E\u0440\u0430"}</Link>
+        </div>
+      </div>
+    </article>
   );
 }
 

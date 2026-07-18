@@ -57,6 +57,9 @@ export default async function WeeklyPeriodDetailsPage({ params, searchParams }: 
 
       <SummaryGrid summary={summary} />
 
+
+      <ReportsForWeek periodId={period.id} />
+
       <section className="grid gap-3 lg:grid-cols-3">
         <TopList title="По категоріях" rows={summary.byCategory} />
         <TopList title="По об'єктах" rows={summary.byObjectTop} />
@@ -69,6 +72,44 @@ export default async function WeeklyPeriodDetailsPage({ params, searchParams }: 
         ))}
       </section>
     </div>
+  );
+}
+
+function ReportsForWeek({ periodId }: { periodId: string }) {
+  const reports = [
+    { title: "\u0422\u0438\u0436\u043D\u0435\u0432\u0438\u0439 \u0437\u0432\u0456\u0442", href: `/reports/weekly?periodId=${periodId}` },
+    { title: "\u041F\u043E \u043E\u0431\u0027\u0454\u043A\u0442\u0430\u0445", href: `/reports/objects?periodId=${periodId}` },
+    { title: "\u041F\u043E \u0432\u0438\u043A\u043E\u043D\u0430\u0432\u0446\u044F\u0445", href: `/reports/workers?periodId=${periodId}` },
+    { title: "\u041F\u043E \u043A\u0430\u0442\u0435\u0433\u043E\u0440\u0456\u044F\u0445", href: `/reports/categories?periodId=${periodId}` },
+    { title: "\u0417\u0432\u0456\u0442 \u0434\u043B\u044F \u0434\u0438\u0440\u0435\u043A\u0442\u043E\u0440\u0430", href: `/reports/director?periodId=${periodId}` },
+  ];
+  const exports = [
+    { title: "Weekly CSV", href: `/reports/export?type=weekly&periodId=${periodId}` },
+    { title: "Director CSV", href: `/reports/export?type=director&periodId=${periodId}` },
+  ];
+  return (
+    <section className="rounded-[18px] border border-orange-400/15 bg-orange-500/[0.04] p-3 shadow-sm shadow-black/20">
+      <div className="flex flex-col gap-1 md:flex-row md:items-end md:justify-between">
+        <div>
+          <h2 className="text-[14px] font-semibold text-stone-100">{"\u0417\u0432\u0456\u0442\u0438 \u0437\u0430 \u0446\u0435\u0439 \u0442\u0438\u0436\u0434\u0435\u043D\u044C"}</h2>
+          <p className="mt-1 text-[11px] text-stone-500">{"\u0426\u0456 \u043F\u043E\u0441\u0438\u043B\u0430\u043D\u043D\u044F \u0432\u0438\u043A\u043E\u0440\u0438\u0441\u0442\u043E\u0432\u0443\u044E\u0442\u044C \u0430\u0440\u0445\u0456\u0432\u043D\u0438\u0439 snapshot weekly_period_tickets, \u0430 \u043D\u0435 live-\u0437\u0430\u044F\u0432\u043A\u0438."}</p>
+        </div>
+      </div>
+      <div className="mt-3 grid gap-2 md:grid-cols-3 xl:grid-cols-5">
+        {reports.map((report) => (
+          <Button key={report.href} asChild variant="outline" size="sm" className="h-9 justify-start rounded-2xl text-[11px]">
+            <Link href={report.href}><ExternalLink className="mr-1 h-3.5 w-3.5" />{report.title}</Link>
+          </Button>
+        ))}
+      </div>
+      <div className="mt-2 flex flex-wrap gap-2">
+        {exports.map((item) => (
+          <Button key={item.href} asChild size="sm" className="h-9 rounded-2xl text-[11px]">
+            <Link href={item.href}><Download className="mr-1 h-3.5 w-3.5" />{item.title}</Link>
+          </Button>
+        ))}
+      </div>
+    </section>
   );
 }
 
