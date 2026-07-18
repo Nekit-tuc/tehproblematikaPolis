@@ -342,7 +342,7 @@ function PlanCard({ plan }: { plan: WorkPlan }) {
   const style = planStatusStyle[plan.status];
   const StatusIcon = style.icon;
   return (
-    <div className="relative overflow-hidden rounded-[17px] border border-white/[0.08] bg-[linear-gradient(145deg,rgba(255,255,255,0.06),rgba(255,255,255,0.025))] p-3 shadow-[0_10px_26px_rgba(0,0,0,0.32)] md:grid md:grid-cols-[1.4fr_1fr_120px_120px_auto] md:items-center md:gap-3 md:rounded-lg">
+    <div className="relative overflow-visible rounded-[17px] border border-white/[0.08] bg-[linear-gradient(145deg,rgba(255,255,255,0.06),rgba(255,255,255,0.025))] p-3 shadow-[0_10px_26px_rgba(0,0,0,0.32)] md:grid md:grid-cols-[1.4fr_1fr_120px_120px_auto] md:items-center md:gap-3 md:rounded-lg">
       <div className={cn("absolute left-0 top-0 h-full w-[3px]", style.stripe)} />
       <div className="flex min-w-0 items-start justify-between gap-2 md:block">
         <div className="min-w-0 pl-1 md:pl-0">
@@ -377,9 +377,7 @@ function PlanCard({ plan }: { plan: WorkPlan }) {
         <Button asChild variant="outline" className="h-8 rounded-[10px] border-white/[0.08] bg-white/[0.035] text-[10px] text-zinc-200 md:h-auto md:rounded-md md:text-sm">
           <Link href={`/work-planning/${plan.id}`}><Eye className="h-3 w-3 md:h-4 md:w-4" />Переглянути</Link>
         </Button>
-        <Button asChild variant="outline" className="h-8 w-8 rounded-[10px] border-white/[0.08] bg-white/[0.035] p-0 text-zinc-300 md:hidden">
-          <Link href={`/work-planning/${plan.id}`} aria-label="Деталі плану"><MoreHorizontal className="h-3.5 w-3.5" /></Link>
-        </Button>
+        <PlanActionsMenu plan={plan} />
       </div>
     </div>
   );
@@ -396,25 +394,36 @@ function PlanningSummaryBadge({ summary, fallbackCount }: { summary: WorkPlannin
   );
 }
 
-function PlanActionsMenu({ planId }: { planId: string }) {
+function deletePlanConfirmMessage(status: WorkPlanStatus) {
+  if (status === "sent" || status === "partially_done") {
+    return "План уже міг бути надісланий виконавцям. Видалити його? Заявки залишаться в системі без плану.";
+  }
+  return "Видалити цей план? Заявки залишаться в системі та стануть доступними для нового планування.";
+}
+
+function PlanActionsMenu({ plan }: { plan: WorkPlan }) {
   return (
-    <details className="group relative">
+    <details className="group relative z-30 open:z-[90]">
       <summary className="flex h-8 w-8 cursor-pointer list-none items-center justify-center rounded-[10px] border border-white/[0.08] bg-white/[0.035] text-zinc-300 hover:bg-white/[0.07]">
         <MoreHorizontal className="h-3.5 w-3.5" />
       </summary>
-      <div className="absolute right-0 top-9 z-20 w-44 rounded-[12px] border border-white/[0.10] bg-[#111]/95 p-1.5 shadow-2xl shadow-black/40">
-        <form action={deleteWorkPlanAction.bind(null, planId)}>
-          <ConfirmSubmitButton
-            type="submit"
-            variant="ghost"
-            className="h-8 w-full justify-start rounded-[10px] px-2 text-[11px] text-red-300 hover:bg-red-500/10"
-            pendingText="Видаляємо..."
-            message="Ви точно хочете видалити цей план? Заявки буде відв'язано від плану."
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-            Видалити план
-          </ConfirmSubmitButton>
-        </form>
+      <div className="absolute right-0 top-9 z-[100] w-44 rounded-[12px] border border-white/[0.10] bg-[#111]/95 p-1.5 shadow-2xl shadow-black/40">
+        {plan.status === "done" ? (
+          <div className="rounded-[10px] px-2 py-2 text-[11px] leading-4 text-zinc-400">Завершений план не можна видалити.</div>
+        ) : (
+          <form action={deleteWorkPlanAction.bind(null, plan.id)}>
+            <ConfirmSubmitButton
+              type="submit"
+              variant="ghost"
+              className="h-8 w-full justify-start rounded-[10px] px-2 text-[11px] text-red-300 hover:bg-red-500/10"
+              pendingText="Видаляємо..."
+              message={deletePlanConfirmMessage(plan.status)}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              Видалити
+            </ConfirmSubmitButton>
+          </form>
+        )}
       </div>
     </details>
   );

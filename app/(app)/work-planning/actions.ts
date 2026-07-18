@@ -99,5 +99,6 @@ export async function deleteWorkPlanAction(workPlanId: string) {
   revalidatePath("/work-planning");
   revalidatePath("/tickets");
   revalidatePath("/dashboard");
+  revalidatePath("/weekly-control");
   redirect("/work-planning?success=deleted");
 }

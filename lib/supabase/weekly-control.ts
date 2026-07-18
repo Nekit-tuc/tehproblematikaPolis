@@ -237,7 +237,7 @@ function isHighPriority(ticket: TicketWithRelations) {
 }
 
 function completionDate(ticket: TicketWithRelations) {
-  return ticket.completed_at ?? ticket.admin_confirmed_at ?? ticket.worker_completed_at ?? (ticket.status === "done" ? ticket.updated_at : null);
+  return ticket.admin_confirmed_at ?? ticket.worker_completed_at ?? ticket.completed_at ?? (ticket.status === "done" ? ticket.updated_at : null);
 }
 
 function dateInRange(iso: string | null | undefined, start: Date, end: Date) {
@@ -334,6 +334,112 @@ async function queryCompletedTickets(supabase: Awaited<ReturnType<typeof createC
   return { data: Array.from(map.values()), error };
 }
 
+
+async function queryPreviousCarryOverTicketIds(supabase: Awaited<ReturnType<typeof createClient>>, weekStartIso: string) {
+  const previousPeriodResult = await measureAsync("weekly-control:previous_period", () =>
+    supabase
+      .from("weekly_periods")
+      .select("id")
+      .lt("week_start", weekStartIso)
+      .in("status", ["closed", "archived"])
+      .order("week_start", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  );
+  if (previousPeriodResult.error) return { ids: [] as string[], error: previousPeriodResult.error.message };
+  const previousPeriodId = (previousPeriodResult.data as { id?: string } | null)?.id;
+  if (!previousPeriodId) return { ids: [] as string[], error: null as string | null };
+
+  const previousTicketsResult = await measureAsync("weekly-control:previous_unresolved", () =>
+    supabase
+      .from("weekly_period_tickets")
+      .select("ticket_id")
+      .eq("weekly_period_id", previousPeriodId)
+      .in("role", ["unresolved", "carried_over"])
+      .limit(1500),
+  );
+  const ids = Array.from(new Set(((previousTicketsResult.data ?? []) as Array<{ ticket_id: string | null }>).map((row) => row.ticket_id).filter(Boolean) as string[]));
+  return { ids, error: previousTicketsResult.error?.message ?? null };
+}
+
+async function queryTicketsByIds(supabase: Awaited<ReturnType<typeof createClient>>, ids: string[]) {
+  if (ids.length === 0) return { data: [] as TicketWithRelations[], error: null as string | null };
+  const result = await measureAsync("weekly-control:tickets_by_ids", () =>
+    supabase.from("tickets").select(ticketSnapshotSelect).in("id", ids).not("status", "in", "(done,cancelled,rejected)").limit(1500),
+  );
+  return { data: (result.data ?? []) as unknown as TicketWithRelations[], error: result.error?.message ?? null };
+}
+
+async function buildWeeklySnapshotRows(supabase: Awaited<ReturnType<typeof createClient>>, period: WeeklyPeriod) {
+  const start = new Date(`${period.week_start}T00:00:00`);
+  const end = endOfDay(new Date(`${period.week_end}T00:00:00`));
+  const startIso = start.toISOString();
+  const endIso = end.toISOString();
+
+  const [createdResult, completedResult, plannedResult, waitingResult, previousCarryOverResult] = await Promise.all([
+    measureAsync("weekly-control:snapshot_created", () =>
+      supabase.from("tickets").select(ticketSnapshotSelect).gte("created_at", startIso).lte("created_at", endIso).limit(1500),
+    ),
+    queryCompletedTickets(supabase, start, end),
+    measureAsync("weekly-control:snapshot_planned", () =>
+      supabase
+        .from("work_plan_items")
+        .select(`ticket_id, worker:workers(id,name), ticket:tickets(${ticketSnapshotSelect}), work_plan:work_plans!inner(id,title,status,period_start,period_end)`)
+        .lte("work_plan.period_start", period.week_end)
+        .gte("work_plan.period_end", period.week_start)
+        .limit(1500),
+    ),
+    measureAsync("weekly-control:snapshot_waiting_confirmation", () =>
+      supabase
+        .from("tickets")
+        .select(ticketSnapshotSelect)
+        .eq("status", "waiting_admin_confirmation")
+        .gte("worker_completed_at", startIso)
+        .lte("worker_completed_at", endIso)
+        .limit(1500),
+    ),
+    queryPreviousCarryOverTicketIds(supabase, period.week_start),
+  ]);
+
+  const carryOverResult = await queryTicketsByIds(supabase, previousCarryOverResult.ids);
+  const snapshot = new Map<string, { ticket: TicketWithRelations; role: WeeklyTicketRole }>();
+  const createdTickets = (createdResult.data ?? []) as unknown as TicketWithRelations[];
+  const completedTickets = completedResult.data;
+  const plannedTickets = ((plannedResult.data ?? []) as any[]).map(asTicket).filter(Boolean) as TicketWithRelations[];
+  const waitingTickets = (waitingResult.data ?? []) as unknown as TicketWithRelations[];
+  const carryOverTickets = carryOverResult.data;
+
+  for (const ticket of createdTickets) addTicket(snapshot, ticket, "created");
+  for (const ticket of completedTickets) addTicket(snapshot, ticket, "completed");
+  for (const ticket of plannedTickets) addTicket(snapshot, ticket, "planned");
+
+  const weeklyTickets = new Map<string, TicketWithRelations>();
+  for (const ticket of [...createdTickets, ...completedTickets, ...plannedTickets, ...waitingTickets]) weeklyTickets.set(ticket.id, ticket);
+  for (const ticket of weeklyTickets.values()) if (isHighPriority(ticket)) addTicket(snapshot, ticket, "hot");
+
+  const unresolvedTickets = new Map<string, TicketWithRelations>();
+  for (const ticket of [...createdTickets, ...plannedTickets, ...waitingTickets]) unresolvedTickets.set(ticket.id, ticket);
+  for (const ticket of unresolvedTickets.values()) if (!inactiveStatuses.has(ticket.status)) addTicket(snapshot, ticket, "unresolved");
+
+  for (const ticket of carryOverTickets) {
+    if (inactiveStatuses.has(ticket.status)) continue;
+    addTicket(snapshot, ticket, "carried_over");
+    addTicket(snapshot, ticket, "unresolved");
+  }
+
+  const error = createdResult.error?.message ?? completedResult.error ?? plannedResult.error?.message ?? waitingResult.error?.message ?? previousCarryOverResult.error ?? carryOverResult.error ?? null;
+  return { rows: Array.from(snapshot.values()), error };
+}
+
+export async function getWeeklyControlSummary(period: WeeklyPeriod | null): Promise<QueryResult<WeeklySummary>> {
+  if (!hasSupabaseEnv()) return emptyWithError(emptySummary);
+  if (!period) return { data: emptySummary, error: null };
+  if (period.status === "archived" || period.status === "closed") return { data: periodToSummary(period), error: null };
+  const supabase = await createClient();
+  const snapshot = await buildWeeklySnapshotRows(supabase, period);
+  return { data: buildSummary(snapshot.rows), error: snapshot.error };
+}
+
 export async function createWeeklySnapshot(periodId: string): Promise<QueryResult<{ period: WeeklyPeriod | null; summary: WeeklySummary; snapshotCount: number; message: string }>> {
   if (!hasSupabaseEnv()) return emptyWithError({ period: null, summary: emptySummary, snapshotCount: 0, message: missingSupabaseMessage });
   const supabase = await createClient();
@@ -348,66 +454,11 @@ export async function createWeeklySnapshot(periodId: string): Promise<QueryResul
     return { data: { period, summary: periodToSummary(period), snapshotCount: 0, message: "Тиждень уже закрито." }, error: null };
   }
 
-  const start = new Date(`${period.week_start}T00:00:00`);
-  const end = endOfDay(new Date(`${period.week_end}T00:00:00`));
-  const startIso = start.toISOString();
-  const endIso = end.toISOString();
-
-  const [createdResult, completedResult, activeResult, plannedResult, previousUnresolvedResult] = await Promise.all([
-    measureAsync("weekly-control:snapshot_created", () =>
-      supabase.from("tickets").select(ticketSnapshotSelect).gte("created_at", startIso).lte("created_at", endIso).limit(1500),
-    ),
-    queryCompletedTickets(supabase, start, end),
-    measureAsync("weekly-control:snapshot_active", () =>
-      supabase.from("tickets").select(ticketSnapshotSelect).not("status", "in", "(done,cancelled,rejected)").limit(1500),
-    ),
-    measureAsync("weekly-control:snapshot_planned", () =>
-      supabase
-        .from("work_plan_items")
-        .select(`ticket_id, worker:workers(id,name), ticket:tickets(${ticketSnapshotSelect}), work_plan:work_plans!inner(id,title,status,period_start,period_end)`)
-        .lte("work_plan.period_start", period.week_end)
-        .gte("work_plan.period_end", period.week_start)
-        .limit(1500),
-    ),
-    measureAsync("weekly-control:snapshot_previous_unresolved", () =>
-      supabase
-        .from("weekly_period_tickets")
-        .select("ticket_id, weekly_period:weekly_periods!inner(week_start,status)")
-        .eq("role", "unresolved")
-        .lt("weekly_period.week_start", period.week_start)
-        .in("weekly_period.status", ["closed", "archived"])
-        .limit(1500),
-    ),
-  ]);
-
-  const snapshot = new Map<string, { ticket: TicketWithRelations; role: WeeklyTicketRole }>();
-  const createdTickets = (createdResult.data ?? []) as unknown as TicketWithRelations[];
-  const completedTickets = completedResult.data;
-  const activeTickets = (activeResult.data ?? []) as unknown as TicketWithRelations[];
-  const plannedTickets = ((plannedResult.data ?? []) as any[]).map(asTicket).filter(Boolean) as TicketWithRelations[];
-  const previousUnresolvedIds = new Set(((previousUnresolvedResult.data ?? []) as Array<{ ticket_id: string }>).map((row) => row.ticket_id));
-  const plannedIds = new Set(plannedTickets.map((ticket) => ticket.id));
-  const createdIds = new Set(createdTickets.map((ticket) => ticket.id));
-
-  for (const ticket of createdTickets) addTicket(snapshot, ticket, "created");
-  for (const ticket of completedTickets) addTicket(snapshot, ticket, "completed");
-  for (const ticket of plannedTickets) addTicket(snapshot, ticket, "planned");
-
-  const hotPool = new Map<string, TicketWithRelations>();
-  for (const ticket of [...createdTickets, ...plannedTickets, ...activeTickets]) if (isHighPriority(ticket)) hotPool.set(ticket.id, ticket);
-  for (const ticket of hotPool.values()) addTicket(snapshot, ticket, "hot");
-
-  const candidates = new Map<string, TicketWithRelations>();
-  for (const ticket of [...createdTickets, ...plannedTickets, ...activeTickets]) candidates.set(ticket.id, ticket);
-  for (const ticket of candidates.values()) {
-    if (!inactiveStatuses.has(ticket.status) && (createdIds.has(ticket.id) || plannedIds.has(ticket.id) || isHighPriority(ticket))) addTicket(snapshot, ticket, "unresolved");
-    if (!inactiveStatuses.has(ticket.status) && previousUnresolvedIds.has(ticket.id)) addTicket(snapshot, ticket, "carried_over");
-  }
-
-  const rows = Array.from(snapshot.values());
+  const snapshotResult = await buildWeeklySnapshotRows(supabase, period);
+  const rows = snapshotResult.rows;
   const upsertRows = rows.map((row) => snapshotRow(period.id, row.ticket, row.role));
   const summary = buildSummary(rows);
-  let mutationError = createdResult.error?.message ?? completedResult.error ?? activeResult.error?.message ?? plannedResult.error?.message ?? previousUnresolvedResult.error?.message ?? null;
+  let mutationError = snapshotResult.error;
 
   if (upsertRows.length > 0) {
     const { error } = await measureAsync("weekly-control:snapshot_upsert", () =>
@@ -438,7 +489,8 @@ export async function createWeeklySnapshot(periodId: string): Promise<QueryResul
   );
   if (updateError && !mutationError) mutationError = updateError.message;
 
-  const nextRange = getCurrentWeekRange(addDays(end, 1));
+  const periodEnd = endOfDay(new Date(`${period.week_end}T00:00:00`));
+  const nextRange = getCurrentWeekRange(addDays(periodEnd, 1));
   await getOrCreatePeriodForRange(nextRange.startIso, nextRange.endIso, "current");
 
   return {

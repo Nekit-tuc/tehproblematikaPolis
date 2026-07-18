@@ -6,28 +6,22 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CloseWeekForm } from "@/components/weekly-control/close-week-form";
 import { requireRole } from "@/lib/auth/server";
-import { getOrCreateCurrentWeeklyPeriod, getWeeklyPeriods, type WeeklyPeriod, type WeeklySummary } from "@/lib/supabase/weekly-control";
-import { getWeeklyDashboardCommandCenter } from "@/lib/supabase/queries";
+import { getOrCreateCurrentWeeklyPeriod, getWeeklyControlSummary, getWeeklyPeriods, type WeeklyPeriod, type WeeklySummary } from "@/lib/supabase/weekly-control";
 import { closeWeeklyPeriodAction } from "./actions";
 
 export default async function WeeklyControlPage({ searchParams }: { searchParams: Promise<{ success?: string; error?: string }> }) {
   await requireRole(["admin", "management", "tech_manager"]);
   const params = await searchParams;
-  const [currentResult, periodsResult, dashboardResult] = await Promise.all([
+  const [currentResult, periodsResult] = await Promise.all([
     getOrCreateCurrentWeeklyPeriod(),
     getWeeklyPeriods(20),
-    getWeeklyDashboardCommandCenter(),
   ]);
   const current = currentResult.data;
+  const currentSummaryResult = await getWeeklyControlSummary(current);
   const periods = periodsResult.data;
   const archived = periods.filter((period) => period.status === "archived" || period.status === "closed");
-  const currentSummary = {
-    totalCreated: dashboardResult.data.kpi.currentWeekTicketCount,
-    totalCompleted: dashboardResult.data.kpi.completedThisWeekCount,
-    totalUnresolved: dashboardResult.data.problemSummary.carriedOver + dashboardResult.data.problemSummary.overdue,
-    totalWaitingAdminConfirmation: dashboardResult.data.kpi.waitingAdminConfirmationCount,
-  };
-  const error = currentResult.error ?? periodsResult.error ?? dashboardResult.error;
+  const currentSummary = currentSummaryResult.data;
+  const error = currentResult.error ?? periodsResult.error ?? currentSummaryResult.error;
 
   return (
     <div className="page-shell mx-auto max-w-6xl space-y-4 pb-28 md:pb-8">

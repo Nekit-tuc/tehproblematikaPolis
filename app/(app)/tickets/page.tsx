@@ -10,6 +10,7 @@ import {
   MapPin,
   MoreVertical,
   Plus,
+  Printer,
   Search,
   Tag,
   Trash2,
@@ -31,6 +32,39 @@ import type { TicketPriority, TicketStatus, TicketWithRelations } from "@/types/
 import { hardDeleteTicketAction } from "./[id]/actions";
 
 const PAGE_SIZE = 20;
+
+function toInputDate(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function startOfWeek(date = new Date()) {
+  const value = new Date(date);
+  value.setHours(0, 0, 0, 0);
+  const day = value.getDay() || 7;
+  value.setDate(value.getDate() - day + 1);
+  return value;
+}
+
+function addDays(date: Date, days: number) {
+  const value = new Date(date);
+  value.setDate(value.getDate() + days);
+  return value;
+}
+
+function startOfMonth(date = new Date()) {
+  return new Date(date.getFullYear(), date.getMonth(), 1);
+}
+
+function endOfMonth(date = new Date()) {
+  return new Date(date.getFullYear(), date.getMonth() + 1, 0);
+}
+
+function isDateParam(value?: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value ?? "");
+}
 
 const uaStatusLabels: Record<TicketStatus, string> = {
   pending_review: "AI Review",
@@ -148,6 +182,8 @@ export default async function TicketsPage({
     success?: string;
     error?: string;
     deleted?: string;
+    from?: string;
+    to?: string;
   }>;
 }) {
   const { profile } = await requireAuth();
@@ -163,10 +199,12 @@ export default async function TicketsPage({
     : "all";
   const activeSort = query.sort === "priority_asc" ? "priority_asc" : query.sort === "priority_desc" ? "priority_desc" : "newest";
   const searchQuery = (query.q ?? "").trim();
+  const activeFrom = isDateParam(query.from) ? query.from ?? "" : "";
+  const activeTo = isDateParam(query.to) ? query.to ?? "" : "";
   const currentPage = Math.max(Number(query.page ?? 1) || 1, 1);
 
   const [ticketsPageResult, categoriesResult, aiTicketsResult] = await Promise.all([
-    getTicketsPage({ status: activeStatus, category: activeCategory, priority: activePriority, sort: activeSort, q: searchQuery, page: currentPage, limit: PAGE_SIZE }),
+    getTicketsPage({ status: activeStatus, category: activeCategory, priority: activePriority, sort: activeSort, q: searchQuery, from: activeFrom, to: activeTo, page: currentPage, limit: PAGE_SIZE }),
     getCategories(),
     getTickets({ status: "pending_review", source: ["telegram_group", "telegram_private_test"], limit: null }),
   ]);
@@ -187,10 +225,12 @@ export default async function TicketsPage({
     if (activePriority !== "all") params.set("priority", activePriority);
     if (activeSort !== "newest") params.set("sort", activeSort);
     if (searchQuery) params.set("q", searchQuery);
+    if (activeFrom) params.set("from", activeFrom);
+    if (activeTo) params.set("to", activeTo);
     if (safePage > 1) params.set("page", String(safePage));
 
     for (const [key, value] of Object.entries(updates)) {
-      if (!value || value === "all" || (key === "sort" && value === "newest") || (key === "q" && !value.trim())) {
+      if (!value || value === "all" || (key === "sort" && value === "newest") || (key === "q" && !value.trim()) || ((key === "from" || key === "to") && !isDateParam(value))) {
         params.delete(key);
       } else {
         params.set(key, value);
@@ -203,6 +243,15 @@ export default async function TicketsPage({
   };
 
   const returnTo = ticketHref({ page: String(safePage) });
+  const printHref = ticketHref({ page: undefined }).replace(/^\/tickets/, "/tickets/print");
+  const exportHref = ticketHref({ page: undefined }).replace(/^\/tickets/, "/tickets/export");
+  const weekStart = startOfWeek();
+  const periodLinks = {
+    thisWeek: ticketHref({ from: toInputDate(weekStart), to: toInputDate(addDays(weekStart, 6)) }),
+    previousWeek: ticketHref({ from: toInputDate(addDays(weekStart, -7)), to: toInputDate(addDays(weekStart, -1)) }),
+    thisMonth: ticketHref({ from: toInputDate(startOfMonth()), to: toInputDate(endOfMonth()) }),
+    clear: ticketHref({ from: undefined, to: undefined }),
+  };
 
   return (
     <div className="page-shell max-w-full overflow-x-hidden pb-28 md:space-y-6 md:pb-0">
@@ -225,6 +274,8 @@ export default async function TicketsPage({
           {activeCategory !== "all" ? <input type="hidden" name="category" value={activeCategory} /> : null}
           {activePriority !== "all" ? <input type="hidden" name="priority" value={activePriority} /> : null}
           {activeSort !== "newest" ? <input type="hidden" name="sort" value={activeSort} /> : null}
+          {activeFrom ? <input type="hidden" name="from" value={activeFrom} /> : null}
+          {activeTo ? <input type="hidden" name="to" value={activeTo} /> : null}
         </form>
 
         <MobileTicketSwitch active="tickets" aiCount={aiTicketsCount} />
@@ -245,6 +296,15 @@ export default async function TicketsPage({
               <FilterButton href={ticketHref({ sort: "newest" })} active={activeSort === "newest"}>Нові спочатку</FilterButton>
               <FilterButton href={ticketHref({ sort: "priority_desc" })} active={activeSort === "priority_desc"}>Вищий пріоритет</FilterButton>
             </FilterGroup>
+            <PeriodFilterForm activeFrom={activeFrom} activeTo={activeTo} searchQuery={searchQuery} activeStatus={activeStatus} activeCategory={activeCategory} activePriority={activePriority} activeSort={activeSort} />
+            <div className="flex max-w-full gap-1.5 overflow-x-auto pb-0.5">
+              <FilterButton href={periodLinks.thisWeek} active={false}>Цей тиждень</FilterButton>
+              <FilterButton href={periodLinks.previousWeek} active={false}>Минулий тиждень</FilterButton>
+              <FilterButton href={periodLinks.thisMonth} active={false}>Цей місяць</FilterButton>
+              <FilterButton href={periodLinks.clear} active={!activeFrom && !activeTo}>Очистити</FilterButton>
+            </div>
+            <Button asChild variant="secondary" className="min-h-8 w-full rounded-lg text-[10px]"><Link href={printHref}><Printer className="h-3.5 w-3.5" />Друк звіту</Link></Button>
+            <Button asChild variant="outline" className="min-h-8 w-full rounded-lg text-[10px]"><Link href={exportHref}>Excel</Link></Button>
             <Button asChild variant="outline" className="min-h-8 w-full rounded-lg text-[10px]"><Link href="/tickets">Скинути фільтри</Link></Button>
           </div>
         </details>
@@ -268,6 +328,17 @@ export default async function TicketsPage({
           <CardHeader><CardTitle>Список заявок</CardTitle></CardHeader>
           <CardContent className="space-y-4">
             <div className="flex flex-wrap gap-2">{statusFilters.map((filter) => <Button key={filter.value} asChild variant={activeStatus === filter.value ? "default" : "outline"} size="sm"><Link href={ticketHref({ status: filter.value })}>{filter.label}</Link></Button>)}</div>
+            <div className="rounded-2xl border border-white/[0.08] bg-black/20 p-3">
+              <div className="flex flex-wrap items-end gap-2">
+                <PeriodFilterForm activeFrom={activeFrom} activeTo={activeTo} searchQuery={searchQuery} activeStatus={activeStatus} activeCategory={activeCategory} activePriority={activePriority} activeSort={activeSort} />
+                <Button asChild variant="outline" size="sm"><Link href={periodLinks.thisWeek}>Цей тиждень</Link></Button>
+                <Button asChild variant="outline" size="sm"><Link href={periodLinks.previousWeek}>Минулий тиждень</Link></Button>
+                <Button asChild variant="outline" size="sm"><Link href={periodLinks.thisMonth}>Цей місяць</Link></Button>
+                <Button asChild variant="ghost" size="sm"><Link href={periodLinks.clear}>Очистити</Link></Button>
+                <Button asChild size="sm"><Link href={printHref}><Printer className="h-4 w-4" />Друк звіту</Link></Button>
+                <Button asChild variant="secondary" size="sm"><Link href={exportHref}>Excel</Link></Button>
+              </div>
+            </div>
             <PaginationBar page={safePage} total={totalTickets} totalPages={totalPages} shownFrom={shownFrom} shownTo={shownTo} hrefForPage={(page) => ticketHref({ page: String(page) })} />
             {tickets.length === 0 ? <p className="text-sm text-muted-foreground">Заявок поки немає. Спробуйте змінити фільтри.</p> : (
               <Table>
@@ -288,6 +359,27 @@ function TicketsMessages({ error, queryError, deleted }: { error?: string | null
     {deleted ? <Alert title="Заявку повністю видалено">Заявку та пов'язані записи видалено з бази.</Alert> : null}
     {queryError ? <Alert title="Не вдалося завантажити дані">{queryError}</Alert> : null}
   </>;
+}
+
+function PeriodFilterForm({ activeFrom, activeTo, searchQuery, activeStatus, activeCategory, activePriority, activeSort }: { activeFrom: string; activeTo: string; searchQuery: string; activeStatus: "all" | TicketStatus; activeCategory: string; activePriority: "all" | TicketPriority; activeSort: string }) {
+  return (
+    <form action="/tickets" className="flex w-full flex-wrap items-end gap-2 md:w-auto">
+      {searchQuery ? <input type="hidden" name="q" value={searchQuery} /> : null}
+      {activeStatus !== "all" ? <input type="hidden" name="status" value={activeStatus} /> : null}
+      {activeCategory !== "all" ? <input type="hidden" name="category" value={activeCategory} /> : null}
+      {activePriority !== "all" ? <input type="hidden" name="priority" value={activePriority} /> : null}
+      {activeSort !== "newest" ? <input type="hidden" name="sort" value={activeSort} /> : null}
+      <label className="min-w-[130px] flex-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-500 md:flex-none">
+        Від
+        <input type="date" name="from" defaultValue={activeFrom} className="mt-1 h-9 w-full rounded-xl border border-white/10 bg-white/[0.055] px-2 text-[11px] text-zinc-100 outline-none focus:border-orange-400/50" />
+      </label>
+      <label className="min-w-[130px] flex-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-500 md:flex-none">
+        До
+        <input type="date" name="to" defaultValue={activeTo} className="mt-1 h-9 w-full rounded-xl border border-white/10 bg-white/[0.055] px-2 text-[11px] text-zinc-100 outline-none focus:border-orange-400/50" />
+      </label>
+      <Button type="submit" size="sm" className="h-9 rounded-xl text-[11px]">Застосувати</Button>
+    </form>
+  );
 }
 
 function PaginationBar({ page, total, totalPages, shownFrom, shownTo, hrefForPage }: { page: number; total: number; totalPages: number; shownFrom: number; shownTo: number; hrefForPage: (page: number) => string }) {

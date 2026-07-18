@@ -598,37 +598,37 @@ export async function getWorkPlanActiveTicketCount(): Promise<QueryResult<number
 
 export async function deleteWorkPlan(workPlanId: string, actorId: string): Promise<QueryResult<null>> {
   if (!hasSupabaseEnv()) return { data: null, error: missingSupabaseMessage };
-  const itemsResult = await getWorkPlanItems(workPlanId);
-  if (itemsResult.error) return { data: null, error: itemsResult.error };
-  const supabase = await createClient();
-  const now = new Date().toISOString();
-  const activeResetStatuses: TicketStatus[] = ["assigned", "in_progress", "waiting_admin_confirmation"];
 
-  for (const item of itemsResult.data) {
-    const ticket = item.ticket;
-    if (!ticket) continue;
-    if (ticket.status !== "done") {
-      const update: Record<string, string | null> = {
-        assignee_worker_id: null,
-        assigned_at: null,
-        sent_to_worker_at: null,
-        updated_at: now,
-      };
-      if (activeResetStatuses.includes(ticket.status)) update.status = "new";
-      const { error: ticketError } = await supabase.from("tickets").update(update).eq("id", ticket.id);
-      if (ticketError) return { data: null, error: ticketError.message };
-      const { error: historyError } = await supabase.from("ticket_history").insert({
-        ticket_id: ticket.id,
-        actor_id: actorId,
-        action: "План видалено. Виконавця знято із заявки.",
-        metadata: { work_plan_id: workPlanId, previous_status: ticket.status, previous_worker_id: ticket.assignee_worker_id ?? null },
-      });
-      if (historyError) return { data: null, error: historyError.message };
-    }
+  const planResult = await getWorkPlanById(workPlanId);
+  if (planResult.error) return { data: null, error: planResult.error };
+  if (!planResult.data) return { data: null, error: "План не знайдено." };
+  if (planResult.data.status === "done") {
+    return { data: null, error: "Завершений план не можна видалити. Його можна переглянути в архіві." };
   }
 
-  await supabase.from("work_plan_dispatches").delete().eq("work_plan_id", workPlanId);
-  await supabase.from("work_plan_items").delete().eq("work_plan_id", workPlanId);
+  const itemsResult = await getWorkPlanItems(workPlanId);
+  if (itemsResult.error) return { data: null, error: itemsResult.error };
+
+  const supabase = await createClient();
+  const ticketIds = Array.from(new Set(itemsResult.data.map((item) => item.ticket_id).filter(Boolean)));
+
+  if (ticketIds.length > 0) {
+    const historyRows = ticketIds.map((ticketId) => ({
+      ticket_id: ticketId,
+      actor_id: actorId,
+      action: "План робіт видалено. Заявку повернуто до доступних для планування.",
+      metadata: { work_plan_id: workPlanId, work_plan_status: planResult.data?.status ?? null },
+    }));
+    const { error: historyError } = await supabase.from("ticket_history").insert(historyRows);
+    if (historyError) return { data: null, error: historyError.message };
+  }
+
+  const { error: dispatchError } = await supabase.from("work_plan_dispatches").delete().eq("work_plan_id", workPlanId);
+  if (dispatchError) return { data: null, error: dispatchError.message };
+
+  const { error: itemsError } = await supabase.from("work_plan_items").delete().eq("work_plan_id", workPlanId);
+  if (itemsError) return { data: null, error: itemsError.message };
+
   const { error } = await supabase.from("work_plans").delete().eq("id", workPlanId);
   if (error) return { data: null, error: error.message };
   return { data: null, error: null };

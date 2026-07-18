@@ -108,6 +108,8 @@ export type TicketListFilters = {
   priority?: string;
   q?: string;
   sort?: string;
+  from?: string;
+  to?: string;
   page?: number;
   limit?: number;
 };
@@ -152,6 +154,8 @@ function applyTicketFilters(query: any, filters: TicketListFilters) {
   if (filters.status && filters.status !== "all") query = query.eq("status", filters.status);
   if (filters.category && filters.category !== "all") query = query.eq("category_id", filters.category);
   if (filters.priority && filters.priority !== "all") query = query.eq("priority", filters.priority);
+  if (filters.from) query = query.gte("created_at", `${filters.from}T00:00:00`);
+  if (filters.to) query = query.lte("created_at", `${filters.to}T23:59:59.999`);
   const search = filters.q?.trim();
   if (search) {
     const escaped = search.replace(/[%_,]/g, "");
@@ -182,6 +186,24 @@ export async function getTicketsPage(filters: TicketListFilters = {}): Promise<Q
 
   const { data, count, error } = await measureAsync("tickets:page", () => query);
   return { data: { tickets: (data ?? []) as unknown as TicketWithRelations[], total: count ?? 0, page, limit }, error: error?.message ?? null };
+}
+
+export async function getTicketsForPrint(filters: TicketListFilters = {}): Promise<QueryResult<TicketWithRelations[]>> {
+  if (!hasSupabaseEnv()) return emptyWithError([]);
+  const profile = await getCurrentProfile();
+  if (!profile) return emptyWithError([]);
+  const supabase = await createClient();
+  let query = supabase.from("tickets").select(ticketListSelect);
+  query = applyTicketAccess(query, profile);
+  query = applyTicketFilters(query, filters);
+  if (filters.sort === "priority_asc" || filters.sort === "priority_desc") {
+    query = query.order("priority", { ascending: filters.sort === "priority_asc" }).order("created_at", { ascending: false });
+  } else {
+    query = query.order("created_at", { ascending: false });
+  }
+  query = query.limit(filters.limit ?? 2000);
+  const { data, error } = await measureAsync("tickets:print", () => query);
+  return { data: (data ?? []) as unknown as TicketWithRelations[], error: error?.message ?? null };
 }
 
 type CountQuery = PromiseLike<{ count: number | null; error: { message: string } | null }>;
