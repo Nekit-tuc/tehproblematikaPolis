@@ -1,3 +1,4 @@
+import { getPreviousWorkWeekRange, getWorkWeekRange } from "@/lib/date/work-week";
 import { getCategories, getObjects, getTickets, type QueryResult } from "@/lib/supabase/queries";
 import { createClient } from "@/lib/supabase/server";
 import { getWorkers } from "@/lib/supabase/worker-queries";
@@ -183,13 +184,6 @@ function addDays(date: Date, days: number) {
   return value;
 }
 
-function startOfWeek(date: Date) {
-  const value = atStartOfDay(date);
-  const day = value.getDay() || 7;
-  value.setDate(value.getDate() - day + 1);
-  return value;
-}
-
 function formatRangeLabel(from: string, to: string) {
   const formatter = new Intl.DateTimeFormat("uk-UA", { day: "2-digit", month: "2-digit", year: "numeric" });
   return `${formatter.format(new Date(`${from}T12:00:00`))} - ${formatter.format(new Date(`${to}T12:00:00`))}`;
@@ -199,10 +193,9 @@ export function getReportsPeriodRange(period: string | undefined, customFrom?: s
   const selected = period === "previous_week" || period === "month" || period === "custom" ? period : "this_week";
   const now = new Date();
   if (selected === "previous_week") {
-    const start = addDays(startOfWeek(now), -7);
-    const end = addDays(start, 6);
-    const from = isoDate(start);
-    const to = isoDate(end);
+    const range = getPreviousWorkWeekRange(now);
+    const from = range.startDate;
+    const to = range.endDate;
     return { period: selected, from, to, label: `Минулий тиждень · ${formatRangeLabel(from, to)}` };
   }
   if (selected === "month") {
@@ -215,10 +208,9 @@ export function getReportsPeriodRange(period: string | undefined, customFrom?: s
   if (selected === "custom" && customFrom && customTo) {
     return { period: selected, from: customFrom, to: customTo, label: `Період · ${formatRangeLabel(customFrom, customTo)}` };
   }
-  const start = startOfWeek(now);
-  const end = addDays(start, 6);
-  const from = isoDate(start);
-  const to = isoDate(end);
+  const range = getWorkWeekRange(now);
+  const from = range.startDate;
+  const to = range.endDate;
   return { period: "this_week", from, to, label: `Цей тиждень · ${formatRangeLabel(from, to)}` };
 }
 
@@ -249,7 +241,7 @@ export function reportsPeriodHref(basePath: string, period: ReportsPeriod, from:
 
 function ticketCreatedInRange(ticket: TicketWithRelations, from: Date, to: Date) {
   const createdAt = new Date(ticket.created_at);
-  return createdAt >= from && createdAt <= to;
+  return createdAt >= from && createdAt < to;
 }
 
 function completionDate(ticket: TicketWithRelations) {
@@ -260,7 +252,7 @@ function ticketCompletedInRange(ticket: TicketWithRelations, from: Date, to: Dat
   const value = completionDate(ticket);
   if (!value || ticket.status !== "done") return false;
   const date = new Date(value);
-  return date >= from && date <= to;
+  return date >= from && date < to;
 }
 
 function uniqueTickets(tickets: TicketWithRelations[]) {
@@ -285,8 +277,8 @@ async function getPlannedAssignmentsForPeriod(from: string, to: string): Promise
   const { data, error } = await supabase
     .from("work_plan_items")
     .select(plannedTicketSelect)
-    .lte("work_plan.period_start", to)
-    .gte("work_plan.period_end", from)
+    .gte("work_plan.period_start", from)
+    .lt("work_plan.period_start", to)
     .limit(2000);
   const rows = ((data ?? []) as unknown[]).map((row) => {
     const ticket = plannedTicket(row);
@@ -405,7 +397,7 @@ function topWorkers(tickets: TicketWithRelations[]): ReportsTopRow[] {
 }
 
 function buildTrend(tickets: TicketWithRelations[], from: Date, to: Date): ReportsDailyPoint[] {
-  const dayCount = Math.min(31, Math.max(1, Math.ceil((to.getTime() - from.getTime()) / 86400000) + 1));
+  const dayCount = Math.min(31, Math.max(1, Math.ceil((to.getTime() - from.getTime()) / 86400000)));
   const formatter = new Intl.DateTimeFormat("uk-UA", { day: "2-digit", month: "2-digit" });
   return Array.from({ length: dayCount }, (_, index) => {
     const date = addDays(from, index);
@@ -654,7 +646,7 @@ function buildSnapshotCategoryRows(rows: WeeklyPeriodTicket[]): CategoryReportRo
 function buildSnapshotTrend(rows: WeeklyPeriodTicket[], from: string, to: string): ReportsDailyPoint[] {
   const fromDate = atStartOfDay(new Date(`${from}T00:00:00`));
   const toDate = atEndOfDay(new Date(`${to}T00:00:00`));
-  const dayCount = Math.min(31, Math.max(1, Math.ceil((toDate.getTime() - fromDate.getTime()) / 86400000) + 1));
+  const dayCount = Math.min(31, Math.max(1, Math.ceil((toDate.getTime() - fromDate.getTime()) / 86400000)));
   const formatter = new Intl.DateTimeFormat("uk-UA", { day: "2-digit", month: "2-digit" });
   return Array.from({ length: dayCount }, (_, index) => {
     const date = addDays(fromDate, index);
@@ -663,7 +655,7 @@ function buildSnapshotTrend(rows: WeeklyPeriodTicket[], from: string, to: string
     const dayEnd = atEndOfDay(date);
     const inDay = rows.filter((row) => {
       const value = new Date(row.created_at_snapshot ?? row.added_at);
-      return value >= dayStart && value <= dayEnd;
+      return value >= dayStart && value < dayEnd;
     });
     return { iso, label: formatter.format(date), count: inDay.length, completed: inDay.filter((row) => snapshotStatus(row) === "done").length };
   });
@@ -724,7 +716,7 @@ export async function getReportsDashboardData(periodParam?: string, customFrom?:
   }
   const periodRange = getReportsPeriodRange(periodParam, customFrom, customTo);
   const fromDate = atStartOfDay(new Date(`${periodRange.from}T00:00:00`));
-  const toDate = atEndOfDay(new Date(`${periodRange.to}T00:00:00`));
+  const toDate = periodRange.period === "this_week" || periodRange.period === "previous_week" ? new Date(`${periodRange.to}T00:00:00`) : atEndOfDay(new Date(`${periodRange.to}T00:00:00`));
   const [ticketsResult, objectsResult, categoriesResult, workersResult, plannedResult] = await Promise.all([
     getTickets({ limit: null }),
     getObjects(),
@@ -743,7 +735,7 @@ export async function getReportsDashboardData(periodParam?: string, customFrom?:
   const plannedTicketIds = new Set(plannedTickets.map((ticket) => ticket.id));
   const plannedByTicket = plannedWorkerMap(plannedAssignments);
   const unresolvedInPeriod = periodTickets.filter((ticket) => (ticketCreatedInRange(ticket, fromDate, toDate) || plannedTicketIds.has(ticket.id)) && isUnresolved(ticket));
-  const waitingConfirmation = periodTickets.filter((ticket) => ticket.status === "waiting_admin_confirmation" && (plannedTicketIds.has(ticket.id) || ticketCreatedInRange(ticket, fromDate, toDate) || (ticket.worker_completed_at ? new Date(ticket.worker_completed_at) >= fromDate && new Date(ticket.worker_completed_at) <= toDate : false)));
+  const waitingConfirmation = periodTickets.filter((ticket) => ticket.status === "waiting_admin_confirmation" && (plannedTicketIds.has(ticket.id) || ticketCreatedInRange(ticket, fromDate, toDate) || (ticket.worker_completed_at ? new Date(ticket.worker_completed_at) >= fromDate && new Date(ticket.worker_completed_at) < toDate : false)));
   const problematicInPeriod = periodTickets.filter((ticket) => isProblematic(ticket) || (plannedTicketIds.has(ticket.id) && isUnresolved(ticket)));
   const categoryTopRows = topCategories(periodTickets);
   const objectTopRows = topObjects(problematicInPeriod.length ? problematicInPeriod : periodTickets);

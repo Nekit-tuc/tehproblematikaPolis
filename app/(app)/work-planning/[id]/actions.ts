@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireRole } from "@/lib/auth/server";
-import { cancelWorkPlan, removeWorkPlanItem, sendWorkPlanToWorkers, updateWorkPlan, type SendWorkPlanMode } from "@/lib/supabase/work-plans";
+import { cancelWorkPlan, moveWorkPlanItemToDraftPlan, removeWorkPlanItem, sendWorkPlanToWorkers, updateWorkPlan, type SendWorkPlanMode } from "@/lib/supabase/work-plans";
 
 function text(formData: FormData, key: string) {
   const value = formData.get(key);
@@ -73,6 +73,31 @@ export async function removeWorkPlanItemAction(workPlanId: string, formData: For
   revalidatePath("/work-planning");
   revalidatePath(`/work-planning/${workPlanId}`);
   success(workPlanId, "item_removed");
+}
+
+export async function moveWorkPlanItemAction(workPlanId: string, formData: FormData) {
+  const { user } = await requireRole(["admin", "management", "tech_manager"]);
+  const itemId = text(formData, "item_id");
+  const targetPlanId = text(formData, "target_plan_id");
+  if (!itemId) fail(workPlanId, "Заявку в плані не знайдено.");
+  if (!targetPlanId) fail(workPlanId, "Оберіть план для перенесення.");
+
+  const result = await moveWorkPlanItemToDraftPlan({
+    itemId,
+    currentPlanId: workPlanId,
+    targetPlanId,
+    actorId: user.id,
+  });
+  if (result.error || !result.data) {
+    console.error("[work-planning] move item failed", { workPlanId, itemId, targetPlanId, error: result.error });
+    fail(workPlanId, publicError(result.error));
+  }
+
+  revalidatePath("/work-planning");
+  revalidatePath(`/work-planning/${workPlanId}`);
+  revalidatePath(`/work-planning/${result.data.targetPlanId}`);
+  revalidatePath("/tickets");
+  success(workPlanId, "item_moved");
 }
 
 export async function cancelWorkPlanAction(workPlanId: string) {

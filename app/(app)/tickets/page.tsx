@@ -26,6 +26,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { TD, TH, THead, TBody, TR, Table } from "@/components/ui/table";
 import { canHardDeleteTicket } from "@/lib/auth/permissions";
 import { requireAuth } from "@/lib/auth/server";
+import { getPreviousWorkWeekRange, getWorkWeekRange } from "@/lib/date/work-week";
 import { getCategories, getTickets, getTicketsPage } from "@/lib/supabase/queries";
 import { formatDate } from "@/lib/utils";
 import type { TicketPriority, TicketStatus, TicketWithRelations } from "@/types/domain";
@@ -38,20 +39,6 @@ function toInputDate(date: Date) {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
-}
-
-function startOfWeek(date = new Date()) {
-  const value = new Date(date);
-  value.setHours(0, 0, 0, 0);
-  const day = value.getDay() || 7;
-  value.setDate(value.getDate() - day + 1);
-  return value;
-}
-
-function addDays(date: Date, days: number) {
-  const value = new Date(date);
-  value.setDate(value.getDate() + days);
-  return value;
 }
 
 function startOfMonth(date = new Date()) {
@@ -245,10 +232,11 @@ export default async function TicketsPage({
   const returnTo = ticketHref({ page: String(safePage) });
   const printHref = ticketHref({ page: undefined }).replace(/^\/tickets/, "/tickets/print");
   const exportHref = ticketHref({ page: undefined }).replace(/^\/tickets/, "/tickets/export");
-  const weekStart = startOfWeek();
+  const currentWorkWeek = getWorkWeekRange();
+  const previousWorkWeek = getPreviousWorkWeekRange();
   const periodLinks = {
-    thisWeek: ticketHref({ from: toInputDate(weekStart), to: toInputDate(addDays(weekStart, 6)) }),
-    previousWeek: ticketHref({ from: toInputDate(addDays(weekStart, -7)), to: toInputDate(addDays(weekStart, -1)) }),
+    thisWeek: ticketHref({ from: currentWorkWeek.startDate, to: currentWorkWeek.endDate }),
+    previousWeek: ticketHref({ from: previousWorkWeek.startDate, to: previousWorkWeek.endDate }),
     thisMonth: ticketHref({ from: toInputDate(startOfMonth()), to: toInputDate(endOfMonth()) }),
     clear: ticketHref({ from: undefined, to: undefined }),
   };

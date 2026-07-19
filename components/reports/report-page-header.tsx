@@ -21,7 +21,7 @@ export function ReportBackButton({ href = "/reports" }: { href?: string }) {
   return <Button asChild variant="outline" size="sm" className="h-9 rounded-2xl text-[11px]"><a href={href}>До звітів</a></Button>;
 }
 
-export function ReportExportButton({ href, label = "\u0415\u043A\u0441\u043F\u043E\u0440\u0442" }: { href: string; label?: string }) {
+export function ReportExportButton({ href, label = "Excel" }: { href: string; label?: string }) {
   return (
     <Button asChild size="sm" className="h-9 rounded-2xl text-[11px]">
       <a href={href}>

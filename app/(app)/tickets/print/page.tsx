@@ -2,29 +2,9 @@ import Link from "next/link";
 import type React from "react";
 import { PrintButton } from "@/components/reports/print-button";
 import { requireAuth } from "@/lib/auth/server";
+import { getWorkWeekRange } from "@/lib/date/work-week";
 import { formatDateDDMMYYYY, formatDateTimeDDMMYYYYHHMM, getTicketReportRows, getTicketReportSummary } from "@/lib/reports/ticket-report-format";
 import { getTicketsForPrint } from "@/lib/supabase/queries";
-
-function toInputDate(date: Date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function startOfWeek(date = new Date()) {
-  const value = new Date(date);
-  value.setHours(0, 0, 0, 0);
-  const day = value.getDay() || 7;
-  value.setDate(value.getDate() - day + 1);
-  return value;
-}
-
-function addDays(date: Date, days: number) {
-  const value = new Date(date);
-  value.setDate(value.getDate() + days);
-  return value;
-}
 
 function isDateParam(value?: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(value ?? "");
@@ -40,9 +20,9 @@ function buildBackHref(params: Record<string, string>) {
 export default async function TicketsPrintPage({ searchParams }: { searchParams: Promise<{ from?: string; to?: string; status?: string; category?: string; priority?: string; q?: string; sort?: string }> }) {
   await requireAuth();
   const params = await searchParams;
-  const weekStart = startOfWeek();
-  const from = isDateParam(params.from) ? params.from! : toInputDate(weekStart);
-  const to = isDateParam(params.to) ? params.to! : toInputDate(addDays(weekStart, 6));
+  const currentWorkWeek = getWorkWeekRange();
+  const from = isDateParam(params.from) ? params.from! : currentWorkWeek.startDate;
+  const to = isDateParam(params.to) ? params.to! : currentWorkWeek.endDate;
   const filters = {
     from,
     to,

@@ -1,6 +1,7 @@
 import ExcelJS from "exceljs";
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth/server";
+import { getWorkWeekRange } from "@/lib/date/work-week";
 import { formatDateDDMMYYYY, formatDateTimeDDMMYYYYHHMM, getTicketReportRows, getTicketReportSummary, type TicketReportRow } from "@/lib/reports/ticket-report-format";
 import { getTicketsForPrint } from "@/lib/supabase/queries";
 
@@ -13,40 +14,19 @@ const thinBorder: Partial<ExcelJS.Borders> = {
   right: { style: "thin", color: { argb: "FFE5E7EB" } },
 };
 
-function toInputDate(date: Date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function startOfWeek(date = new Date()) {
-  const value = new Date(date);
-  value.setHours(0, 0, 0, 0);
-  const day = value.getDay() || 7;
-  value.setDate(value.getDate() - day + 1);
-  return value;
-}
-
-function addDays(date: Date, days: number) {
-  const value = new Date(date);
-  value.setDate(value.getDate() + days);
-  return value;
-}
-
 function isDateParam(value?: string | null) {
   return /^\d{4}-\d{2}-\d{2}$/.test(value ?? "");
 }
 
 function periodFromRequest(request: Request) {
   const url = new URL(request.url);
-  const weekStart = startOfWeek();
+  const currentWorkWeek = getWorkWeekRange();
   const explicitFrom = url.searchParams.get("from");
   const explicitTo = url.searchParams.get("to");
   const hasExplicitPeriod = isDateParam(explicitFrom) && isDateParam(explicitTo);
   return {
-    from: isDateParam(explicitFrom) ? explicitFrom! : toInputDate(weekStart),
-    to: isDateParam(explicitTo) ? explicitTo! : toInputDate(addDays(weekStart, 6)),
+    from: isDateParam(explicitFrom) ? explicitFrom! : currentWorkWeek.startDate,
+    to: isDateParam(explicitTo) ? explicitTo! : currentWorkWeek.endDate,
     hasExplicitPeriod,
     status: url.searchParams.get("status") ?? undefined,
     category: url.searchParams.get("category") ?? undefined,

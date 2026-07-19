@@ -1,11 +1,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Download, ExternalLink } from "lucide-react";
+import { ArrowLeft, Download, ExternalLink, RotateCcw } from "lucide-react";
+import { ConfirmSubmitButton } from "@/components/tickets/confirm-submit-button";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { requireRole } from "@/lib/auth/server";
 import { getWeeklyPeriodDetails, type WeeklyPeriodTicket, type WeeklySummary, type WeeklyTicketRole } from "@/lib/supabase/weekly-control";
+import { rebuildWeeklyArchiveAction } from "../actions";
 
 const roleLabels: Record<WeeklyTicketRole, string> = {
   created: "Створені",
@@ -28,7 +30,7 @@ const statusLabels: Record<string, string> = {
   rejected: "Відхилена",
 };
 
-export default async function WeeklyPeriodDetailsPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ success?: string }> }) {
+export default async function WeeklyPeriodDetailsPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ success?: string; error?: string }> }) {
   await requireRole(["admin", "management", "tech_manager"]);
   const [{ id }, query] = await Promise.all([params, searchParams]);
   const result = await getWeeklyPeriodDetails(id);
@@ -39,6 +41,8 @@ export default async function WeeklyPeriodDetailsPage({ params, searchParams }: 
   return (
     <div className="page-shell mx-auto max-w-6xl space-y-4 pb-28 md:pb-8">
       {query.success === "closed" ? <Alert title="Тиждень закрито">Snapshot створено. Архів доступний для перегляду та експорту.</Alert> : null}
+      {query.success === "recalculated" ? <Alert title={"\u0410\u0440\u0445\u0456\u0432 \u043F\u0435\u0440\u0435\u0440\u0430\u0445\u043E\u0432\u0430\u043D\u043E"}>{"Snapshot \u0442\u0430 \u0441\u0442\u0430\u0442\u0438\u0441\u0442\u0438\u043A\u0443 \u043E\u043D\u043E\u0432\u043B\u0435\u043D\u043E \u0437\u0430 \u043F\u043E\u0442\u043E\u0447\u043D\u043E\u044E \u043B\u043E\u0433\u0456\u043A\u043E\u044E \u0442\u0438\u0436\u043D\u044F."}</Alert> : null}
+      {query.error === "rebuild-failed" ? <Alert title={"\u041D\u0435 \u0432\u0434\u0430\u043B\u043E\u0441\u044F \u043F\u0435\u0440\u0435\u0440\u0430\u0445\u0443\u0432\u0430\u0442\u0438 \u0430\u0440\u0445\u0456\u0432"}>{"\u041F\u0435\u0440\u0435\u0432\u0456\u0440\u0442\u0435 \u0434\u043E\u0441\u0442\u0443\u043F \u0434\u043E Supabase \u0430\u0431\u043E \u043F\u043E\u0432\u0442\u043E\u0440\u0456\u0442\u044C \u043F\u0456\u0437\u043D\u0456\u0448\u0435."}</Alert> : null}
       {result.error ? <Alert title="Дані архіву завантажено частково">{result.error}</Alert> : null}
 
       <section className="rounded-[20px] border border-white/[0.08] bg-white/[0.04] p-4 shadow-sm shadow-black/20 md:p-5">
@@ -50,7 +54,21 @@ export default async function WeeklyPeriodDetailsPage({ params, searchParams }: 
           </div>
           <div className="flex flex-wrap gap-2">
             <Badge tone="gray">{period.status}</Badge>
-            <Button asChild size="sm"><Link href={`/weekly-control/${period.id}/export`}><Download className="mr-1 h-3.5 w-3.5" />Експорт CSV</Link></Button>
+            <Button asChild size="sm"><Link href={`/weekly-control/${period.id}/export`}><Download className="mr-1 h-3.5 w-3.5" />Експорт Excel</Link></Button>
+            {period.status === "archived" || period.status === "closed" ? (
+              <form action={rebuildWeeklyArchiveAction}>
+                <input type="hidden" name="periodId" value={period.id} />
+                <ConfirmSubmitButton
+                  type="submit"
+                  variant="outline"
+                  size="sm"
+                  message={"\u041F\u0435\u0440\u0435\u0440\u0430\u0445\u0443\u0432\u0430\u0442\u0438 snapshot \u0446\u044C\u043E\u0433\u043E \u0430\u0440\u0445\u0456\u0432\u0443 \u0437\u0430 \u043D\u043E\u0432\u043E\u044E \u043B\u043E\u0433\u0456\u043A\u043E\u044E? \u0417\u0430\u044F\u0432\u043A\u0438 \u0442\u0430 \u043F\u043B\u0430\u043D\u0438 \u043D\u0435 \u0437\u043C\u0456\u043D\u044F\u0442\u044C\u0441\u044F."}
+                  pendingText={"\u041F\u0435\u0440\u0435\u0440\u0430\u0445\u043E\u0432\u0443\u0454\u0442\u044C\u0441\u044F..."}
+                >
+                  <RotateCcw className="mr-1 h-3.5 w-3.5" />{"\u041F\u0435\u0440\u0435\u0440\u0430\u0445\u0443\u0432\u0430\u0442\u0438"}
+                </ConfirmSubmitButton>
+              </form>
+            ) : null}
           </div>
         </div>
       </section>
@@ -84,8 +102,8 @@ function ReportsForWeek({ periodId }: { periodId: string }) {
     { title: "\u0417\u0432\u0456\u0442 \u0434\u043B\u044F \u0434\u0438\u0440\u0435\u043A\u0442\u043E\u0440\u0430", href: `/reports/director?periodId=${periodId}` },
   ];
   const exports = [
-    { title: "Weekly CSV", href: `/reports/export?type=weekly&periodId=${periodId}` },
-    { title: "Director CSV", href: `/reports/export?type=director&periodId=${periodId}` },
+    { title: "Weekly Excel", href: `/reports/export?type=weekly&periodId=${periodId}` },
+    { title: "Director Excel", href: `/reports/export?type=director&periodId=${periodId}` },
   ];
   return (
     <section className="rounded-[18px] border border-orange-400/15 bg-orange-500/[0.04] p-3 shadow-sm shadow-black/20">

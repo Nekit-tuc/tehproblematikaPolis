@@ -12,9 +12,9 @@ import { SubmitButton } from "@/components/ui/submit-button";
 import { Textarea } from "@/components/ui/textarea";
 import { requireRole } from "@/lib/auth/server";
 import { priorityLabels, statusLabels } from "@/lib/labels";
-import { getWorkPlanById, getWorkPlanDispatches, getWorkPlanItems, type WorkPlan, type WorkPlanDispatch, type WorkPlanItem, type WorkPlanStatus } from "@/lib/supabase/work-plans";
+import { getDraftWorkPlansForMove, getWorkPlanById, getWorkPlanDispatches, getWorkPlanItems, type WorkPlan, type WorkPlanDispatch, type WorkPlanItem, type WorkPlanStatus } from "@/lib/supabase/work-plans";
 import { cn, formatDate } from "@/lib/utils";
-import { cancelWorkPlanAction, removeWorkPlanItemAction, resendWorkPlanToAllAction, retryFailedWorkPlanDispatchAction, sendWorkPlanAction, updateWorkPlanAction } from "./actions";
+import { cancelWorkPlanAction, moveWorkPlanItemAction, removeWorkPlanItemAction, resendWorkPlanToAllAction, retryFailedWorkPlanDispatchAction, sendWorkPlanAction, updateWorkPlanAction } from "./actions";
 
 type PageProps = {
   params: Promise<{ id: string }>;
@@ -48,6 +48,7 @@ function successMessage(value?: string) {
   if (!value) return null;
   if (value === "updated") return "План оновлено.";
   if (value === "item_removed") return "Заявку прибрано з плану.";
+  if (value === "item_moved") return "Заявку перенесено в інший план.";
   if (value === "cancelled") return "План скасовано.";
   if (value.startsWith("sent_") || value.startsWith("retry_") || value.startsWith("resend_")) {
     const [mode, sentRaw, failedRaw, skippedRaw] = value.split("_");
@@ -82,6 +83,26 @@ function groupItems(items: WorkPlanItem[]) {
 
 function workerCount(items: WorkPlanItem[]) {
   return new Set(items.map((item) => item.worker_id).filter(Boolean)).size;
+}
+
+function inferredWorkerFromPlanTitle(title: string) {
+  if (title.startsWith("Денис")) return "Денис сантехнік";
+  if (title.startsWith("Лена")) return "Лена (менеджер Гени)";
+  if (title.startsWith("Нікіта")) return "Нікіта";
+  if (title.startsWith("Максим")) return "Максим";
+  if (title.startsWith("Женя")) return "Женя";
+  if (title.includes("вікна/двері/фурнітура")) return "Віталік, фурнітура вікна/двері";
+  if (title.includes("загальні будроботи/сварка")) return "Віталіка бригада";
+  if (title.startsWith("Віталік")) return "Віталік";
+  return null;
+}
+
+function planItemWorkerLabel(item: WorkPlanItem, plan: WorkPlan) {
+  if (item.worker?.name) return item.worker.name;
+  if (item.worker_id) return "Виконавець не знайдений";
+  if (item.ticket?.worker?.name) return item.ticket.worker.name;
+  if (item.ticket?.assignee_worker_id) return "Виконавець не знайдений";
+  return inferredWorkerFromPlanTitle(plan.title) ?? "Не призначено";
 }
 
 function planProgress(items: WorkPlanItem[]) {
@@ -143,16 +164,18 @@ function metricToneClass(tone: "gray" | "green" | "orange" | "red" | "blue") {
 export default async function WorkPlanDetailPage({ params, searchParams }: PageProps) {
   await requireRole(["admin", "management", "tech_manager"]);
   const [{ id }, query] = await Promise.all([params, searchParams]);
-  const [planResult, itemsResult, dispatchesResult] = await Promise.all([
+  const [planResult, itemsResult, dispatchesResult, draftPlansResult] = await Promise.all([
     getWorkPlanById(id),
     getWorkPlanItems(id),
     getWorkPlanDispatches(id),
+    getDraftWorkPlansForMove(id),
   ]);
 
   const plan = planResult.data;
   const items = itemsResult.data;
   const dispatches = dispatchesResult.data;
-  const error = safeDecode(query.error) ?? planResult.error ?? itemsResult.error ?? dispatchesResult.error;
+  const draftPlans = draftPlansResult.data;
+  const error = safeDecode(query.error) ?? planResult.error ?? itemsResult.error ?? dispatchesResult.error ?? draftPlansResult.error;
   const success = successMessage(query.success);
 
   if (!plan) {
@@ -256,8 +279,6 @@ export default async function WorkPlanDetailPage({ params, searchParams }: PageP
         <Metric label="Надіслано" value={plan.sent_at ? formatDate(plan.sent_at) : "Не надсилалось"} tone="orange" icon={Send} compact />
       </div>
 
-      {isDraft ? <DraftEditor plan={plan} /> : null}
-
       <Card className="rounded-[18px] border-white/[0.08] bg-white/[0.03] shadow-[0_14px_34px_rgba(0,0,0,0.28)] md:rounded-lg">
         <CardHeader className="space-y-0 p-3 md:p-6">
           <div className="flex min-w-0 items-start gap-2.5">
@@ -285,12 +306,14 @@ export default async function WorkPlanDetailPage({ params, searchParams }: PageP
                 <Badge className="h-6 shrink-0 rounded-[9px] px-2 text-[10px]" tone={group.key === "unassigned" ? "gray" : "orange"}>{group.items.length} заявок</Badge>
               </div>
               <div className="grid gap-2">
-                {group.items.map((item) => <PlanItemCard key={item.id} item={item} plan={plan} />)}
+                {group.items.map((item) => <PlanItemCard key={item.id} item={item} plan={plan} draftPlans={draftPlans} />)}
               </div>
             </div>
           ))}
         </CardContent>
       </Card>
+
+      {isDraft ? <DraftEditor plan={plan} /> : null}
 
       <DispatchHistory dispatches={dispatches} />
     </div>
@@ -300,11 +323,11 @@ export default async function WorkPlanDetailPage({ params, searchParams }: PageP
 function DraftEditor({ plan }: { plan: WorkPlan }) {
   return (
     <Card className="rounded-[17px] border-orange-500/20 bg-orange-950/10 md:rounded-lg">
-      <CardHeader>
-        <CardTitle>Редагування чернетки</CardTitle>
-        <CardDescription>Після надсилання склад і параметри плану стануть доступні тільки для перегляду.</CardDescription>
+      <CardHeader className="p-3 md:p-6">
+        <CardTitle className="text-[15px] md:text-lg">Редагування чернетки</CardTitle>
+        <CardDescription className="text-[11px] leading-4 md:text-sm">Після надсилання склад і параметри плану стануть доступні тільки для перегляду.</CardDescription>
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent className="space-y-3 p-3 pt-0 md:space-y-4 md:p-6 md:pt-0">
         <form action={updateWorkPlanAction.bind(null, plan.id)} className="grid gap-3 md:grid-cols-4">
           <Field label="Назва">
             <Input name="title" defaultValue={plan.title} required />
@@ -334,8 +357,9 @@ function DraftEditor({ plan }: { plan: WorkPlan }) {
   );
 }
 
-function PlanItemCard({ item, plan }: { item: WorkPlanItem; plan: WorkPlan }) {
+function PlanItemCard({ item, plan, draftPlans }: { item: WorkPlanItem; plan: WorkPlan; draftPlans: WorkPlan[] }) {
   const ticket = item.ticket;
+  const workerLabel = planItemWorkerLabel(item, plan);
   const completionNote = ticket?.status === "waiting_admin_confirmation"
     ? `Позначено виконавцем: ${ticket.worker_completed_at ? formatDate(ticket.worker_completed_at) : "-"}`
     : ticket?.status === "done"
@@ -356,6 +380,7 @@ function PlanItemCard({ item, plan }: { item: WorkPlanItem; plan: WorkPlan }) {
         </div>
         <div className="mt-1 line-clamp-2 break-words text-[10px] leading-4 text-zinc-400 md:text-xs">{ticket?.title || ticket?.description || "-"}</div>
         <div className="mt-1 line-clamp-1 break-words text-[10px] text-zinc-500 md:text-xs">{ticket?.category?.name ?? item.category ?? "-"}</div>
+        <div className="mt-1 line-clamp-1 break-words text-[10px] font-medium text-zinc-300 md:text-xs">Виконавець: {workerLabel}</div>
         {completionNote ? <div className="mt-1.5 flex items-center gap-1.5 break-words text-[9px] font-medium text-emerald-300 md:text-xs"><CheckCircle className="h-3 w-3 shrink-0" />{completionNote}</div> : null}
       </div>
       <Badge className="mt-2 hidden w-fit text-[9px] md:mt-0 md:inline-flex md:text-xs" tone={priorityTone(ticket?.priority)}>{ticket?.priority ? priorityLabels[ticket.priority] : "-"}</Badge>
@@ -371,6 +396,25 @@ function PlanItemCard({ item, plan }: { item: WorkPlanItem; plan: WorkPlan }) {
             <input type="hidden" name="ticket_id" value={ticket.id} />
             <SubmitButton variant="outline" size="sm" className="h-8 w-full rounded-[10px] border-white/[0.08] bg-white/[0.035] text-[10px] md:h-auto md:w-auto md:rounded-md md:text-sm" pendingText="...">
               Прибрати
+            </SubmitButton>
+          </form>
+        ) : null}
+        {plan.status === "draft" && ticket && draftPlans.length > 0 ? (
+          <form action={moveWorkPlanItemAction.bind(null, plan.id)} className="grid gap-1.5">
+            <input type="hidden" name="item_id" value={item.id} />
+            <select
+              name="target_plan_id"
+              required
+              className="h-8 w-full rounded-[10px] border border-white/[0.08] bg-black/30 px-2 text-[10px] text-zinc-100 outline-none ring-orange-400/30 focus:ring-2 md:min-w-[150px] md:rounded-md"
+              defaultValue=""
+            >
+              <option value="" disabled>Інший план</option>
+              {draftPlans.map((draftPlan) => (
+                <option key={draftPlan.id} value={draftPlan.id}>{draftPlan.title}</option>
+              ))}
+            </select>
+            <SubmitButton variant="outline" size="sm" className="h-8 w-full rounded-[10px] border-orange-400/20 bg-orange-500/10 text-[10px] text-orange-100 md:h-auto md:w-auto md:rounded-md md:text-sm" pendingText="...">
+              Перенести
             </SubmitButton>
           </form>
         ) : null}

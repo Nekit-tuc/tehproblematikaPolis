@@ -2,13 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Bot, Building2, ClipboardList, Home, Plus } from "lucide-react";
+import { Building2, CalendarDays, ClipboardList, Home, Plus } from "lucide-react";
 import type { Profile } from "@/types/domain";
 import { cn } from "@/lib/utils";
 
 export function MobileBottomNav({ profile, aiTicketsCount = 0 }: { profile: Profile; aiTicketsCount?: number }) {
-  const canSeeAi = ["admin", "management", "tech_manager"].includes(profile.role);
   const canSeeObjects = ["admin", "management", "tech_manager"].includes(profile.role);
+  void aiTicketsCount;
 
   return (
     <nav className="fixed inset-x-0 bottom-0 z-40 px-4 pb-[max(env(safe-area-inset-bottom),0.75rem)] md:hidden">
@@ -24,7 +24,7 @@ export function MobileBottomNav({ profile, aiTicketsCount = 0 }: { profile: Prof
             <Plus className="h-6 w-6 stroke-[2.4]" />
           </span>
         </Link>
-        <MobileNavItem href={canSeeAi ? "/ai-tickets" : "/tickets"} icon={Bot} label="AI" count={canSeeAi ? aiTicketsCount : 0} />
+        <MobileNavItem href="/work-planning" icon={CalendarDays} label={"\u041F\u043B\u0430\u043D\u0438"} />
         <MobileNavItem href={canSeeObjects ? "/objects" : "/dashboard"} icon={Building2} label="Об'єкти" />
       </div>
     </nav>

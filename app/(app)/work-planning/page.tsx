@@ -29,6 +29,7 @@ import { Label } from "@/components/ui/label";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { Textarea } from "@/components/ui/textarea";
 import { requireRole } from "@/lib/auth/server";
+import { getNextWorkWeekRange } from "@/lib/date/work-week";
 import { priorityLabels, statusLabels } from "@/lib/labels";
 import { getCategories, getObjects } from "@/lib/supabase/queries";
 import { getTicketsGroupedByCategory, getWorkPlanningSummary, getWorkPlans, type PlanningFilters, type PlanningTicket, type WorkPlan, type WorkPlanStatus, type WorkPlanningSummary } from "@/lib/supabase/work-plans";
@@ -179,6 +180,7 @@ export default async function WorkPlanningPage({ searchParams }: { searchParams:
   const createError = displayWorkPlanningError(params.error);
   const ticketCount = groupsResult.data.reduce((sum, group) => sum + group.tickets.length, 0);
   const planningSummary = summaryResult.data;
+  const nextWorkWeek = getNextWorkWeekRange();
 
   return (
     <div className="page-shell max-w-full space-y-2.5 overflow-x-hidden bg-[radial-gradient(circle_at_50%_0%,rgba(249,115,22,0.10),transparent_28%)] pb-28 md:space-y-6 md:bg-none md:pb-6">
@@ -271,10 +273,10 @@ export default async function WorkPlanningPage({ searchParams }: { searchParams:
                 <Input name="title" required placeholder="Наприклад: План робіт на тиждень" />
               </Field>
               <Field label="Період з">
-                <Input name="period_start" type="date" required />
+                <Input name="period_start" type="date" required defaultValue={nextWorkWeek.startDate} />
               </Field>
               <Field label="Період по">
-                <Input name="period_end" type="date" required />
+                <Input name="period_end" type="date" required defaultValue={nextWorkWeek.endDate} />
               </Field>
               <div className="flex items-end">
                 <SubmitButton type="submit" pendingText="Створюється..." showOverlay className="min-h-8 w-full rounded-lg text-[10px] md:min-h-0 md:rounded-md md:text-sm">

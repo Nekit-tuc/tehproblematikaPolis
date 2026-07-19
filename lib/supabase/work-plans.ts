@@ -1,4 +1,6 @@
 import { measureAsync } from "@/lib/performance";
+import { getNextWorkWeekRange } from "@/lib/date/work-week";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { hasSupabaseEnv, missingSupabaseMessage } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 import { sendWorkPlanToWorker } from "@/lib/telegram/work-plan-notifications";
@@ -101,6 +103,77 @@ export type UpdateWorkPlanInput = {
 
 const planningStatuses: TicketStatus[] = ["new", "assigned", "in_progress", "waiting_admin_confirmation"];
 const activeWorkPlanStatuses: WorkPlanStatus[] = ["draft", "sent", "partially_done"];
+type AutoWorkPlanConfig = {
+  title: string;
+  categoryName: string;
+  workerName: string;
+  telegramUsername?: string | null;
+  telegramId?: string | null;
+  categoryMatchers: string[];
+  workerMatchers: string[];
+};
+
+const autoWorkPlanConfigs: AutoWorkPlanConfig[] = [
+  {
+    title: "Максим — буд роботи",
+    categoryName: "Будівельні роботи",
+    workerName: "Максим",
+    telegramUsername: "maks8700",
+    telegramId: "6494218954",
+    categoryMatchers: ["будівельні роботи"],
+    workerMatchers: ["максим"],
+  },
+  {
+    title: "Нікіта — студенти/організаційні питання",
+    categoryName: "Студенти",
+    workerName: "Нікіта",
+    telegramUsername: "Ta_pac",
+    telegramId: "5023071549",
+    categoryMatchers: ["студенти", "організаційні", "організаційні питання"],
+    workerMatchers: ["нікіта", "никита"],
+  },
+  {
+    title: "Женя — важливі питання/електрика",
+    categoryName: "Електрика",
+    workerName: "Женя",
+    telegramUsername: "Yevheniy_romaniuk",
+    telegramId: "1005448960",
+    categoryMatchers: ["електрика"],
+    workerMatchers: ["женя", "євген", "евген"],
+  },
+  {
+    title: "Віталік — загальні будроботи/сварка",
+    categoryName: "Буд-роботи, зварювальні, ремонтні проф",
+    workerName: "Віталіка бригада",
+    categoryMatchers: ["буд-роботи", "зварювальні", "ремонтні проф", "сварка", "зварка"],
+    workerMatchers: ["віталіка бригада", "віталік бригада", "бригада віталіка"],
+  },
+  {
+    title: "Денис — сантехніка",
+    categoryName: "Сантехніка",
+    workerName: "Денис сантехнік",
+    telegramUsername: "denis20260",
+    telegramId: "5953788759",
+    categoryMatchers: ["сантехніка", "сантех"],
+    workerMatchers: ["денис сантехнік", "денис"],
+  },
+  {
+    title: "Віталік — вікна/двері/фурнітура",
+    categoryName: "Вікна / двері / фурнітура",
+    workerName: "Віталік, фурнітура вікна/двері",
+    telegramId: "1826329291",
+    categoryMatchers: ["вікна", "двері", "фурнітура", "вікна двері фурнітура"],
+    workerMatchers: ["віталік фурнітура вікна двері", "фурнітура вікна двері"],
+  },
+  {
+    title: "Лена — каналізація",
+    categoryName: "Каналізація",
+    workerName: "Лена (менеджер Гени)",
+    telegramId: "5356376176",
+    categoryMatchers: ["каналізація", "канал"],
+    workerMatchers: ["лена менеджер гени", "лена", "менеджер гени"],
+  },
+];
 
 const planningTicketSelect = `
   id,
@@ -153,6 +226,7 @@ const planItemSelect = `
     source,
     created_at,
     updated_at,
+    worker:workers(id, name, phone, telegram_username, telegram_id, is_active, notes, created_at, updated_at),
     object:objects(id, name, type, object_number, city, district, address, is_active, created_at),
     category:categories(id, name, description, is_active, created_at)
   )
@@ -172,6 +246,93 @@ const dispatchSelect = `
 
 function emptyWithError<T>(data: T): QueryResult<T> {
   return { data, error: missingSupabaseMessage };
+}
+
+function normalizePlanningText(value: string | null | undefined) {
+  return (value ?? "")
+    .toLowerCase()
+    .replace(/[’'`]/g, "'")
+    .replace(/[\/\\–—-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function autoPlanNote(config: AutoWorkPlanConfig) {
+  return `Автоматична чернетка. Виконавець: ${config.workerName}. Категорія: ${config.categoryName}.`;
+}
+
+function autoPlanConfigForCategory(categoryName: string | null | undefined) {
+  const normalized = normalizePlanningText(categoryName);
+  if (!normalized) return null;
+  return autoWorkPlanConfigs.find((config) =>
+    config.categoryMatchers.some((matcher) => {
+      const normalizedMatcher = normalizePlanningText(matcher);
+      return normalized.includes(normalizedMatcher) || normalizedMatcher.includes(normalized);
+    }),
+  ) ?? null;
+}
+
+function autoPlanConfigForTitle(title: string | null | undefined) {
+  const normalizedTitle = normalizePlanningText(title);
+  if (!normalizedTitle) return null;
+  return autoWorkPlanConfigs.find((config) => normalizePlanningText(config.title) === normalizedTitle) ?? null;
+}
+
+function workerMatches(worker: Pick<Worker, "name" | "telegram_username">, config: AutoWorkPlanConfig) {
+  const workerName = normalizePlanningText(worker.name);
+  const telegramUsername = normalizePlanningText(worker.telegram_username?.replace(/^@/, ""));
+  const expectedUsername = normalizePlanningText(config.telegramUsername?.replace(/^@/, ""));
+  if (expectedUsername && telegramUsername === expectedUsername) return true;
+  const expectedName = normalizePlanningText(config.workerName);
+  if (workerName === expectedName || workerName.includes(expectedName) || expectedName.includes(workerName)) return true;
+  return config.workerMatchers.some((matcher) => {
+    const normalizedMatcher = normalizePlanningText(matcher);
+    return workerName === normalizedMatcher || workerName.includes(normalizedMatcher) || normalizedMatcher.includes(workerName) || telegramUsername === normalizedMatcher;
+  });
+}
+
+async function findAutoPlanWorkerId(supabase: ReturnType<typeof createAdminClient>, config: AutoWorkPlanConfig | null) {
+  if (!config) return null;
+  if (config.telegramId) {
+    const byTelegramId = await measureAsync("work-planning:auto_worker_by_telegram_id", () =>
+      supabase.from("workers").select("id, name, telegram_username, telegram_id").eq("is_active", true).eq("telegram_id", config.telegramId).maybeSingle(),
+    );
+    if (byTelegramId.error) {
+      console.warn("[work-planning:auto] worker telegram_id lookup failed", { error: byTelegramId.error.message, planTitle: config.title, workerName: config.workerName });
+    } else if (byTelegramId.data) {
+      return (byTelegramId.data as Pick<Worker, "id">).id;
+    }
+  }
+
+  if (config.telegramUsername) {
+    const username = config.telegramUsername.replace(/^@/, "").toLowerCase();
+    const byUsername = await measureAsync("work-planning:auto_worker_by_username", () =>
+      supabase.from("workers").select("id, name, telegram_username, telegram_id").eq("is_active", true).ilike("telegram_username", username).maybeSingle(),
+    );
+    if (byUsername.error) {
+      console.warn("[work-planning:auto] worker username lookup failed", { error: byUsername.error.message, planTitle: config.title, workerName: config.workerName });
+    } else if (byUsername.data) {
+      return (byUsername.data as Pick<Worker, "id">).id;
+    }
+  }
+
+  const { data, error } = await measureAsync("work-planning:auto_worker_lookup", () =>
+    supabase.from("workers").select("id, name, telegram_username, telegram_id").eq("is_active", true).limit(200),
+  );
+  if (error) {
+    console.warn("[work-planning:auto] worker lookup failed", { error: error.message, planTitle: config.title });
+    return null;
+  }
+  const worker = ((data ?? []) as Array<Pick<Worker, "id" | "name" | "telegram_username">>).find((row) => workerMatches(row, config));
+  if (!worker) {
+    console.warn("[work-planning:auto] worker not found", {
+      planTitle: config.title,
+      workerName: config.workerName,
+      telegramUsername: config.telegramUsername ?? null,
+      telegramId: config.telegramId ?? null,
+    });
+  }
+  return worker?.id ?? null;
 }
 
 type ActivePlanItemRow = {
@@ -317,6 +478,164 @@ export async function createWorkPlan(input: CreateWorkPlanInput): Promise<QueryR
   return { data: data as WorkPlan | null, error: error?.message ?? null };
 }
 
+export async function ensureWeeklyDraftPlansForAutoRouting(date = new Date()): Promise<QueryResult<{ periodStart: string; periodEnd: string; plans: WorkPlan[]; created: number }>> {
+  if (!hasSupabaseEnv()) return emptyWithError({ periodStart: "", periodEnd: "", plans: [], created: 0 });
+  const supabase = createAdminClient();
+  const range = getNextWorkWeekRange(date);
+  const titles = autoWorkPlanConfigs.map((config) => config.title);
+
+  const { data: existingData, error: existingError } = await measureAsync("work-planning:auto_existing_plans", () =>
+    supabase
+      .from("work_plans")
+      .select("id, title, period_start, period_end, status, created_by, created_at, updated_at, sent_at, notes")
+      .eq("period_start", range.startDate)
+      .eq("period_end", range.endDate)
+      .in("title", titles)
+      .in("status", activeWorkPlanStatuses),
+  );
+  if (existingError) return { data: { periodStart: range.startDate, periodEnd: range.endDate, plans: [], created: 0 }, error: existingError.message };
+
+  const existing = (existingData ?? []) as WorkPlan[];
+  const existingTitles = new Set(existing.map((plan) => plan.title));
+  const missing = autoWorkPlanConfigs.filter((config) => !existingTitles.has(config.title));
+  let createdPlans: WorkPlan[] = [];
+
+  if (missing.length > 0) {
+    const { data: inserted, error: insertError } = await measureAsync("work-planning:auto_create_plans", () =>
+      supabase
+        .from("work_plans")
+        .insert(missing.map((config) => ({
+          title: config.title,
+          period_start: range.startDate,
+          period_end: range.endDate,
+          status: "draft",
+          notes: autoPlanNote(config),
+        })))
+        .select("id, title, period_start, period_end, status, created_by, created_at, updated_at, sent_at, notes"),
+    );
+    if (insertError) return { data: { periodStart: range.startDate, periodEnd: range.endDate, plans: existing, created: 0 }, error: insertError.message };
+    createdPlans = (inserted ?? []) as WorkPlan[];
+  }
+
+  await Promise.all(existing.map(async (plan) => {
+    const config = autoPlanConfigForTitle(plan.title);
+    if (!config) return;
+    const expectedNote = autoPlanNote(config);
+    if (plan.notes && plan.notes !== "Автоматична чернетка. Створено системою для розподілу заявок із Telegram-бота.") return;
+    const { error } = await measureAsync("work-planning:auto_update_plan_note", () =>
+      supabase.from("work_plans").update({ notes: expectedNote }).eq("id", plan.id),
+    );
+    if (error) console.warn("[work-planning:auto] plan note update failed", { planId: plan.id, title: plan.title, error: error.message });
+    else plan.notes = expectedNote;
+  }));
+
+  return {
+    data: {
+      periodStart: range.startDate,
+      periodEnd: range.endDate,
+      plans: [...existing, ...createdPlans],
+      created: createdPlans.length,
+    },
+    error: null,
+  };
+}
+
+export async function getDraftWorkPlansForMove(excludePlanId?: string): Promise<QueryResult<WorkPlan[]>> {
+  if (!hasSupabaseEnv()) return emptyWithError([]);
+  const supabase = await createClient();
+  let query = supabase
+    .from("work_plans")
+    .select("id, title, period_start, period_end, status, created_by, created_at, updated_at, sent_at, notes")
+    .eq("status", "draft")
+    .order("period_start", { ascending: true })
+    .order("title", { ascending: true })
+    .limit(100);
+  if (excludePlanId) query = query.neq("id", excludePlanId);
+  const { data, error } = await measureAsync("work-planning:draft_plans_for_move", () => query);
+  return { data: (data ?? []) as WorkPlan[], error: error?.message ?? null };
+}
+
+export async function autoAddTelegramTicketToWeeklyDraftPlan(input: {
+  ticketId: string;
+  categoryName?: string | null;
+}) {
+  if (!hasSupabaseEnv()) return { data: null, error: missingSupabaseMessage };
+  const supabase = createAdminClient();
+
+  const { data: ticketData, error: ticketError } = await measureAsync("work-planning:auto_ticket_lookup", () =>
+    supabase
+      .from("tickets")
+      .select("id, source, category_id, assignee_worker_id, category:categories(name)")
+      .eq("id", input.ticketId)
+      .maybeSingle(),
+  );
+  if (ticketError) return { data: null, error: ticketError.message };
+  const ticket = ticketData as { id: string; source?: string | null; category_id?: string | null; assignee_worker_id?: string | null; category?: { name?: string | null } | { name?: string | null }[] | null } | null;
+  if (!ticket) return { data: null, error: "Ticket not found" };
+  if (ticket.source !== "telegram_group" && ticket.source !== "telegram_private_test") return { data: { added: false, reason: "not_telegram_ticket" }, error: null };
+
+  const category = Array.isArray(ticket.category) ? ticket.category[0] : ticket.category;
+  const categoryName = input.categoryName ?? category?.name ?? null;
+  const config = autoPlanConfigForCategory(categoryName);
+  if (!config) return { data: { added: false, reason: "category_not_mapped" }, error: null };
+
+  const existingItemResult = await measureAsync("work-planning:auto_existing_item", () =>
+    supabase
+      .from("work_plan_items")
+      .select("id, work_plan:work_plans!inner(id,status,title)")
+      .eq("ticket_id", input.ticketId)
+      .in("work_plan.status", activeWorkPlanStatuses)
+      .limit(1)
+      .maybeSingle(),
+  );
+  if (existingItemResult.error) return { data: null, error: existingItemResult.error.message };
+  if (existingItemResult.data) return { data: { added: false, reason: "ticket_already_planned" }, error: null };
+
+  const plansResult = await ensureWeeklyDraftPlansForAutoRouting();
+  if (plansResult.error) return { data: null, error: plansResult.error };
+  const plan = plansResult.data.plans.find((item) => item.title === config.title && item.status === "draft");
+  if (!plan) return { data: { added: false, reason: "plan_not_found" }, error: null };
+
+  const workerId = ticket.assignee_worker_id ?? await findAutoPlanWorkerId(supabase, config);
+  const countResult = await measureAsync("work-planning:auto_plan_item_count", () =>
+    supabase.from("work_plan_items").select("id", { count: "exact", head: true }).eq("work_plan_id", plan.id),
+  );
+  const sortOrder = countResult.count ?? 0;
+
+  const { data: inserted, error: insertError } = await measureAsync("work-planning:auto_add_item", () =>
+    supabase
+      .from("work_plan_items")
+      .insert({
+        work_plan_id: plan.id,
+        ticket_id: input.ticketId,
+        worker_id: workerId,
+        category: categoryName,
+        sort_order: sortOrder,
+      })
+      .select("id")
+      .single(),
+  );
+  if (insertError) {
+    if (insertError.code === "23505") return { data: { added: false, reason: "ticket_already_in_target_plan" }, error: null };
+    return { data: null, error: insertError.message };
+  }
+
+  await supabase.from("ticket_history").insert({
+    ticket_id: input.ticketId,
+    actor_id: null,
+    action: `Заявку автоматично додано до плану: ${plan.title}`,
+    metadata: {
+      work_plan_id: plan.id,
+      work_plan_title: plan.title,
+      category: categoryName,
+      worker_id: workerId,
+      source: "telegram_auto_planning",
+    },
+  });
+
+  return { data: { added: true, planId: plan.id, planTitle: plan.title, workerId, itemId: (inserted as { id?: string } | null)?.id ?? null }, error: null };
+}
+
 export async function addTicketsToWorkPlan(workPlanId: string, ticketIds: string[]) {
   if (!hasSupabaseEnv()) return { data: null, error: missingSupabaseMessage };
   const uniqueTicketIds = Array.from(new Set(ticketIds.filter(Boolean)));
@@ -426,6 +745,85 @@ export async function removeWorkPlanItem(workPlanId: string, ticketId: string) {
   if (!planResult.data) return { data: null, error: "План не знайдено." };
   if (planResult.data.status !== "draft") return { data: null, error: "Змінювати склад можна тільки у чернетці плану." };
   return removeTicketFromWorkPlan(workPlanId, ticketId);
+}
+
+export async function moveWorkPlanItemToDraftPlan(input: {
+  itemId: string;
+  currentPlanId: string;
+  targetPlanId: string;
+  actorId: string;
+}): Promise<QueryResult<{ targetPlanId: string } | null>> {
+  if (!hasSupabaseEnv()) return { data: null, error: missingSupabaseMessage };
+  if (!input.itemId || !input.currentPlanId || !input.targetPlanId) return { data: null, error: "Заявку або план не знайдено." };
+  if (input.currentPlanId === input.targetPlanId) return { data: null, error: "Оберіть інший план для перенесення." };
+
+  const supabase = await createClient();
+  const [itemResult, targetPlanResult] = await Promise.all([
+    measureAsync("work-planning:move_item_load", () =>
+      supabase
+        .from("work_plan_items")
+        .select("id, work_plan_id, ticket_id, worker_id, category, sort_order")
+        .eq("id", input.itemId)
+        .eq("work_plan_id", input.currentPlanId)
+        .maybeSingle(),
+    ),
+    measureAsync("work-planning:move_target_plan", () =>
+      supabase
+        .from("work_plans")
+        .select("id, title, period_start, period_end, status, created_by, created_at, updated_at, sent_at, notes")
+        .eq("id", input.targetPlanId)
+        .maybeSingle(),
+    ),
+  ]);
+
+  if (itemResult.error) return { data: null, error: itemResult.error.message };
+  if (targetPlanResult.error) return { data: null, error: targetPlanResult.error.message };
+  const item = itemResult.data as { id: string; work_plan_id: string; ticket_id: string; worker_id?: string | null; category?: string | null; sort_order?: number | null } | null;
+  const targetPlan = targetPlanResult.data as WorkPlan | null;
+  if (!item) return { data: null, error: "Заявку в поточному плані не знайдено." };
+  if (!targetPlan) return { data: null, error: "Цільовий план не знайдено." };
+  if (targetPlan.status !== "draft") return { data: null, error: "Перенести заявку можна тільки в план-чернетку." };
+
+  const duplicateResult = await measureAsync("work-planning:move_duplicate_check", () =>
+    supabase
+      .from("work_plan_items")
+      .select("id")
+      .eq("work_plan_id", input.targetPlanId)
+      .eq("ticket_id", item.ticket_id)
+      .limit(1)
+      .maybeSingle(),
+  );
+  if (duplicateResult.error) return { data: null, error: duplicateResult.error.message };
+  if (duplicateResult.data) return { data: null, error: "Ця заявка вже є у вибраному плані." };
+
+  let workerId = item.worker_id ?? null;
+  if (!workerId) {
+    const targetConfig = autoPlanConfigForTitle(targetPlan.title);
+    if (targetConfig) workerId = await findAutoPlanWorkerId(createAdminClient(), targetConfig);
+  }
+
+  const { error: updateError } = await measureAsync("work-planning:move_item_update", () =>
+    supabase
+      .from("work_plan_items")
+      .update({ work_plan_id: input.targetPlanId, worker_id: workerId })
+      .eq("id", input.itemId)
+      .eq("work_plan_id", input.currentPlanId),
+  );
+  if (updateError) return { data: null, error: updateError.message };
+
+  await supabase.from("ticket_history").insert({
+    ticket_id: item.ticket_id,
+    actor_id: input.actorId,
+    action: `Заявку перенесено в інший план: ${targetPlan.title}`,
+    metadata: {
+      from_work_plan_id: input.currentPlanId,
+      to_work_plan_id: input.targetPlanId,
+      to_work_plan_title: targetPlan.title,
+      worker_id: workerId,
+    },
+  });
+
+  return { data: { targetPlanId: input.targetPlanId }, error: null };
 }
 
 export async function updateWorkPlanStatus(id: string, status: WorkPlanStatus) {

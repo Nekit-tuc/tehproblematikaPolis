@@ -3,6 +3,7 @@ import { hasSupabaseEnv, missingSupabaseMessage } from "@/lib/supabase/env";
 import { getCurrentProfile } from "@/lib/auth/server";
 import { canViewTicket } from "@/lib/auth/permissions";
 import { measureAsync } from "@/lib/performance";
+import { getNextWorkWeekRange, getPreviousWorkWeekRange, getWorkWeekRange } from "@/lib/date/work-week";
 import { getLatestArchivedWeeklyPeriod } from "@/lib/supabase/weekly-control";
 import type { Category, CompanyObject, Profile, TicketCommentWithAuthor, TicketHistory, TicketPhotoWithUrl, TicketWithRelations } from "@/types/domain";
 
@@ -322,18 +323,33 @@ export type WeeklyDashboardCommandCenter = {
   };
 };
 
+export type DashboardOverview = {
+  userName: string;
+  week: {
+    startDate: string;
+    endDate: string;
+    label: string;
+  };
+  intake: {
+    total: number;
+    pendingReview: number;
+    confirmed: number;
+    awaitingPlanning: number;
+    critical: number;
+  };
+  execution: {
+    planned: number;
+    inProgress: number;
+    done: number;
+    waitingConfirmation: number;
+    notDone: number;
+  };
+};
+
 const inactiveTicketStatuses = ["done", "cancelled", "rejected"];
 const inWorkTicketStatuses = ["assigned", "in_progress", "waiting", "waiting_admin_confirmation"];
-const dayLabels = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Нд"];
+const dayLabels = ["\u0421\u0431", "\u041d\u0434", "\u041f\u043d", "\u0412\u0442", "\u0421\u0440", "\u0427\u0442", "\u041f\u0442"];
 const monthFormatter = new Intl.DateTimeFormat("uk-UA", { month: "long", year: "numeric" });
-
-function startOfWeek(date: Date) {
-  const value = new Date(date);
-  const day = value.getDay() || 7;
-  value.setHours(0, 0, 0, 0);
-  value.setDate(value.getDate() - day + 1);
-  return value;
-}
 
 function addDays(date: Date, days: number) {
   const value = new Date(date);
@@ -402,17 +418,120 @@ async function queryTicketsForProfile(supabase: Awaited<ReturnType<typeof create
   return { data: (data ?? []) as unknown as TicketWithRelations[], error: error?.message ?? null };
 }
 
+function dashboardWeekLabel(startDate: string, endDate: string) {
+  const formatter = new Intl.DateTimeFormat("uk-UA", { day: "2-digit", month: "2-digit" });
+  return `${formatter.format(new Date(`${startDate}T12:00:00`))} \u2014 ${formatter.format(new Date(`${endDate}T12:00:00`))}`;
+}
+
+function plannedTicketFromRow(row: any): TicketWithRelations | null {
+  return Array.isArray(row.ticket) ? row.ticket[0] ?? null : row.ticket ?? null;
+}
+
+export async function getDashboardOverview(): Promise<QueryResult<DashboardOverview>> {
+  const emptyRange = getWorkWeekRange();
+  const empty: DashboardOverview = {
+    userName: "Administrator",
+    week: {
+      startDate: emptyRange.startDate,
+      endDate: emptyRange.endDate,
+      label: dashboardWeekLabel(emptyRange.startDate, emptyRange.endDate),
+    },
+    intake: { total: 0, pendingReview: 0, confirmed: 0, awaitingPlanning: 0, critical: 0 },
+    execution: { planned: 0, inProgress: 0, done: 0, waitingConfirmation: 0, notDone: 0 },
+  };
+  if (!hasSupabaseEnv()) return emptyWithError(empty);
+
+  const profile = await getCurrentProfile();
+  if (!profile) return emptyWithError(empty);
+
+  const supabase = await createClient();
+  const currentRange = getWorkWeekRange();
+  const weekStart = currentRange.start;
+  const weekEnd = currentRange.end;
+  const weekStartIso = weekStart.toISOString();
+  const weekEndIso = weekEnd.toISOString();
+
+  const [currentWeekTickets, activePlanItems, currentWeekPlanItems] = await Promise.all([
+    queryTicketsForProfile(supabase, profile, "dashboard-overview:intake", (query) =>
+      query.gte("created_at", weekStartIso).lt("created_at", weekEndIso).order("created_at", { ascending: false }).limit(1000),
+    ),
+    measureAsync("dashboard-overview:active_plan_items", () =>
+      supabase
+        .from("work_plan_items")
+        .select("ticket_id, work_plan:work_plans!inner(id,status,period_start)")
+        .in("work_plan.status", ["draft", "sent", "partially_done"])
+        .limit(2000),
+    ),
+    measureAsync("dashboard-overview:current_plan_items", () =>
+      supabase
+        .from("work_plan_items")
+        .select(`ticket_id, ticket:tickets(${ticketListSelect}), work_plan:work_plans!inner(id,status,period_start)`)
+        .in("work_plan.status", ["draft", "sent", "partially_done"])
+        .gte("work_plan.period_start", currentRange.startDate)
+        .lt("work_plan.period_start", currentRange.endDate)
+        .limit(2000),
+    ),
+  ]);
+
+  const tickets = currentWeekTickets.data;
+  const activePlannedTicketIds = new Set(((activePlanItems.data ?? []) as Array<{ ticket_id?: string | null }>).map((row) => row.ticket_id).filter(Boolean) as string[]);
+  const currentPlanTickets = new Map<string, TicketWithRelations>();
+  for (const row of (currentWeekPlanItems.data ?? []) as any[]) {
+    const ticket = plannedTicketFromRow(row);
+    if (ticket?.id) currentPlanTickets.set(ticket.id, ticket);
+  }
+  const plannedTickets = Array.from(currentPlanTickets.values());
+
+  const intakeActiveTickets = tickets.filter((ticket) => !isInactiveStatus(ticket.status));
+  const pendingReview = tickets.filter((ticket) => ticket.status === "pending_review").length;
+  const confirmed = tickets.filter((ticket) => !["pending_review", "rejected", "cancelled"].includes(ticket.status)).length;
+  const awaitingPlanning = intakeActiveTickets.filter((ticket) => ticket.status !== "pending_review" && !activePlannedTicketIds.has(ticket.id)).length;
+  const critical = intakeActiveTickets.filter((ticket) => isHighPriority(ticket.priority)).length;
+
+  const planned = plannedTickets.length;
+  const inProgress = plannedTickets.filter((ticket) => ticket.status === "assigned" || ticket.status === "in_progress").length;
+  const done = plannedTickets.filter((ticket) => ticket.status === "done").length;
+  const waitingConfirmation = plannedTickets.filter((ticket) => ticket.status === "waiting_admin_confirmation").length;
+  const notDone = plannedTickets.filter((ticket) => !isInactiveStatus(ticket.status)).length;
+
+  return {
+    data: {
+      userName: profile.full_name || profile.email || "Administrator",
+      week: {
+        startDate: currentRange.startDate,
+        endDate: currentRange.endDate,
+        label: dashboardWeekLabel(currentRange.startDate, currentRange.endDate),
+      },
+      intake: {
+        total: tickets.length,
+        pendingReview,
+        confirmed,
+        awaitingPlanning,
+        critical,
+      },
+      execution: {
+        planned,
+        inProgress,
+        done,
+        waitingConfirmation,
+        notDone,
+      },
+    },
+    error: currentWeekTickets.error ?? activePlanItems.error?.message ?? currentWeekPlanItems.error?.message ?? null,
+  };
+}
+
 export async function getWeeklyDashboardCommandCenter(): Promise<QueryResult<WeeklyDashboardCommandCenter>> {
   const empty: WeeklyDashboardCommandCenter = {
     period: {
       weekNumber: weekNumber(new Date()),
       monthLabel: monthFormatter.format(new Date()),
-      startIso: isoDate(startOfWeek(new Date())),
-      endIso: isoDate(addDays(startOfWeek(new Date()), 6)),
-      previousStartIso: isoDate(addDays(startOfWeek(new Date()), -7)),
-      previousEndIso: isoDate(addDays(startOfWeek(new Date()), -1)),
-      nextStartIso: isoDate(addDays(startOfWeek(new Date()), 7)),
-      nextEndIso: isoDate(addDays(startOfWeek(new Date()), 13)),
+      startIso: getWorkWeekRange().startDate,
+      endIso: getWorkWeekRange().endDate,
+      previousStartIso: getPreviousWorkWeekRange().startDate,
+      previousEndIso: getPreviousWorkWeekRange().endDate,
+      nextStartIso: getNextWorkWeekRange().startDate,
+      nextEndIso: getNextWorkWeekRange().endDate,
     },
     kpi: { currentWeekTicketCount: 0, inWorkCount: 0, completedThisWeekCount: 0, problematicCount: 0, pendingAiCount: 0, waitingAdminConfirmationCount: 0 },
     calendarDays: [],
@@ -430,19 +549,22 @@ export async function getWeeklyDashboardCommandCenter(): Promise<QueryResult<Wee
 
   const supabase = await createClient();
   const now = new Date();
-  const weekStart = startOfWeek(now);
-  const weekEnd = endOfDay(addDays(weekStart, 6));
-  const previousWeekStart = addDays(weekStart, -7);
-  const previousWeekEnd = endOfDay(addDays(weekStart, -1));
-  const nextWeekStart = addDays(weekStart, 7);
-  const nextWeekEnd = endOfDay(addDays(weekStart, 13));
+  const currentRange = getWorkWeekRange(now);
+  const previousRange = getPreviousWorkWeekRange(now);
+  const nextRange = getNextWorkWeekRange(now);
+  const weekStart = currentRange.start;
+  const weekEnd = currentRange.end;
+  const previousWeekStart = previousRange.start;
+  const previousWeekEnd = previousRange.end;
+  const nextWeekStart = nextRange.start;
+  const nextWeekEnd = nextRange.end;
   const overdueBoundary = daysAgo(7);
 
   const [currentWeek, previousWeek, activeTickets, completedByDate, planItems] = await Promise.all([
-    queryTicketsForProfile(supabase, profile, "dashboard-weekly:current_week", (query) => query.gte("created_at", weekStart.toISOString()).lte("created_at", weekEnd.toISOString()).order("created_at", { ascending: false }).limit(500)),
-    queryTicketsForProfile(supabase, profile, "dashboard-weekly:previous_week", (query) => query.gte("created_at", previousWeekStart.toISOString()).lte("created_at", previousWeekEnd.toISOString()).order("created_at", { ascending: false }).limit(500)),
+    queryTicketsForProfile(supabase, profile, "dashboard-weekly:current_week", (query) => query.gte("created_at", weekStart.toISOString()).lt("created_at", weekEnd.toISOString()).order("created_at", { ascending: false }).limit(500)),
+    queryTicketsForProfile(supabase, profile, "dashboard-weekly:previous_week", (query) => query.gte("created_at", previousWeekStart.toISOString()).lt("created_at", previousWeekEnd.toISOString()).order("created_at", { ascending: false }).limit(500)),
     queryTicketsForProfile(supabase, profile, "dashboard-weekly:active", (query) => query.not("status", "in", "(done,cancelled,rejected)").order("created_at", { ascending: false }).limit(500)),
-    queryTicketsForProfile(supabase, profile, "dashboard-weekly:completed", (query) => query.eq("status", "done").gte("completed_at", weekStart.toISOString()).lte("completed_at", weekEnd.toISOString()).order("completed_at", { ascending: false }).limit(500)),
+    queryTicketsForProfile(supabase, profile, "dashboard-weekly:completed", (query) => query.eq("status", "done").gte("completed_at", weekStart.toISOString()).lt("completed_at", weekEnd.toISOString()).order("completed_at", { ascending: false }).limit(500)),
     measureAsync("dashboard-weekly:plan_items", () => supabase
       .from("work_plan_items")
       .select("ticket_id, worker_id, category, ticket:tickets(status,category:categories(name)), work_plan:work_plans!inner(id,title,status,period_start,period_end)")
@@ -461,7 +583,13 @@ export async function getWeeklyDashboardCommandCenter(): Promise<QueryResult<Wee
     const plan = plannedPlan(row);
     return plan && ["draft", "sent", "partially_done"].includes(plan.status);
   });
-  const plannedTicketIds = new Set(activePlanRows.map((row) => row.ticket_id).filter(Boolean));
+  const currentPlanRows = activePlanRows.filter((row) => {
+    const plan = plannedPlan(row);
+    if (!plan?.period_start) return false;
+    const start = new Date(plan.period_start);
+    return start >= weekStart && start < weekEnd;
+  });
+  const plannedTicketIds = new Set(currentPlanRows.map((row) => row.ticket_id).filter(Boolean));
   const inWorkIds = new Set(active.filter((ticket) => isInWorkStatus(ticket.status)).map((ticket) => ticket.id));
   for (const ticketId of plannedTicketIds) inWorkIds.add(ticketId);
 
@@ -489,7 +617,7 @@ export async function getWeeklyDashboardCommandCenter(): Promise<QueryResult<Wee
     const plan = plannedPlan(row);
     if (!plan?.period_start) return false;
     const start = new Date(plan.period_start);
-    return start >= nextWeekStart && start <= nextWeekEnd;
+    return start >= nextWeekStart && start < nextWeekEnd;
   });
   const effectivePlanRows = nextWeekPlanRows.length > 0 ? nextWeekPlanRows : activePlanRows.filter((row) => plannedPlan(row)?.status === "draft");
   const categoryMap = new Map<string, { tickets: Set<string>; workers: Set<string> }>();
@@ -513,12 +641,12 @@ export async function getWeeklyDashboardCommandCenter(): Promise<QueryResult<Wee
       period: {
         weekNumber: weekNumber(now),
         monthLabel: monthFormatter.format(now),
-        startIso: isoDate(weekStart),
-        endIso: isoDate(weekEnd),
-        previousStartIso: isoDate(previousWeekStart),
-        previousEndIso: isoDate(previousWeekEnd),
-        nextStartIso: isoDate(nextWeekStart),
-        nextEndIso: isoDate(nextWeekEnd),
+        startIso: currentRange.startDate,
+        endIso: currentRange.endDate,
+        previousStartIso: previousRange.startDate,
+        previousEndIso: previousRange.endDate,
+        nextStartIso: nextRange.startDate,
+        nextEndIso: nextRange.endDate,
       },
       kpi: {
         currentWeekTicketCount: currentTickets.length,

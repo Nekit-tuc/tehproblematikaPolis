@@ -1,5 +1,6 @@
 import { getCurrentUser } from "@/lib/auth/server";
 import { measureAsync } from "@/lib/performance";
+import { getNextWorkWeekRange, getWorkWeekRange } from "@/lib/date/work-week";
 import { createClient } from "@/lib/supabase/server";
 import { hasSupabaseEnv, missingSupabaseMessage } from "@/lib/supabase/env";
 import type { QueryResult } from "@/lib/supabase/queries";
@@ -100,50 +101,16 @@ function emptyWithError<T>(data: T): QueryResult<T> {
   return { data, error: missingSupabaseMessage };
 }
 
-function toLocalDate(date: Date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function atLocalStart(date: Date) {
-  const value = new Date(date);
-  value.setHours(0, 0, 0, 0);
-  return value;
-}
-
-function addDays(date: Date, days: number) {
-  const value = new Date(date);
-  value.setDate(value.getDate() + days);
-  return value;
-}
-
-function startOfWeek(date: Date) {
-  const value = atLocalStart(date);
-  const day = value.getDay() || 7;
-  value.setDate(value.getDate() - day + 1);
-  return value;
-}
-
-function endOfDay(date: Date) {
-  const value = new Date(date);
-  value.setHours(23, 59, 59, 999);
-  return value;
-}
-
 export function getCurrentWeekRange(date = new Date()) {
-  const start = startOfWeek(date);
-  const end = endOfDay(addDays(start, 6));
-  const nextStart = addDays(start, 7);
-  const nextEnd = endOfDay(addDays(nextStart, 6));
+  const current = getWorkWeekRange(date);
+  const next = getNextWorkWeekRange(date);
   return {
-    start,
-    end,
-    startIso: toLocalDate(start),
-    endIso: toLocalDate(end),
-    nextStartIso: toLocalDate(nextStart),
-    nextEndIso: toLocalDate(nextEnd),
+    start: current.start,
+    end: current.end,
+    startIso: current.startDate,
+    endIso: current.endDate,
+    nextStartIso: next.startDate,
+    nextEndIso: next.endDate,
   };
 }
 
@@ -243,7 +210,7 @@ function completionDate(ticket: TicketWithRelations) {
 function dateInRange(iso: string | null | undefined, start: Date, end: Date) {
   if (!iso) return false;
   const value = new Date(iso);
-  return value >= start && value <= end;
+  return value >= start && value < end;
 }
 
 function ticketKey(ticket: TicketWithRelations, role: WeeklyTicketRole) {
@@ -320,7 +287,7 @@ async function queryCompletedTickets(supabase: Awaited<ReturnType<typeof createC
   const fields = ["completed_at", "admin_confirmed_at", "worker_completed_at", "updated_at"];
   const results = await Promise.all(fields.map((field) =>
     measureAsync(`weekly-control:completed:${field}`, () =>
-      supabase.from("tickets").select(ticketSnapshotSelect).eq("status", "done").gte(field, startIso).lte(field, endIso).limit(1000),
+      supabase.from("tickets").select(ticketSnapshotSelect).eq("status", "done").gte(field, startIso).lt(field, endIso).limit(1000),
     ),
   ));
   const map = new Map<string, TicketWithRelations>();
@@ -335,58 +302,34 @@ async function queryCompletedTickets(supabase: Awaited<ReturnType<typeof createC
 }
 
 
-async function queryPreviousCarryOverTicketIds(supabase: Awaited<ReturnType<typeof createClient>>, weekStartIso: string) {
-  const previousPeriodResult = await measureAsync("weekly-control:previous_period", () =>
-    supabase
-      .from("weekly_periods")
-      .select("id")
-      .lt("week_start", weekStartIso)
-      .in("status", ["closed", "archived"])
-      .order("week_start", { ascending: false })
-      .limit(1)
-      .maybeSingle(),
-  );
-  if (previousPeriodResult.error) return { ids: [] as string[], error: previousPeriodResult.error.message };
-  const previousPeriodId = (previousPeriodResult.data as { id?: string } | null)?.id;
-  if (!previousPeriodId) return { ids: [] as string[], error: null as string | null };
-
-  const previousTicketsResult = await measureAsync("weekly-control:previous_unresolved", () =>
-    supabase
-      .from("weekly_period_tickets")
-      .select("ticket_id")
-      .eq("weekly_period_id", previousPeriodId)
-      .in("role", ["unresolved", "carried_over"])
-      .limit(1500),
-  );
-  const ids = Array.from(new Set(((previousTicketsResult.data ?? []) as Array<{ ticket_id: string | null }>).map((row) => row.ticket_id).filter(Boolean) as string[]));
-  return { ids, error: previousTicketsResult.error?.message ?? null };
+function snapshotKey(value: { ticket_id?: string | null; ticket?: TicketWithRelations | null; role: WeeklyTicketRole }) {
+  const ticketId = value.ticket_id ?? value.ticket?.id;
+  return ticketId ? `${ticketId}:${value.role}` : null;
 }
 
-async function queryTicketsByIds(supabase: Awaited<ReturnType<typeof createClient>>, ids: string[]) {
-  if (ids.length === 0) return { data: [] as TicketWithRelations[], error: null as string | null };
-  const result = await measureAsync("weekly-control:tickets_by_ids", () =>
-    supabase.from("tickets").select(ticketSnapshotSelect).in("id", ids).not("status", "in", "(done,cancelled,rejected)").limit(1500),
-  );
-  return { data: (result.data ?? []) as unknown as TicketWithRelations[], error: result.error?.message ?? null };
+function chunks<T>(items: T[], size: number) {
+  const result: T[][] = [];
+  for (let index = 0; index < items.length; index += size) result.push(items.slice(index, index + size));
+  return result;
 }
 
 async function buildWeeklySnapshotRows(supabase: Awaited<ReturnType<typeof createClient>>, period: WeeklyPeriod) {
   const start = new Date(`${period.week_start}T00:00:00`);
-  const end = endOfDay(new Date(`${period.week_end}T00:00:00`));
+  const end = new Date(`${period.week_end}T00:00:00`);
   const startIso = start.toISOString();
   const endIso = end.toISOString();
 
-  const [createdResult, completedResult, plannedResult, waitingResult, previousCarryOverResult] = await Promise.all([
+  const [createdResult, completedResult, plannedResult, waitingResult] = await Promise.all([
     measureAsync("weekly-control:snapshot_created", () =>
-      supabase.from("tickets").select(ticketSnapshotSelect).gte("created_at", startIso).lte("created_at", endIso).limit(1500),
+      supabase.from("tickets").select(ticketSnapshotSelect).gte("created_at", startIso).lt("created_at", endIso).limit(1500),
     ),
     queryCompletedTickets(supabase, start, end),
     measureAsync("weekly-control:snapshot_planned", () =>
       supabase
         .from("work_plan_items")
         .select(`ticket_id, worker:workers(id,name), ticket:tickets(${ticketSnapshotSelect}), work_plan:work_plans!inner(id,title,status,period_start,period_end)`)
-        .lte("work_plan.period_start", period.week_end)
-        .gte("work_plan.period_end", period.week_start)
+        .gte("work_plan.period_start", period.week_start)
+        .lt("work_plan.period_start", period.week_end)
         .limit(1500),
     ),
     measureAsync("weekly-control:snapshot_waiting_confirmation", () =>
@@ -395,19 +338,16 @@ async function buildWeeklySnapshotRows(supabase: Awaited<ReturnType<typeof creat
         .select(ticketSnapshotSelect)
         .eq("status", "waiting_admin_confirmation")
         .gte("worker_completed_at", startIso)
-        .lte("worker_completed_at", endIso)
+        .lt("worker_completed_at", endIso)
         .limit(1500),
     ),
-    queryPreviousCarryOverTicketIds(supabase, period.week_start),
   ]);
 
-  const carryOverResult = await queryTicketsByIds(supabase, previousCarryOverResult.ids);
   const snapshot = new Map<string, { ticket: TicketWithRelations; role: WeeklyTicketRole }>();
   const createdTickets = (createdResult.data ?? []) as unknown as TicketWithRelations[];
   const completedTickets = completedResult.data;
   const plannedTickets = ((plannedResult.data ?? []) as any[]).map(asTicket).filter(Boolean) as TicketWithRelations[];
   const waitingTickets = (waitingResult.data ?? []) as unknown as TicketWithRelations[];
-  const carryOverTickets = carryOverResult.data;
 
   for (const ticket of createdTickets) addTicket(snapshot, ticket, "created");
   for (const ticket of completedTickets) addTicket(snapshot, ticket, "completed");
@@ -421,13 +361,7 @@ async function buildWeeklySnapshotRows(supabase: Awaited<ReturnType<typeof creat
   for (const ticket of [...createdTickets, ...plannedTickets, ...waitingTickets]) unresolvedTickets.set(ticket.id, ticket);
   for (const ticket of unresolvedTickets.values()) if (!inactiveStatuses.has(ticket.status)) addTicket(snapshot, ticket, "unresolved");
 
-  for (const ticket of carryOverTickets) {
-    if (inactiveStatuses.has(ticket.status)) continue;
-    addTicket(snapshot, ticket, "carried_over");
-    addTicket(snapshot, ticket, "unresolved");
-  }
-
-  const error = createdResult.error?.message ?? completedResult.error ?? plannedResult.error?.message ?? waitingResult.error?.message ?? previousCarryOverResult.error ?? carryOverResult.error ?? null;
+  const error = createdResult.error?.message ?? completedResult.error ?? plannedResult.error?.message ?? waitingResult.error?.message ?? null;
   return { rows: Array.from(snapshot.values()), error };
 }
 
@@ -489,8 +423,8 @@ export async function createWeeklySnapshot(periodId: string): Promise<QueryResul
   );
   if (updateError && !mutationError) mutationError = updateError.message;
 
-  const periodEnd = endOfDay(new Date(`${period.week_end}T00:00:00`));
-  const nextRange = getCurrentWeekRange(addDays(periodEnd, 1));
+  const periodEnd = new Date(`${period.week_end}T00:00:00`);
+  const nextRange = getCurrentWeekRange(periodEnd);
   await getOrCreatePeriodForRange(nextRange.startIso, nextRange.endIso, "current");
 
   return {
@@ -501,6 +435,81 @@ export async function createWeeklySnapshot(periodId: string): Promise<QueryResul
       message: mutationError ? "Тиждень закрито частково. Перевірте журнал помилок." : "Тиждень закрито та додано в архів.",
     },
     error: mutationError,
+  };
+}
+
+export async function rebuildArchivedWeeklySnapshot(periodId: string): Promise<QueryResult<{ period: WeeklyPeriod | null; summary: WeeklySummary; snapshotCount: number; removedStaleRows: number; message: string }>> {
+  if (!hasSupabaseEnv()) return emptyWithError({ period: null, summary: emptySummary, snapshotCount: 0, removedStaleRows: 0, message: missingSupabaseMessage });
+  const supabase = await createClient();
+  const { data: periodData, error: periodError } = await measureAsync("weekly-control:rebuild_period_load", () =>
+    supabase.from("weekly_periods").select("*").eq("id", periodId).maybeSingle(),
+  );
+  if (periodError) return { data: { period: null, summary: emptySummary, snapshotCount: 0, removedStaleRows: 0, message: periodError.message }, error: periodError.message };
+  const period = periodData as WeeklyPeriod | null;
+  if (!period) return { data: { period: null, summary: emptySummary, snapshotCount: 0, removedStaleRows: 0, message: "\u041F\u0435\u0440\u0456\u043E\u0434 \u043D\u0435 \u0437\u043D\u0430\u0439\u0434\u0435\u043D\u043E." }, error: "\u041F\u0435\u0440\u0456\u043E\u0434 \u043D\u0435 \u0437\u043D\u0430\u0439\u0434\u0435\u043D\u043E." };
+  if (period.status !== "archived" && period.status !== "closed") {
+    return {
+      data: { period, summary: periodToSummary(period), snapshotCount: 0, removedStaleRows: 0, message: "\u041F\u0435\u0440\u0435\u0440\u0430\u0445\u0443\u043D\u043E\u043A \u0434\u043E\u0441\u0442\u0443\u043F\u043D\u0438\u0439 \u0442\u0456\u043B\u044C\u043A\u0438 \u0434\u043B\u044F \u0437\u0430\u043A\u0440\u0438\u0442\u0438\u0445 \u0430\u0440\u0445\u0456\u0432\u0456\u0432." },
+      error: "\u041F\u0435\u0440\u0435\u0440\u0430\u0445\u0443\u043D\u043E\u043A \u0434\u043E\u0441\u0442\u0443\u043F\u043D\u0438\u0439 \u0442\u0456\u043B\u044C\u043A\u0438 \u0434\u043B\u044F \u0437\u0430\u043A\u0440\u0438\u0442\u0438\u0445 \u0430\u0440\u0445\u0456\u0432\u0456\u0432.",
+    };
+  }
+
+  const snapshotResult = await buildWeeklySnapshotRows(supabase, period);
+  if (snapshotResult.error) {
+    return { data: { period, summary: periodToSummary(period), snapshotCount: 0, removedStaleRows: 0, message: snapshotResult.error }, error: snapshotResult.error };
+  }
+
+  const rows = snapshotResult.rows;
+  const upsertRows = rows.map((row) => snapshotRow(period.id, row.ticket, row.role));
+  const summary = buildSummary(rows);
+  const newKeys = new Set(rows.map(snapshotKey).filter(Boolean));
+
+  let mutationError: string | null = null;
+  if (upsertRows.length > 0) {
+    const { error } = await measureAsync("weekly-control:rebuild_snapshot_upsert", () =>
+      supabase.from("weekly_period_tickets").upsert(upsertRows, { onConflict: "weekly_period_id,ticket_id,role" }),
+    );
+    if (error) mutationError = error.message;
+  }
+  if (mutationError) return { data: { period, summary: periodToSummary(period), snapshotCount: 0, removedStaleRows: 0, message: mutationError }, error: mutationError };
+
+  const existingResult = await measureAsync("weekly-control:rebuild_existing_rows", () =>
+    supabase.from("weekly_period_tickets").select("id,ticket_id,role").eq("weekly_period_id", period.id).limit(3000),
+  );
+  if (existingResult.error) return { data: { period, summary: periodToSummary(period), snapshotCount: upsertRows.length, removedStaleRows: 0, message: existingResult.error.message }, error: existingResult.error.message };
+
+  const staleIds = ((existingResult.data ?? []) as Array<{ id: string; ticket_id: string | null; role: WeeklyTicketRole }>).filter((row) => {
+    const key = snapshotKey(row);
+    return !key || !newKeys.has(key);
+  }).map((row) => row.id);
+
+  for (const ids of chunks(staleIds, 200)) {
+    const { error } = await measureAsync("weekly-control:rebuild_delete_stale", () =>
+      supabase.from("weekly_period_tickets").delete().in("id", ids),
+    );
+    if (error && !mutationError) mutationError = error.message;
+  }
+  if (mutationError) return { data: { period, summary: periodToSummary(period), snapshotCount: upsertRows.length, removedStaleRows: 0, message: mutationError }, error: mutationError };
+
+  const { data: updated, error: updateError } = await measureAsync("weekly-control:rebuild_update_summary", () =>
+    supabase
+      .from("weekly_periods")
+      .update({ summary_json: summary })
+      .eq("id", period.id)
+      .select("*")
+      .single(),
+  );
+  if (updateError) return { data: { period, summary: periodToSummary(period), snapshotCount: upsertRows.length, removedStaleRows: staleIds.length, message: updateError.message }, error: updateError.message };
+
+  return {
+    data: {
+      period: (updated ?? period) as WeeklyPeriod,
+      summary,
+      snapshotCount: upsertRows.length,
+      removedStaleRows: staleIds.length,
+      message: "\u0410\u0440\u0445\u0456\u0432 \u043F\u0435\u0440\u0435\u0440\u0430\u0445\u043E\u0432\u0430\u043D\u043E \u0437\u0430 \u043D\u043E\u0432\u043E\u044E \u043B\u043E\u0433\u0456\u043A\u043E\u044E.",
+    },
+    error: null,
   };
 }
 

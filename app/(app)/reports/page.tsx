@@ -38,7 +38,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
               <p className="mt-1 max-w-2xl text-[11px] leading-relaxed text-stone-400 md:text-sm">Аналітика заявок, виконавців і магазинів</p>
               <p className="mt-2 text-[10px] text-stone-500">Оновлено сьогодні, {updatedAt}</p>
             </div>
-            <Button asChild size="sm" className="h-9 rounded-2xl text-[11px]"><a href={reportsExportHref("weekly", data.periodRange.period, data.periodRange.from, data.periodRange.to, params.periodId)}><Download className="h-3.5 w-3.5" />{"\u0415\u043A\u0441\u043F\u043E\u0440\u0442 CSV"}</a></Button>
+            <Button asChild size="sm" className="h-9 rounded-2xl text-[11px]"><a href={reportsExportHref("weekly", data.periodRange.period, data.periodRange.from, data.periodRange.to, params.periodId)}><Download className="h-3.5 w-3.5" />Excel</a></Button>
           </div>
         </section>
 
@@ -125,7 +125,7 @@ function WeeklyReportCard({ data, periodId }: { data: ReportsDashboardData; peri
       </div>
       <div className="mt-3 flex flex-wrap gap-2">
         <Button asChild size="sm" className="h-9 rounded-2xl text-[11px]"><Link href="/weekly-control">Відкрити</Link></Button>
-        <Button asChild variant="outline" size="sm" className="h-9 rounded-2xl text-[11px]"><a href={reportsExportHref("weekly", data.periodRange.period, data.periodRange.from, data.periodRange.to, periodId)}>{"\u0415\u043A\u0441\u043F\u043E\u0440\u0442"}</a></Button>
+        <Button asChild variant="outline" size="sm" className="h-9 rounded-2xl text-[11px]"><a href={reportsExportHref("weekly", data.periodRange.period, data.periodRange.from, data.periodRange.to, periodId)}>Excel</a></Button>
       </div>
     </section>
   );

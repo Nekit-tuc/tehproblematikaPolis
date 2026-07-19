@@ -5,6 +5,7 @@ import { normalizeStoreText, type StoreMatchResult } from "@/lib/stores/match-st
 import { loadMatcherObjectsFromSupabase } from "@/lib/stores/object-source";
 import { sendNewAiTicketPush } from "@/lib/push/send-push-notification";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { autoAddTelegramTicketToWeeklyDraftPlan } from "@/lib/supabase/work-plans";
 import { generateTicketNumber, isDuplicateTicketNumberError, TICKET_NUMBER_RETRY_LIMIT } from "@/lib/tickets/numbering";
 import { defaultTicketCategory } from "@/lib/ai/category-taxonomy";
 import type { AiWorkItem } from "@/types/ai";
@@ -307,7 +308,19 @@ export async function handleTelegramGroupMessage(message: TelegramMessage): Prom
       objectResolver,
       source,
     });
-    if (ticket) created.push(ticket);
+    if (ticket) {
+      created.push(ticket);
+      try {
+        const autoPlanResult = await autoAddTelegramTicketToWeeklyDraftPlan({ ticketId: ticket.id, categoryName: category.name });
+        if (autoPlanResult.error) {
+          console.warn("[telegram-group-intake] auto planning failed", { ticketId: ticket.id, category: category.name, error: autoPlanResult.error });
+        } else {
+          console.info("[telegram-group-intake] auto planning finished", { ticketId: ticket.id, category: category.name, result: autoPlanResult.data });
+        }
+      } catch (error) {
+        console.warn("[telegram-group-intake] auto planning crashed", { ticketId: ticket.id, category: category.name, error: error instanceof Error ? error.message : String(error) });
+      }
+    }
   }
 
   if (created.length === 0) return { handled: true, created: false, reason: "ticket_insert_failed" };
