@@ -357,6 +357,11 @@ function DraftEditor({ plan }: { plan: WorkPlan }) {
   );
 }
 
+function formatRepeatDate(value?: string | null) {
+  if (!value) return null;
+  return new Intl.DateTimeFormat("uk-UA", { day: "2-digit", month: "2-digit" }).format(new Date(value));
+}
+
 function PlanItemCard({ item, plan, draftPlans }: { item: WorkPlanItem; plan: WorkPlan; draftPlans: WorkPlan[] }) {
   const ticket = item.ticket;
   const workerLabel = planItemWorkerLabel(item, plan);
@@ -385,6 +390,9 @@ function PlanItemCard({ item, plan, draftPlans }: { item: WorkPlanItem; plan: Wo
       </div>
       <Badge className="mt-2 hidden w-fit text-[9px] md:mt-0 md:inline-flex md:text-xs" tone={priorityTone(ticket?.priority)}>{ticket?.priority ? priorityLabels[ticket.priority] : "-"}</Badge>
       <Badge className="mt-2 w-fit rounded-[8px] px-2 text-[9px] md:mt-0 md:text-xs" tone={ticket?.status === "waiting_admin_confirmation" ? "orange" : ticket?.status === "done" ? "green" : "gray"}>{ticket?.status ? statusLabels[ticket.status] : "-"}</Badge>
+      {ticket && (ticket.repeat_count ?? 0) > 0 ? (
+        <Badge className="mt-2 w-fit rounded-[8px] px-2 text-[9px] md:mt-0 md:text-xs" tone="orange">{"\u041F\u043E\u0432\u0442\u043E\u0440\u043D\u0430 \u00B7 "}{ticket.repeat_count}{formatRepeatDate(ticket.last_repeat_at) ? " / " + formatRepeatDate(ticket.last_repeat_at) : ""}</Badge>
+      ) : null}
       <div className="mt-2 grid gap-2 md:mt-0 md:flex md:justify-end">
         {ticket ? (
           <Button asChild variant="outline" size="sm" className="h-8 w-full rounded-[10px] border-white/[0.08] bg-white/[0.035] text-[10px] md:h-auto md:w-auto md:rounded-md md:text-sm">

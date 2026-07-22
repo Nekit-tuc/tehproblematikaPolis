@@ -388,11 +388,34 @@ function PaginationBar({ page, total, totalPages, shownFrom, shownTo, hrefForPag
   );
 }
 
+function formatRepeatDate(value?: string | null) {
+  if (!value) return null;
+  return new Intl.DateTimeFormat("uk-UA", { day: "2-digit", month: "2-digit" }).format(new Date(value));
+}
+
+function RepeatBadge({ ticket }: { ticket: TicketWithRelations }) {
+  const repeatCount = ticket.repeat_count ?? 0;
+  if (repeatCount <= 0) return null;
+  const lastRepeat = formatRepeatDate(ticket.last_repeat_at);
+  return (
+    <span className="inline-flex min-h-5 items-center gap-1 rounded-lg border border-orange-400/25 bg-orange-500/10 px-2 py-0.5 text-[9px] font-semibold text-orange-200 md:text-xs">
+      {"\u041F\u043E\u0432\u0442\u043E\u0440\u043D\u0430 \u00B7 "}{repeatCount}{lastRepeat ? <span className="font-normal text-orange-200/70">{"\u041E\u0441\u0442. "}{lastRepeat}</span> : null}
+    </span>
+  );
+}
+
 function DesktopTicketRow({ ticket, canDeleteTickets, returnTo }: { ticket: TicketWithRelations; canDeleteTickets: boolean; returnTo: string }) {
   return (
     <TR>
-      <TD><Link className="font-medium text-orange-200 hover:underline" href={`/tickets/${ticket.id}`}>{ticket.number}</Link></TD>
-      <TD><div>{ticket.title}</div><div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground"><span>{uaPriorityLabels[ticket.priority]} • {ticket.category?.name ?? "Без категорії"}</span>{ticket.telegram_source_group_id ? <Badge tone="gray">Групове повідомлення</Badge> : null}</div></TD>
+      <TD><Link className="font-medium text-orange-200 hover:underline" href={"/tickets/" + ticket.id}>{ticket.number}</Link></TD>
+      <TD>
+        <div>{ticket.title}</div>
+        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <span>{uaPriorityLabels[ticket.priority]} {"\u00B7"} {ticket.category?.name ?? "\u0411\u0435\u0437 \u043A\u0430\u0442\u0435\u0433\u043E\u0440\u0456\u0457"}</span>
+          {ticket.telegram_source_group_id ? <Badge tone="gray">{"\u0413\u0440\u0443\u043F\u043E\u0432\u0435 \u043F\u043E\u0432\u0456\u0434\u043E\u043C\u043B\u0435\u043D\u043D\u044F"}</Badge> : null}
+          <RepeatBadge ticket={ticket} />
+        </div>
+      </TD>
       <TD>{ticket.object?.name ?? "-"}</TD>
       <TD>{getWorkerName(ticket)}</TD>
       <TD><Badge tone={statusTone(ticket.status)}>{uaStatusLabels[ticket.status]}</Badge></TD>
@@ -427,6 +450,7 @@ function MobileTicketCard({ ticket, canDeleteTickets, returnTo }: { ticket: Tick
         <div className="mt-2 flex flex-wrap items-center gap-1">
           <span className={`inline-flex min-h-5 items-center gap-1 rounded-lg border px-2 py-0.5 text-[9px] font-semibold ${statusBadgeClass(ticket.status)}`}><StatusIcon className="h-3 w-3" />{uaStatusLabels[ticket.status]}</span>
           <span className="rounded-lg border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[9px] font-semibold text-zinc-300">{sourceLabel(ticket.source)} ? {getWorkerName(ticket)}</span>
+          <RepeatBadge ticket={ticket} />
           {ticket.source === "telegram_private_test" ? <span className="rounded-lg border border-blue-400/20 bg-blue-500/15 px-2 py-0.5 text-[9px] font-semibold text-blue-300">Приватний тест</span> : ticket.telegram_source_group_id ? <span className="rounded-lg border border-blue-400/20 bg-blue-500/15 px-2 py-0.5 text-[9px] font-semibold text-blue-300">AI Review</span> : null}
         </div>
       </div>

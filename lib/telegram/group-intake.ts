@@ -4,9 +4,11 @@ import { buildPendingReviewTicketDraft } from "@/lib/ai/ticket-builder";
 import { normalizeStoreText, type StoreMatchResult } from "@/lib/stores/match-store";
 import { loadMatcherObjectsFromSupabase } from "@/lib/stores/object-source";
 import { sendNewAiTicketPush } from "@/lib/push/send-push-notification";
+import { createTicketRepeat } from "@/lib/supabase/ticket-repeats";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { autoAddTelegramTicketToWeeklyDraftPlan } from "@/lib/supabase/work-plans";
 import { generateTicketNumber, isDuplicateTicketNumberError, TICKET_NUMBER_RETRY_LIMIT } from "@/lib/tickets/numbering";
+import { detectRepeatCandidate } from "@/lib/tickets/repeat-detector";
 import { defaultTicketCategory } from "@/lib/ai/category-taxonomy";
 import type { AiWorkItem } from "@/types/ai";
 import type { Category, CompanyObject, Profile } from "@/types/domain";
@@ -14,8 +16,8 @@ import type { TelegramMessage } from "./client";
 
 type IntakeResult =
   | { handled: false; reason: string }
-  | { handled: true; created: false; reason: string }
-  | { handled: true; created: true; ticketIds: string[]; numbers: string[] };
+  | { handled: true; created: false; reason: string; repeatedTicketIds?: string[] }
+  | { handled: true; created: true; ticketIds: string[]; numbers: string[]; repeatedTicketIds?: string[] };
 
 function allowedPrivateTestUserIds() {
   return new Set(
@@ -73,6 +75,75 @@ async function requesterForTelegramUser(supabase: ReturnType<typeof createAdminC
   return (data as Profile | null) ?? null;
 }
 
+
+
+async function recordRepeatTicket({
+  supabase,
+  ticketId,
+  categoryName,
+  requester,
+  message,
+  rawText,
+  confidence,
+  reason,
+}: {
+  supabase: ReturnType<typeof createAdminClient>;
+  ticketId: string;
+  categoryName: string;
+  requester: Profile;
+  message: TelegramMessage;
+  rawText: string;
+  confidence: number;
+  reason: string;
+}) {
+  const sourceMessageId = String(message.message_id);
+  const sourceChatId = String(message.chat.id);
+  const repeatResult = await createTicketRepeat({
+    ticketId,
+    sourceMessageId,
+    sourceChatId,
+    rawText,
+    detectedBy: "rule",
+    confidence,
+    createdByName: telegramUserName(message),
+  });
+
+  if (repeatResult.error) {
+    console.warn("[telegram-group-intake] repeat record failed", { ticketId, error: repeatResult.error });
+    return { recorded: false, alreadyRecorded: false };
+  }
+
+  if (repeatResult.data?.alreadyRecorded) {
+    console.info("[telegram-group-intake] repeat already recorded", { ticketId, sourceChatId, sourceMessageId });
+    return { recorded: true, alreadyRecorded: true };
+  }
+
+  await supabase.from("ticket_history").insert({
+    ticket_id: ticketId,
+    actor_id: requester.id,
+    action: "\u041F\u043E\u0432\u0442\u043E\u0440\u043D\u0435 \u0437\u0432\u0435\u0440\u043D\u0435\u043D\u043D\u044F \u0437 Telegram-\u0433\u0440\u0443\u043F\u0438. \u0422\u0435\u043A\u0441\u0442: " + rawText.slice(0, 240),
+    metadata: {
+      source: "telegram_repeat",
+      telegram_chat_id: sourceChatId,
+      telegram_message_id: sourceMessageId,
+      repeat_confidence: confidence,
+      repeat_reason: reason,
+    },
+  });
+
+  try {
+    const autoPlanResult = await autoAddTelegramTicketToWeeklyDraftPlan({ ticketId, categoryName });
+    if (autoPlanResult.error) {
+      console.warn("[telegram-group-intake] repeat auto planning failed", { ticketId, category: categoryName, error: autoPlanResult.error });
+    } else {
+      console.info("[telegram-group-intake] repeat auto planning finished", { ticketId, category: categoryName, result: autoPlanResult.data });
+    }
+  } catch (error) {
+    console.warn("[telegram-group-intake] repeat auto planning crashed", { ticketId, category: categoryName, error: error instanceof Error ? error.message : String(error) });
+  }
+
+  return { recorded: true, alreadyRecorded: false };
+}
 
 async function sendAiTicketPushSafely({
   ticket,
@@ -287,11 +358,49 @@ export async function handleTelegramGroupMessage(message: TelegramMessage): Prom
 
   const sourceGroupId = allowedPrivateTestUser ? `private_${message.chat.id}_${message.message_id}` : `${message.chat.id}_${message.message_id}`;
   const created = [];
+  const repeated: string[] = [];
   for (const workItem of eligibleWorkItems) {
     const category = findCategory((categories ?? []) as Category[], workItem.category);
     if (!category) {
       console.info("[telegram-group-intake] category_not_found", { category: workItem.category });
       continue;
+    }
+
+
+    try {
+      const repeatDetectionResult = await detectRepeatCandidate({
+        objectId: object.id,
+        categoryId: category.id,
+        categoryName: category.name,
+        description: workItem.description,
+        rawText: text,
+        sourceMessageId: String(message.message_id),
+        sourceChatId: String(message.chat.id),
+      });
+
+      if (repeatDetectionResult.isStrongRepeat && repeatDetectionResult.candidateTicketId) {
+        console.info("[telegram-group-intake] repeat detected", {
+          ticketId: repeatDetectionResult.candidateTicketId,
+          confidence: repeatDetectionResult.confidence,
+          reason: repeatDetectionResult.reason,
+        });
+        const repeatRecord = await recordRepeatTicket({
+          supabase,
+          ticketId: repeatDetectionResult.candidateTicketId,
+          categoryName: category.name,
+          requester,
+          message,
+          rawText: text,
+          confidence: repeatDetectionResult.confidence,
+          reason: repeatDetectionResult.reason,
+        });
+        if (repeatRecord.recorded) {
+          repeated.push(repeatDetectionResult.candidateTicketId);
+          continue;
+        }
+      }
+    } catch (error) {
+      console.warn("[telegram-group-intake] repeat detection failed; continuing with ticket creation", { error: error instanceof Error ? error.message : String(error) });
     }
 
     const ticket = await createPendingTicket({
@@ -323,6 +432,7 @@ export async function handleTelegramGroupMessage(message: TelegramMessage): Prom
     }
   }
 
+  if (created.length === 0 && repeated.length > 0) return { handled: true, created: false, reason: "repeat_detected", repeatedTicketIds: repeated };
   if (created.length === 0) return { handled: true, created: false, reason: "ticket_insert_failed" };
-  return { handled: true, created: true, ticketIds: created.map((ticket) => ticket.id), numbers: created.map((ticket) => ticket.number) };
+  return { handled: true, created: true, ticketIds: created.map((ticket) => ticket.id), numbers: created.map((ticket) => ticket.number), repeatedTicketIds: repeated };
 }

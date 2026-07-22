@@ -89,6 +89,8 @@ const ticketListSelect = `
   telegram_source_group_id,
   ai_confidence,
   recommended_department,
+  repeat_count,
+  last_repeat_at,
   created_at,
   updated_at,
   object:objects(id, name, type, object_number, city, district, address, is_active, created_at),

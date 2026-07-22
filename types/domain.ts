@@ -112,6 +112,8 @@ export interface Ticket {
   ai_confidence?: number | null;
   ai_raw_result?: Record<string, unknown> | null;
   recommended_department?: string | null;
+  repeat_count?: number;
+  last_repeat_at?: string | null;
   created_at: string;
   updated_at: string;
 }
