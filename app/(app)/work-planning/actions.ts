@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireRole } from "@/lib/auth/server";
-import { addTicketsToWorkPlan, createWorkPlan, deleteWorkPlan, getActivePlannedTickets } from "@/lib/supabase/work-plans";
+import { addTicketsToWorkPlan, createWorkPlan, deleteWorkPlan, ensureWeeklyDraftPlansForAutoRouting, getActivePlannedTickets } from "@/lib/supabase/work-plans";
 
 function text(formData: FormData, key: string) {
   const value = formData.get(key);
@@ -101,4 +101,16 @@ export async function deleteWorkPlanAction(workPlanId: string) {
   revalidatePath("/dashboard");
   revalidatePath("/weekly-control");
   redirect("/work-planning?success=deleted");
+}
+
+export async function ensureAutoDraftPlansAction() {
+  await requireRole(["admin", "management", "tech_manager"]);
+  const result = await ensureWeeklyDraftPlansForAutoRouting();
+  if (result.error) {
+    console.error("[work-planning] auto drafts failed", { error: result.error });
+    redirect(`/work-planning?error=${encodeURIComponent(publicErrorMessage(result.error))}`);
+  }
+
+  revalidatePath("/work-planning");
+  redirect(`/work-planning?week=${result.data.periodStart}&success=auto_drafts&created=${result.data.created}`);
 }

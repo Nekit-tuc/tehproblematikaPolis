@@ -5,6 +5,7 @@ import {
   CalendarDays,
   CalendarPlus,
   CheckCircle,
+  FileSpreadsheet,
   ChevronDown,
   ClipboardList,
   Eye,
@@ -13,6 +14,7 @@ import {
   LayoutGrid,
   MoreHorizontal,
   Pencil,
+  UserRound,
   Plus,
   Send,
   Trash2,
@@ -20,6 +22,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { ConfirmSubmitButton } from "@/components/tickets/confirm-submit-button";
+import { WorkPlanningDocumentsMenu } from "@/components/work-planning/work-planning-documents-menu";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -29,14 +32,14 @@ import { Label } from "@/components/ui/label";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { Textarea } from "@/components/ui/textarea";
 import { requireRole } from "@/lib/auth/server";
-import { getNextWorkWeekRange } from "@/lib/date/work-week";
+import { addDays, formatDateDDMMYYYY, getNextWorkWeekRange, getWorkWeekRange, type WorkWeekRange } from "@/lib/date/work-week";
 import { priorityLabels, statusLabels } from "@/lib/labels";
 import { getCategories, getObjects } from "@/lib/supabase/queries";
-import { getTicketsGroupedByCategory, getWorkPlanningSummary, getWorkPlans, type PlanningFilters, type PlanningTicket, type WorkPlan, type WorkPlanStatus, type WorkPlanningSummary } from "@/lib/supabase/work-plans";
+import { getTicketsGroupedByCategory, getWorkPlanningSummary, getWorkPlanningWeeksOverview, getWorkPlans, type PlanningFilters, type PlanningTicket, type WorkPlan, type WorkPlanStatus, type WorkPlanningSummary, type WorkPlanningWeekOverview } from "@/lib/supabase/work-plans";
 import { getActiveWorkers } from "@/lib/supabase/worker-queries";
 import { cn, formatDate } from "@/lib/utils";
 import type { TicketPriority, TicketStatus, WorkerWithCategories } from "@/types/domain";
-import { createWorkPlanAction, deleteWorkPlanAction } from "./actions";
+import { createWorkPlanAction, deleteWorkPlanAction, ensureAutoDraftPlansAction } from "./actions";
 
 type SearchParams = {
   view?: "category" | "worker" | "object";
@@ -48,6 +51,8 @@ type SearchParams = {
   objectId?: string;
   assignment?: "all" | "with_worker" | "without_worker";
   create?: string;
+  week?: string;
+  created?: string;
   success?: string;
   error?: string;
 };
@@ -158,32 +163,89 @@ function buildTabHref(view: string, params: SearchParams) {
   return `/work-planning?${search.toString()}`;
 }
 
+function isDateParam(value?: string | null) {
+  return Boolean(value && /^\d{4}-\d{2}-\d{2}$/.test(value));
+}
+
+function planningHref(params: Record<string, string | undefined | null>) {
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value) search.set(key, value);
+  });
+  const query = search.toString();
+  return query ? `/work-planning?${query}` : "/work-planning";
+}
+
+function weekRangeFromStart(startDate: string): WorkWeekRange {
+  return getWorkWeekRange(new Date(`${startDate}T12:00:00`));
+}
+
+function buildPlanningWeeks(currentWeek: WorkWeekRange, selectedWeek: WorkWeekRange) {
+  const baseStart = currentWeek.start;
+  const starts = [-14, -7, 0, 7, 14, 21, 28].map((offset) => addDays(baseStart, offset));
+  if (!starts.some((date) => formatDateDDMMYYYY(date) === formatDateDDMMYYYY(selectedWeek.start))) starts.push(selectedWeek.start);
+  return starts
+    .sort((a, b) => a.getTime() - b.getTime())
+    .map((start) => {
+      const range = getWorkWeekRange(start);
+      const diffDays = Math.round((range.start.getTime() - currentWeek.start.getTime()) / 86400000);
+      const label: WorkPlanningWeekOverview["label"] = diffDays < 0 ? "previous" : diffDays === 0 ? "current" : diffDays === 7 ? "next" : "future";
+      return { startDate: range.startDate, endDate: range.endDate, label };
+    });
+}
+
+function shortWeekPeriod(week: Pick<WorkPlanningWeekOverview, "startDate" | "endDate">) {
+  return `${formatDateDDMMYYYY(week.startDate).slice(0, 5)}—${formatDateDDMMYYYY(week.endDate).slice(0, 5)}`;
+}
+
+function weekBadgeLabel(label: WorkPlanningWeekOverview["label"]) {
+  if (label === "previous") return "Минулий";
+  if (label === "current") return "Поточний";
+  if (label === "next") return "Наступний";
+  return "Майбутній";
+}
+
+function weekHint(label: WorkPlanningWeekOverview["label"]) {
+  if (label === "previous") return "Минулий тиждень · перегляд історії планів.";
+  if (label === "current") return "Поточний тиждень · роботи, які виконуються зараз.";
+  if (label === "next") return "Наступний тиждень · сюди автоматично додаються нові заявки з Telegram.";
+  return "Майбутній тиждень · підготовка робіт наперед.";
+}
+
 export default async function WorkPlanningPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   await requireRole(["admin", "management", "tech_manager"]);
   const params = await searchParams;
   const view = params.view === "worker" || params.view === "object" ? params.view : "category";
   const createMode = params.create === "1";
   const filters = filtersFromParams(params);
+  const currentWorkWeek = getWorkWeekRange();
+  const nextWorkWeek = getNextWorkWeekRange();
+  const selectedWeek = isDateParam(params.week) ? weekRangeFromStart(params.week!) : nextWorkWeek;
+  const weekOptions = buildPlanningWeeks(currentWorkWeek, selectedWeek);
 
-  const [groupsResult, plansResult, categoriesResult, objectsResult, workersResult, summaryResult] = await Promise.all([
+  const [groupsResult, plansResult, categoriesResult, objectsResult, workersResult, summaryResult, weeksOverviewResult] = await Promise.all([
     getTicketsGroupedByCategory(filters),
-    getWorkPlans(),
+    getWorkPlans({ from: selectedWeek.startDate, to: selectedWeek.endDate, limit: 100 }),
     getCategories(),
     getObjects(),
     getActiveWorkers(),
     getWorkPlanningSummary(),
+    getWorkPlanningWeeksOverview(weekOptions),
   ]);
 
   const workersById = new Map(workersResult.data.map((worker) => [worker.id, worker]));
-  const error = groupsResult.error ?? plansResult.error ?? categoriesResult.error ?? objectsResult.error ?? workersResult.error ?? summaryResult.error;
+  const error = groupsResult.error ?? plansResult.error ?? categoriesResult.error ?? objectsResult.error ?? workersResult.error ?? summaryResult.error ?? weeksOverviewResult.error;
   const pageError = displayWorkPlanningError(error);
   const createError = displayWorkPlanningError(params.error);
   const ticketCount = groupsResult.data.reduce((sum, group) => sum + group.tickets.length, 0);
   const planningSummary = summaryResult.data;
-  const nextWorkWeek = getNextWorkWeekRange();
+  const weekOverview = weeksOverviewResult.data;
+  const selectedWeekBase = weekOptions.find((week) => week.startDate === selectedWeek.startDate) ?? { startDate: selectedWeek.startDate, endDate: selectedWeek.endDate, label: "future" as const };
+  const selectedWeekOverview = weekOverview.find((week) => week.startDate === selectedWeek.startDate) ?? { ...selectedWeekBase, plansCount: 0, ticketsCount: 0, draftCount: 0, sentCount: 0, doneCount: 0, notDoneCount: 0, withoutWorkerCount: 0 };
+  const isNextSelectedWeek = selectedWeek.startDate === nextWorkWeek.startDate;
 
   return (
-    <div className="page-shell max-w-full space-y-2.5 overflow-x-hidden bg-[radial-gradient(circle_at_50%_0%,rgba(249,115,22,0.10),transparent_28%)] pb-28 md:space-y-6 md:bg-none md:pb-6">
+    <div className="page-shell max-w-full space-y-2.5 overflow-x-hidden bg-[radial-gradient(circle_at_50%_0%,rgba(249,115,22,0.10),transparent_28%)] pb-[180px] md:space-y-6 md:bg-none md:pb-8">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h1 className="text-[23px] font-bold leading-[1.05] tracking-[-0.03em] text-zinc-100 md:text-2xl">Планування робіт</h1>
@@ -221,62 +283,35 @@ export default async function WorkPlanningPage({ searchParams }: { searchParams:
         </div>
       ) : null}
 
-      <details className="rounded-[18px] border border-white/[0.08] bg-white/[0.035] p-2.5 shadow-[0_10px_28px_rgba(0,0,0,0.28)] md:hidden">
-        <summary className="flex h-10 cursor-pointer list-none items-center justify-between rounded-[13px] bg-white/[0.045] px-3">
-          <span className="flex items-center gap-2 text-[12px] font-semibold text-orange-200"><Filter className="h-4 w-4" />Фільтри</span>
-          <span className="flex items-center gap-1.5 text-[10px] text-zinc-400">
-            <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-white/[0.08] px-1.5 text-[10px] font-semibold text-zinc-200">{ticketCount}</span>
-            знайдено
-            <ChevronDown className="h-3.5 w-3.5" />
-          </span>
-        </summary>
-        <FilterForm params={params} categories={categoriesResult.data} objects={objectsResult.data} workers={workersResult.data} compact />
-      </details>
-
-      <Card className="hidden md:block">
-        <CardHeader>
-          <CardTitle>Фільтри</CardTitle>
-          <CardDescription>Показуються підтверджені незавершені заявки: нові, призначені, в роботі та на підтвердженні виконання.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <FilterForm params={params} categories={categoriesResult.data} objects={objectsResult.data} workers={workersResult.data} />
-        </CardContent>
-      </Card>
-
-      <div className="-mx-1 max-w-full overflow-x-auto px-1 pb-1">
-        <div className="flex min-w-0 gap-2">
-          <TabLink href={buildTabHref("category", params)} active={view === "category"} icon={LayoutGrid}>По категоріях</TabLink>
-          <TabLink href={buildTabHref("worker", params)} active={view === "worker"} icon={Users}>По виконавцях</TabLink>
-          <TabLink href={buildTabHref("object", params)} active={view === "object"} icon={Building2}>По об'єктах</TabLink>
+      {params.success === "auto_drafts" ? (
+        <div className="min-w-0 max-w-full overflow-hidden break-words whitespace-normal">
+          <Alert title={"Авто-чернетки оновлено"}>
+            <span className="break-words whitespace-normal">{"Створено нових планів: "}{params.created ?? "0"}</span>
+          </Alert>
         </div>
+      ) : null}
+
+      <WeekSlider weeks={weekOverview} selectedWeekStart={selectedWeek.startDate} params={params} />
+      <div className="flex justify-stretch md:justify-start">
+        <WorkPlanningDocumentsMenu weekStart={selectedWeekOverview.startDate} weekPeriod={shortWeekPeriod(selectedWeekOverview)} plans={plansResult.data.map((plan) => ({ id: plan.id, title: plan.title, itemsCount: plan.items_count ?? 0 }))} />
       </div>
 
-      {view !== "category" ? (
-        <Card className="rounded-[17px] border-white/10 bg-white/[0.04] md:rounded-lg">
-          <CardContent className="pt-6 text-sm text-muted-foreground">Буде додано на наступному етапі.</CardContent>
-        </Card>
-      ) : (
-        <>
-        {!createMode ? (
-          <Button asChild className="h-11 w-full rounded-[14px] bg-gradient-to-r from-orange-500 to-orange-400 text-[12px] font-semibold text-white shadow-[0_10px_28px_rgba(249,115,22,0.25)] md:hidden">
-            <Link href="/work-planning?create=1"><Plus className="h-4 w-4" />Створити тижневий план</Link>
-          </Button>
-        ) : null}
-        <form action={createWorkPlanAction} className={cn("space-y-6", !createMode && "hidden md:block")}>
+      {createMode ? (
+        <form action={createWorkPlanAction} className="space-y-3">
           <Card className="rounded-[18px] border-orange-500/20 bg-orange-950/10 shadow-[0_10px_28px_rgba(0,0,0,0.24)] md:rounded-lg">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-[15px] md:text-lg"><FolderKanban className="h-4 w-4 text-orange-300 md:h-5 md:w-5" />Створити тижневий план</CardTitle>
-              <CardDescription>Оберіть заявки нижче, вкажіть період і створіть чернетку плану. Telegram-розсилка буде на етапі 2.</CardDescription>
+              <CardDescription>Оберіть заявки, вкажіть період і створіть чернетку плану.</CardDescription>
             </CardHeader>
             <CardContent className="grid gap-3 md:grid-cols-4">
               <Field label="Назва плану">
                 <Input name="title" required placeholder="Наприклад: План робіт на тиждень" />
               </Field>
               <Field label="Період з">
-                <Input name="period_start" type="date" required defaultValue={nextWorkWeek.startDate} />
+                <Input name="period_start" type="date" required defaultValue={selectedWeek.startDate} />
               </Field>
               <Field label="Період по">
-                <Input name="period_end" type="date" required defaultValue={nextWorkWeek.endDate} />
+                <Input name="period_end" type="date" required defaultValue={selectedWeek.endDate} />
               </Field>
               <div className="flex items-end">
                 <SubmitButton type="submit" pendingText="Створюється..." showOverlay className="min-h-8 w-full rounded-lg text-[10px] md:min-h-0 md:rounded-md md:text-sm">
@@ -293,98 +328,200 @@ export default async function WorkPlanningPage({ searchParams }: { searchParams:
               </Button>
             </CardContent>
           </Card>
-
-          {groupsResult.data.length === 0 ? (
-            <Card className="rounded-[17px] border-white/10 bg-white/[0.04] md:rounded-lg">
-              <CardContent className="pt-6 text-sm text-muted-foreground">Заявок для планування за поточними фільтрами немає.</CardContent>
-            </Card>
-          ) : (
-            <div className="space-y-4">
-              {groupsResult.data.map((group) => (
-                <CategoryGroup key={group.categoryId} title={group.categoryName} tickets={group.tickets} workersById={workersById} />
-              ))}
-            </div>
-          )}
         </form>
-        </>
-      )}
+      ) : null}
 
-      <Card className="rounded-[18px] border-white/[0.08] bg-white/[0.03] shadow-[0_14px_34px_rgba(0,0,0,0.28)] md:rounded-lg">
-        <CardHeader className="p-3 md:p-6">
-          <div className="flex items-start gap-2.5">
-            <div className="grid h-8 w-8 shrink-0 place-items-center rounded-[10px] border border-orange-400/25 bg-orange-500/15">
-              <CalendarDays className="h-4 w-4 text-orange-300" />
-            </div>
-            <div className="min-w-0">
-              <CardTitle className="text-[15px] font-bold text-zinc-100 md:text-lg">Плани робіт</CardTitle>
-              <CardDescription className="mt-0.5 text-[11px] leading-4 text-zinc-400 md:text-sm">Останні чернетки та плани. Детальна сторінка плану буде додана окремим етапом.</CardDescription>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-3 p-3 pt-0 md:p-6 md:pt-0">
-          {plansResult.data.length === 0 ? (
-            <div className="rounded-[17px] border border-dashed border-white/[0.10] bg-white/[0.025] p-4 text-center">
-              <CalendarPlus className="mx-auto h-6 w-6 text-orange-300" />
-              <div className="mt-2 text-[13px] font-semibold text-zinc-100">Планів робіт поки немає.</div>
-              <p className="mx-auto mt-1 max-w-[260px] text-[10px] leading-4 text-zinc-400">Створіть тижневий план із доступних заявок.</p>
-              <Button asChild className="mt-3 h-9 rounded-[12px] bg-gradient-to-r from-orange-500 to-orange-400 px-4 text-[11px] font-semibold text-white md:hidden">
-                <Link href="/work-planning?create=1"><Plus className="h-3.5 w-3.5" />Створити план</Link>
-              </Button>
-            </div>
-          ) : plansResult.data.map((plan) => (
-            <PlanCard key={plan.id} plan={plan} />
-          ))}
-        </CardContent>
-      </Card>
+      <PlansSection plans={plansResult.data} selectedWeek={selectedWeek} />
+
+
     </div>
   );
+}
+
+function WeekSlider({ weeks, selectedWeekStart, params }: { weeks: WorkPlanningWeekOverview[]; selectedWeekStart: string; params: SearchParams }) {
+  const activeIndex = Math.max(0, weeks.findIndex((week) => week.startDate === selectedWeekStart));
+  const activeWeek = weeks[activeIndex] ?? weeks[0];
+  const previousWeek = weeks[activeIndex - 1];
+  const nextWeek = weeks[activeIndex + 1];
+
+  if (!activeWeek) return null;
+
+  return (
+    <section className="relative overflow-hidden rounded-[22px] border border-white/[0.10] bg-[radial-gradient(circle_at_50%_0%,rgba(249,115,22,0.10),transparent_34%),linear-gradient(145deg,rgba(255,255,255,0.065),rgba(255,255,255,0.025))] p-[14px] shadow-[0_14px_34px_rgba(0,0,0,0.30)] md:rounded-[24px] md:p-5">
+      <div className="flex items-start justify-between gap-3">
+        {previousWeek ? (
+          <Link href={planningHref({ week: previousWeek.startDate, view: params.view ?? "category" })} className="mt-9 grid h-9 w-9 shrink-0 place-items-center rounded-full border border-white/[0.10] bg-white/[0.08] text-xl leading-none text-zinc-100 hover:bg-white/[0.12] md:mt-12 md:h-10 md:w-10 md:text-2xl" aria-label="Попередній тиждень">&lsaquo;</Link>
+        ) : (
+          <span className="mt-9 h-9 w-9 shrink-0 md:mt-12 md:h-10 md:w-10" />
+        )}
+        <div className="min-w-0 flex-1 text-center">
+          <div className="text-[11px] font-semibold text-orange-300 md:text-xs">Плани робіт</div>
+          <div className="mt-1.5 text-2xl font-black leading-none tracking-[-0.03em] text-white md:mt-2 md:text-3xl">{shortWeekPeriod(activeWeek)}</div>
+          <div className="mt-2 flex flex-wrap justify-center gap-1.5 md:mt-3 md:gap-2">
+            <span className="inline-flex h-7 items-center rounded-full border border-orange-400/25 bg-orange-500/15 px-3 text-[11px] font-bold text-orange-200">{weekBadgeLabel(activeWeek.label)} тиждень</span>
+          </div>
+        </div>
+        {nextWeek ? (
+          <Link href={planningHref({ week: nextWeek.startDate, view: params.view ?? "category" })} className="mt-9 grid h-9 w-9 shrink-0 place-items-center rounded-full border border-white/[0.10] bg-white/[0.08] text-xl leading-none text-zinc-100 hover:bg-white/[0.12] md:mt-12 md:h-10 md:w-10 md:text-2xl" aria-label="Наступний тиждень">&rsaquo;</Link>
+        ) : (
+          <span className="mt-9 h-9 w-9 shrink-0 md:mt-12 md:h-10 md:w-10" />
+        )}
+      </div>
+      <div className="mt-4 grid grid-cols-5 gap-1 md:mt-5 md:gap-3">
+        <WeekHeroMetric icon={FolderKanban} label="Планів" value={activeWeek.plansCount} />
+        <WeekHeroMetric icon={ClipboardList} label="Заявок" value={activeWeek.ticketsCount} />
+        <WeekHeroMetric icon={Pencil} label="Чернеток" value={activeWeek.draftCount} />
+        <WeekHeroMetric icon={Send} label="Надіслано" value={activeWeek.sentCount} />
+        <WeekHeroMetric icon={UserRound} label="Без вик." value={activeWeek.withoutWorkerCount} />
+      </div>
+      <div className="mt-4 flex justify-center gap-2 md:mt-5">
+        {weeks.map((week) => (
+          <Link key={week.startDate} href={planningHref({ week: week.startDate, view: params.view ?? "category" })} aria-label={shortWeekPeriod(week)} className={cn("h-1.5 rounded-full transition-all", week.startDate === activeWeek.startDate ? "w-8 bg-orange-400" : "w-5 bg-white/20 hover:bg-white/35")} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function WeekHeroMetric({ icon: Icon, label, value }: { icon: React.ElementType; label: string; value: number }) {
+  return (
+    <div className="min-w-0 text-center">
+      <Icon className="mx-auto h-4 w-4 text-orange-300 md:h-5 md:w-5" />
+      <div className="mt-1.5 text-lg font-bold leading-none text-white md:mt-2 md:text-xl">{value}</div>
+      <div className="mt-0.5 truncate text-[10px] leading-3 text-zinc-400 md:text-xs">{label}</div>
+    </div>
+  );
+}
+
+function PlansSection({ plans, selectedWeek }: { plans: WorkPlan[]; selectedWeek: WorkWeekRange }) {
+  return (
+    <section className="rounded-[24px] border border-white/[0.10] bg-[radial-gradient(circle_at_0%_0%,rgba(249,115,22,0.08),transparent_30%),rgba(255,255,255,0.035)] p-3.5 shadow-[0_18px_42px_rgba(0,0,0,0.34)] md:p-5">
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="text-xl font-bold leading-none text-zinc-100 md:text-2xl">Плани виконавців</h2>
+          <p className="mt-1.5 text-xs leading-4 text-zinc-400 md:text-sm">Плани вибраного тижня {shortWeekPeriod(selectedWeek)}</p>
+        </div>
+        <span className="shrink-0 rounded-full border border-orange-400/25 bg-orange-500/10 px-3 py-1.5 text-xs font-bold text-orange-200 shadow-[0_0_20px_rgba(249,115,22,0.12)] md:text-sm">{plans.length} планів</span>
+      </div>
+      {plans.length === 0 ? (
+        <div className="rounded-[20px] border border-dashed border-white/[0.12] bg-white/[0.025] p-4 text-center">
+          <CalendarPlus className="mx-auto h-7 w-7 text-orange-300" />
+          <div className="mt-2 text-[14px] font-semibold text-zinc-100">Планів на цей тиждень ще немає.</div>
+          <p className="mx-auto mt-1 max-w-[280px] text-[11px] leading-4 text-zinc-400">Створіть план вручну або сформуйте авто-чернетки.</p>
+        </div>
+      ) : (
+        <div className="space-y-2.5 md:grid md:grid-cols-2 md:gap-3 md:space-y-0 xl:grid-cols-3">
+          {plans.map((plan) => <PlanCard key={plan.id} plan={plan} />)}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function ticketWord(count: number) {
+  const mod10 = Math.abs(count) % 10;
+  const mod100 = Math.abs(count) % 100;
+  if (mod10 === 1 && mod100 !== 11) return "заявка";
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return "заявки";
+  return "заявок";
+}
+
+function planDisplayParts(plan: Pick<WorkPlan, "title" | "notes" | "worker_name">) {
+  const normalizedTitle = plan.title.trim() || "План робіт";
+  const [rawOwner, ...rest] = normalizedTitle.split(/\s+[—-]\s+/);
+  const ownerName = rawOwner?.trim() || "Не призначено";
+  const direction = rest.join(" - ").trim() || plan.notes?.trim() || "План робіт";
+  return { ownerName, direction, title: normalizedTitle };
+}
+
+function planInitials(plan: Pick<WorkPlan, "title" | "notes" | "worker_name">) {
+  const owner = planDisplayParts(plan).ownerName;
+  if (owner === "Не призначено") return "-";
+  const words = owner.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return "-";
+  return words.slice(0, 2).map((word) => word[0]?.toUpperCase()).join("").slice(0, 2);
+}
+
+function planProgress(plan: WorkPlan) {
+  const total = plan.items_count ?? 0;
+  const done = Math.min(plan.done_items_count ?? 0, total);
+  const percent = total > 0 ? Math.round((done / total) * 100) : 0;
+  return { total, done, percent };
+}
+
+function progressTone(status: WorkPlanStatus, percent: number) {
+  if (status === "cancelled") return "bg-red-400";
+  if (percent >= 100 || status === "done") return "bg-emerald-400";
+  if (status === "sent" || status === "partially_done") return "bg-blue-400";
+  return "bg-orange-400";
 }
 
 function PlanCard({ plan }: { plan: WorkPlan }) {
   const style = planStatusStyle[plan.status];
   const StatusIcon = style.icon;
+  const { ownerName, direction, title } = planDisplayParts(plan);
+  const progress = planProgress(plan);
+  const period = shortWeekPeriod({ startDate: plan.period_start, endDate: plan.period_end });
+  const withoutWorkerCount = plan.without_worker_count ?? 0;
+
   return (
-    <div className="relative overflow-visible rounded-[17px] border border-white/[0.08] bg-[linear-gradient(145deg,rgba(255,255,255,0.06),rgba(255,255,255,0.025))] p-3 shadow-[0_10px_26px_rgba(0,0,0,0.32)] md:grid md:grid-cols-[1.4fr_1fr_120px_120px_auto] md:items-center md:gap-3 md:rounded-lg">
-      <div className={cn("absolute left-0 top-0 h-full w-[3px]", style.stripe)} />
-      <div className="flex min-w-0 items-start justify-between gap-2 md:block">
-        <div className="min-w-0 pl-1 md:pl-0">
-          <div className="line-clamp-1 break-words text-[13px] font-bold leading-4 text-zinc-100 md:text-sm">{plan.title}</div>
-          <div className="mt-1 hidden text-xs text-muted-foreground md:block">Створено: {formatDate(plan.created_at)}</div>
+    <div className="relative min-w-0 overflow-hidden rounded-[22px] border border-white/[0.10] bg-[linear-gradient(145deg,rgba(255,255,255,0.065),rgba(255,255,255,0.025))] p-3 pl-3.5 shadow-[0_14px_30px_rgba(0,0,0,0.30)] md:p-4 md:pl-5">
+      <div className={cn("absolute left-0 top-9 bottom-9 w-1 rounded-r-full", style.stripe)} />
+      <div className="flex min-w-0 gap-2.5">
+        <div className="grid h-11 w-11 shrink-0 place-items-center rounded-full border border-orange-400/45 bg-orange-500/10 text-base font-bold text-orange-200 shadow-[0_0_22px_rgba(249,115,22,0.10)] md:h-12 md:w-12 md:text-lg">
+          {planInitials(plan)}
         </div>
-        <span className={cn("inline-flex h-6 shrink-0 items-center gap-1 rounded-full border px-2 text-[9px] font-semibold md:hidden", style.badge)}>
-          <StatusIcon className="h-[11px] w-[11px]" />
+        <div className="min-w-0 flex-1">
+          <div className="line-clamp-2 break-words text-sm font-semibold leading-5 text-zinc-100 md:text-base md:leading-6">{title}</div>
+          <div className="mt-1 flex min-w-0 items-center gap-1.5 text-xs leading-4 text-zinc-400">
+            <UserRound className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+            <span className="min-w-0 truncate">Виконавець: {ownerName}</span>
+          </div>
+          <div className="mt-0.5 line-clamp-1 text-[11px] leading-4 text-zinc-500">{direction}</div>
+        </div>
+      </div>
+
+      <div className="mt-2.5 flex min-w-0 flex-wrap gap-1.5">
+        <span className="inline-flex h-7 items-center gap-1.5 rounded-[9px] border border-white/[0.09] bg-black/20 px-2 text-[11px] text-zinc-300">
+          <ClipboardList className="h-3.5 w-3.5 text-orange-300" />
+          {progress.total} {ticketWord(progress.total)}
+        </span>
+        <span className="inline-flex h-7 items-center gap-1.5 rounded-[9px] border border-white/[0.09] bg-black/20 px-2 text-[11px] text-zinc-300">
+          <CalendarDays className="h-3.5 w-3.5 text-zinc-400" />
+          {period}
+        </span>
+        <span className={cn("inline-flex h-7 items-center gap-1.5 rounded-[9px] border px-2 text-[11px] font-semibold", style.badge)}>
+          <StatusIcon className="h-3.5 w-3.5" />
           {planStatusLabels[plan.status]}
         </span>
       </div>
 
-      <div className="mt-2 flex items-center gap-1.5 pl-1 text-[10px] text-zinc-400 md:mt-0 md:pl-0 md:text-sm">
-        <CalendarDays className="h-3 w-3 shrink-0 md:hidden" />
-        <span className="min-w-0 break-words">{plan.period_start} - {plan.period_end}</span>
+      <div className="mt-2.5">
+        <div className="h-1.5 overflow-hidden rounded-full bg-white/[0.10]">
+          <div className={cn("h-full rounded-full transition-all", progressTone(plan.status, progress.percent))} style={{ width: `${progress.percent}%` }} />
+        </div>
+        <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[11px] leading-4 text-zinc-400">
+          {progress.total > 0 ? (
+            <span>Виконано {progress.done} з {progress.total} · {progress.percent}%</span>
+          ) : (
+            <span>Заявок ще немає</span>
+          )}
+          {withoutWorkerCount > 0 ? <span className="font-semibold text-orange-300">Без виконавця: {withoutWorkerCount}</span> : null}
+        </div>
       </div>
 
-      <div className="mt-2.5 grid grid-cols-2 gap-x-2 gap-y-1.5 pl-1 md:hidden">
-        <MetaItem icon={ClipboardList}>{plan.items_count ?? 0} заявок</MetaItem>
-        <MetaItem icon={CalendarDays}>{formatDate(plan.created_at)}</MetaItem>
-      </div>
-
-      <div className="mt-2 hidden md:block">
-        <span className={cn("inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-medium", style.badge)}>
-          <StatusIcon className="h-3 w-3" />
-          {planStatusLabels[plan.status]}
-        </span>
-      </div>
-      <div className="hidden text-muted-foreground md:block">{plan.items_count ?? 0} заявок</div>
-
-      <div className="mt-3 grid grid-cols-[1fr_auto] gap-1.5 md:mt-0 md:flex md:justify-end">
-        <Button asChild variant="outline" className="h-8 rounded-[10px] border-white/[0.08] bg-white/[0.035] text-[10px] text-zinc-200 md:h-auto md:rounded-md md:text-sm">
-          <Link href={`/work-planning/${plan.id}`}><Eye className="h-3 w-3 md:h-4 md:w-4" />Переглянути</Link>
+      <div className="mt-2.5 flex justify-end gap-2">
+        <Button asChild variant="outline" className="h-10 w-10 rounded-full border-white/[0.12] bg-white/[0.045] p-0 text-orange-300 hover:bg-orange-500/10 hover:text-orange-200">
+          <Link href={`/work-planning/${plan.id}`} aria-label={`Редагувати план ${plan.title}`}><Pencil className="h-4 w-4" /></Link>
+        </Button>
+        <Button asChild variant="outline" className="h-10 w-10 rounded-full border-white/[0.12] bg-white/[0.045] p-0 text-orange-300 hover:bg-orange-500/10 hover:text-orange-200">
+          <Link href={`/work-planning/${plan.id}`} aria-label={`Відкрити план ${plan.title}`}><Eye className="h-4 w-4" /></Link>
         </Button>
         <PlanActionsMenu plan={plan} />
       </div>
     </div>
   );
 }
-
 
 function PlanningSummaryBadge({ summary, fallbackCount }: { summary: WorkPlanningSummary; fallbackCount: number }) {
   const total = summary.totalActive || fallbackCount;
@@ -406,10 +543,10 @@ function deletePlanConfirmMessage(status: WorkPlanStatus) {
 function PlanActionsMenu({ plan }: { plan: WorkPlan }) {
   return (
     <details className="group relative z-30 open:z-[90]">
-      <summary className="flex h-8 w-8 cursor-pointer list-none items-center justify-center rounded-[10px] border border-white/[0.08] bg-white/[0.035] text-zinc-300 hover:bg-white/[0.07]">
-        <MoreHorizontal className="h-3.5 w-3.5" />
+      <summary className="flex h-10 w-10 cursor-pointer list-none items-center justify-center rounded-full border border-white/[0.12] bg-white/[0.045] text-orange-300 hover:bg-orange-500/10 hover:text-orange-200">
+        <MoreHorizontal className="h-4 w-4" />
       </summary>
-      <div className="absolute right-0 top-9 z-[100] w-44 rounded-[12px] border border-white/[0.10] bg-[#111]/95 p-1.5 shadow-2xl shadow-black/40">
+      <div className="absolute right-0 top-11 z-[100] w-48 rounded-[12px] border border-white/[0.10] bg-[#111]/95 p-1.5 shadow-2xl shadow-black/40">
         {plan.status === "done" ? (
           <div className="rounded-[10px] px-2 py-2 text-[11px] leading-4 text-zinc-400">Завершений план не можна видалити.</div>
         ) : (

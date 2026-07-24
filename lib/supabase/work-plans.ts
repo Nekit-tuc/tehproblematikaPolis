@@ -21,12 +21,28 @@ export type WorkPlan = {
   sent_at?: string | null;
   notes?: string | null;
   items_count?: number;
+  done_items_count?: number;
+  without_worker_count?: number;
+  worker_name?: string | null;
 };
 
 export type WorkPlanningSummary = {
   totalActive: number;
   plannedActive: number;
   unplannedActive: number;
+};
+
+export type WorkPlanningWeekOverview = {
+  startDate: string;
+  endDate: string;
+  label: "previous" | "current" | "next" | "future";
+  plansCount: number;
+  ticketsCount: number;
+  draftCount: number;
+  sentCount: number;
+  doneCount: number;
+  notDoneCount: number;
+  withoutWorkerCount: number;
 };
 
 export type PlanningTicket = TicketWithRelations & {
@@ -684,22 +700,124 @@ export async function removeTicketFromWorkPlan(workPlanId: string, ticketId: str
   return { data, error: error?.message ?? null };
 }
 
-export async function getWorkPlans(): Promise<QueryResult<WorkPlan[]>> {
+export async function getWorkPlans(filters: { from?: string; to?: string; limit?: number } = {}): Promise<QueryResult<WorkPlan[]>> {
   if (!hasSupabaseEnv()) return emptyWithError([]);
   const supabase = await createClient();
-  const { data, error } = await measureAsync("work-planning:plans", () =>
+  let query = supabase
+    .from("work_plans")
+    .select("id, title, period_start, period_end, status, created_by, created_at, updated_at, sent_at, notes, work_plan_items(id, ticket_id, worker_id, worker:workers(id, name), ticket:tickets(id, status, assignee_worker_id))")
+    .order("period_start", { ascending: true })
+    .order("title", { ascending: true })
+    .limit(filters.limit ?? 50);
+
+  if (filters.from) query = query.gte("period_start", filters.from);
+  if (filters.to) query = query.lt("period_start", filters.to);
+
+  const { data, error } = await measureAsync("work-planning:plans", () => query);
+
+  const plans = ((data ?? []) as unknown as WeekOverviewPlanRow[]).map((plan) => {
+    const items = plan.work_plan_items ?? [];
+    const workerCounts = new Map<string, { name: string; count: number }>();
+    for (const item of items) {
+      const worker = rowWorker(item);
+      if (!worker?.id || !worker.name) continue;
+      const current = workerCounts.get(worker.id) ?? { name: worker.name, count: 0 };
+      current.count += 1;
+      workerCounts.set(worker.id, current);
+    }
+    const primaryWorker = [...workerCounts.values()].sort((a, b) => b.count - a.count)[0] ?? null;
+    return {
+      ...plan,
+      items_count: items.length,
+      done_items_count: items.filter((item) => rowTicket(item)?.status === "done").length,
+      without_worker_count: items.filter((item) => {
+        const ticket = rowTicket(item);
+        return !item.worker_id && !ticket?.assignee_worker_id;
+      }).length,
+      worker_name: primaryWorker?.name ?? null,
+    };
+  });
+  return { data: plans, error: error?.message ?? null };
+}
+
+function emptyWeekOverview(week: Pick<WorkPlanningWeekOverview, "startDate" | "endDate" | "label">): WorkPlanningWeekOverview {
+  return {
+    startDate: week.startDate,
+    endDate: week.endDate,
+    label: week.label,
+    plansCount: 0,
+    ticketsCount: 0,
+    draftCount: 0,
+    sentCount: 0,
+    doneCount: 0,
+    notDoneCount: 0,
+    withoutWorkerCount: 0,
+  };
+}
+
+type WeekOverviewPlanRow = WorkPlan & {
+  work_plan_items?: Array<{
+    id: string;
+    ticket_id?: string | null;
+    worker_id?: string | null;
+    worker?: { id: string; name: string } | { id: string; name: string }[] | null;
+    ticket?: { id: string; status: TicketStatus; assignee_worker_id?: string | null } | { id: string; status: TicketStatus; assignee_worker_id?: string | null }[] | null;
+  }> | null;
+};
+
+function rowTicket(item: NonNullable<WeekOverviewPlanRow["work_plan_items"]>[number]) {
+  return Array.isArray(item.ticket) ? item.ticket[0] : item.ticket;
+}
+
+function rowWorker(item: NonNullable<WeekOverviewPlanRow["work_plan_items"]>[number]) {
+  return Array.isArray(item.worker) ? item.worker[0] : item.worker;
+}
+
+export async function getWorkPlanningWeeksOverview(weeks: Array<Pick<WorkPlanningWeekOverview, "startDate" | "endDate" | "label">>): Promise<QueryResult<WorkPlanningWeekOverview[]>> {
+  const overview = weeks.map(emptyWeekOverview);
+  if (!hasSupabaseEnv()) return { data: overview, error: missingSupabaseMessage };
+  if (weeks.length === 0) return { data: [], error: null };
+
+  const supabase = await createClient();
+  const firstStart = weeks[0].startDate;
+  const lastEnd = weeks[weeks.length - 1].endDate;
+  const ticketIdsByWeek = new Map<string, Set<string>>();
+
+  const { data, error } = await measureAsync("work-planning:weeks_overview", () =>
     supabase
       .from("work_plans")
-      .select("id, title, period_start, period_end, status, created_by, created_at, updated_at, sent_at, notes, work_plan_items(id)")
-      .order("created_at", { ascending: false })
-      .limit(20),
+      .select("id, title, period_start, period_end, status, created_by, created_at, updated_at, sent_at, notes, work_plan_items(id, ticket_id, worker_id, worker:workers(id, name), ticket:tickets(id, status, assignee_worker_id))")
+      .gte("period_start", firstStart)
+      .lt("period_start", lastEnd)
+      .limit(500),
   );
 
-  const plans = ((data ?? []) as Array<WorkPlan & { work_plan_items?: Array<{ id: string }> | null }>).map((plan) => ({
-    ...plan,
-    items_count: plan.work_plan_items?.length ?? 0,
-  }));
-  return { data: plans, error: error?.message ?? null };
+  if (error) return { data: overview, error: error.message };
+
+  for (const plan of (data ?? []) as unknown as WeekOverviewPlanRow[]) {
+    const week = overview.find((item) => plan.period_start >= item.startDate && plan.period_start < item.endDate);
+    if (!week) continue;
+    week.plansCount += 1;
+    if (plan.status === "draft") week.draftCount += 1;
+    if (plan.status === "sent" || plan.status === "partially_done") week.sentCount += 1;
+
+    const ticketIds = ticketIdsByWeek.get(week.startDate) ?? new Set<string>();
+    ticketIdsByWeek.set(week.startDate, ticketIds);
+    for (const item of plan.work_plan_items ?? []) {
+      const ticket = rowTicket(item);
+      const ticketId = ticket?.id ?? item.ticket_id;
+      if (ticketId) ticketIds.add(ticketId);
+      if (ticket?.status === "done") week.doneCount += 1;
+      if (ticket?.status && !["done", "rejected", "cancelled"].includes(ticket.status)) week.notDoneCount += 1;
+      if (!item.worker_id && !ticket?.assignee_worker_id) week.withoutWorkerCount += 1;
+    }
+  }
+
+  for (const week of overview) {
+    week.ticketsCount = ticketIdsByWeek.get(week.startDate)?.size ?? 0;
+  }
+
+  return { data: overview, error: null };
 }
 
 export async function getWorkPlanById(id: string): Promise<QueryResult<WorkPlan | null>> {
