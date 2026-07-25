@@ -1,4 +1,5 @@
 import { Sidebar } from "@/components/layout/sidebar";
+import { BottomNavPrefetcher } from "@/components/layout/bottom-nav-prefetcher";
 import { MobileShell } from "@/components/layout/mobile-shell";
 import { Topbar } from "@/components/layout/topbar";
 import { requireAuth } from "@/lib/auth/server";
@@ -27,6 +28,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   return (
     <div className="min-h-screen bg-background md:flex">
+      <BottomNavPrefetcher />
       <MobileShell profile={profile} aiTicketsCount={aiTicketsCount} notificationCount={notificationCount} />
       <div className="hidden md:block">
         <Sidebar profile={profile} aiTicketsCount={aiTicketsCount} />
