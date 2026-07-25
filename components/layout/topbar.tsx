@@ -2,16 +2,13 @@ import { Search } from "lucide-react";
 import { NotificationsDrawer } from "@/components/layout/notifications-drawer";
 import { Input } from "@/components/ui/input";
 import { roleLabels } from "@/lib/labels";
-import type { AppNotification } from "@/lib/supabase/notifications";
 import type { Profile } from "@/types/domain";
 
 export function Topbar({
   profile,
-  notifications,
   notificationCount,
 }: {
   profile: Profile;
-  notifications: AppNotification[];
   notificationCount: number;
 }) {
   return (
@@ -21,7 +18,7 @@ export function Topbar({
           <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
           <Input className="pl-9" placeholder="Пошук заявки, об'єкта або виконавця" />
         </div>
-        <NotificationsDrawer notifications={notifications} count={notificationCount} />
+        <NotificationsDrawer count={notificationCount} />
         <div className="hidden text-right sm:block">
           <div className="text-sm font-medium">{profile.full_name}</div>
           <div className="text-xs text-muted-foreground">{roleLabels[profile.role]}</div>

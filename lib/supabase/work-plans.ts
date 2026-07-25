@@ -765,12 +765,26 @@ type WeekOverviewPlanRow = WorkPlan & {
   }> | null;
 };
 
+type WeekOverviewBasePlanRow = Pick<WorkPlan, "id" | "period_start" | "status">;
+
+type WeekOverviewItemRow = {
+  id: string;
+  work_plan_id: string;
+  ticket_id?: string | null;
+  worker_id?: string | null;
+  ticket?: { id: string; status: TicketStatus; assignee_worker_id?: string | null } | { id: string; status: TicketStatus; assignee_worker_id?: string | null }[] | null;
+};
+
 function rowTicket(item: NonNullable<WeekOverviewPlanRow["work_plan_items"]>[number]) {
   return Array.isArray(item.ticket) ? item.ticket[0] : item.ticket;
 }
 
 function rowWorker(item: NonNullable<WeekOverviewPlanRow["work_plan_items"]>[number]) {
   return Array.isArray(item.worker) ? item.worker[0] : item.worker;
+}
+
+function overviewRowTicket(item: WeekOverviewItemRow) {
+  return Array.isArray(item.ticket) ? item.ticket[0] : item.ticket;
 }
 
 export async function getWorkPlanningWeeksOverview(weeks: Array<Pick<WorkPlanningWeekOverview, "startDate" | "endDate" | "label">>): Promise<QueryResult<WorkPlanningWeekOverview[]>> {
@@ -783,34 +797,55 @@ export async function getWorkPlanningWeeksOverview(weeks: Array<Pick<WorkPlannin
   const lastEnd = weeks[weeks.length - 1].endDate;
   const ticketIdsByWeek = new Map<string, Set<string>>();
 
-  const { data, error } = await measureAsync("work-planning:weeks_overview", () =>
+  const { data: plansData, error: plansError } = await measureAsync("work-planning:weeks_overview:plans", () =>
     supabase
       .from("work_plans")
-      .select("id, title, period_start, period_end, status, created_by, created_at, updated_at, sent_at, notes, work_plan_items(id, ticket_id, worker_id, worker:workers(id, name), ticket:tickets(id, status, assignee_worker_id))")
+      .select("id, period_start, status")
       .gte("period_start", firstStart)
       .lt("period_start", lastEnd)
       .limit(500),
   );
 
-  if (error) return { data: overview, error: error.message };
+  if (plansError) return { data: overview, error: plansError.message };
 
-  for (const plan of (data ?? []) as unknown as WeekOverviewPlanRow[]) {
+  const plans = (plansData ?? []) as unknown as WeekOverviewBasePlanRow[];
+  const planIds = plans.map((plan) => plan.id);
+  const weekStartByPlanId = new Map<string, string>();
+
+  for (const plan of plans) {
     const week = overview.find((item) => plan.period_start >= item.startDate && plan.period_start < item.endDate);
     if (!week) continue;
+    weekStartByPlanId.set(plan.id, week.startDate);
     week.plansCount += 1;
     if (plan.status === "draft") week.draftCount += 1;
     if (plan.status === "sent" || plan.status === "partially_done") week.sentCount += 1;
+  }
 
+  if (planIds.length === 0) return { data: overview, error: null };
+
+  const { data: itemsData, error: itemsError } = await measureAsync("work-planning:weeks_overview:items", () =>
+    supabase
+      .from("work_plan_items")
+      .select("id, work_plan_id, ticket_id, worker_id, ticket:tickets(id, status, assignee_worker_id)")
+      .in("work_plan_id", planIds)
+      .limit(5000),
+  );
+
+  if (itemsError) return { data: overview, error: itemsError.message };
+
+  for (const item of (itemsData ?? []) as unknown as WeekOverviewItemRow[]) {
+    const weekStart = weekStartByPlanId.get(item.work_plan_id);
+    if (!weekStart) continue;
+    const week = overview.find((entry) => entry.startDate === weekStart);
+    if (!week) continue;
     const ticketIds = ticketIdsByWeek.get(week.startDate) ?? new Set<string>();
     ticketIdsByWeek.set(week.startDate, ticketIds);
-    for (const item of plan.work_plan_items ?? []) {
-      const ticket = rowTicket(item);
-      const ticketId = ticket?.id ?? item.ticket_id;
-      if (ticketId) ticketIds.add(ticketId);
-      if (ticket?.status === "done") week.doneCount += 1;
-      if (ticket?.status && !["done", "rejected", "cancelled"].includes(ticket.status)) week.notDoneCount += 1;
-      if (!item.worker_id && !ticket?.assignee_worker_id) week.withoutWorkerCount += 1;
-    }
+    const ticket = overviewRowTicket(item);
+    const ticketId = ticket?.id ?? item.ticket_id;
+    if (ticketId) ticketIds.add(ticketId);
+    if (ticket?.status === "done") week.doneCount += 1;
+    if (ticket?.status && !["done", "rejected", "cancelled"].includes(ticket.status)) week.notDoneCount += 1;
+    if (!item.worker_id && !ticket?.assignee_worker_id) week.withoutWorkerCount += 1;
   }
 
   for (const week of overview) {
@@ -858,6 +893,22 @@ export async function getWorkPlanItems(id: string): Promise<QueryResult<WorkPlan
     .select(planItemSelect)
     .eq("work_plan_id", id)
     .order("sort_order", { ascending: true });
+  return { data: (data ?? []) as unknown as WorkPlanItem[], error: error?.message ?? null };
+}
+
+export async function getWorkPlanItemsForPlans(planIds: string[]): Promise<QueryResult<WorkPlanItem[]>> {
+  if (!hasSupabaseEnv()) return emptyWithError([]);
+  const uniquePlanIds = Array.from(new Set(planIds.filter(Boolean)));
+  if (uniquePlanIds.length === 0) return { data: [], error: null };
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("work_plan_items")
+    .select(planItemSelect)
+    .in("work_plan_id", uniquePlanIds)
+    .order("work_plan_id", { ascending: true })
+    .order("sort_order", { ascending: true });
+
   return { data: (data ?? []) as unknown as WorkPlanItem[], error: error?.message ?? null };
 }
 

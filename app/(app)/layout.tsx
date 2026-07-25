@@ -3,7 +3,7 @@ import { MobileShell } from "@/components/layout/mobile-shell";
 import { Topbar } from "@/components/layout/topbar";
 import { requireAuth } from "@/lib/auth/server";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
-import { getAttentionNotificationCount, getComputedNotifications } from "@/lib/supabase/notifications";
+import { getAttentionNotificationCount } from "@/lib/supabase/notifications";
 import { createClient } from "@/lib/supabase/server";
 
 async function getAiTicketsCount(role: string) {
@@ -19,26 +19,24 @@ async function getAiTicketsCount(role: string) {
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const { profile } = await requireAuth();
-  const [aiTicketsCount, notificationsResult, attentionCountResult] = await Promise.all([
+  const [aiTicketsCount, attentionCountResult] = await Promise.all([
     getAiTicketsCount(profile.role),
-    getComputedNotifications(20),
     getAttentionNotificationCount(),
   ]);
-  const notifications = notificationsResult.data;
   const notificationCount = attentionCountResult.data;
 
   return (
-    <div className="min-h-screen bg-background">
-      <MobileShell profile={profile} aiTicketsCount={aiTicketsCount} notifications={notifications} notificationCount={notificationCount}>
-        {children}
-      </MobileShell>
-      <div className="hidden md:flex">
+    <div className="min-h-screen bg-background md:flex">
+      <MobileShell profile={profile} aiTicketsCount={aiTicketsCount} notificationCount={notificationCount} />
+      <div className="hidden md:block">
         <Sidebar profile={profile} aiTicketsCount={aiTicketsCount} />
-        <main className="min-w-0 flex-1">
-          <Topbar profile={profile} notifications={notifications} notificationCount={notificationCount} />
-          {children}
-        </main>
       </div>
+      <main className="min-w-0 flex-1 bg-[#090909] text-stone-100 md:bg-transparent md:text-inherit">
+        <div className="hidden md:block">
+          <Topbar profile={profile} notificationCount={notificationCount} />
+        </div>
+        <div className="w-full max-w-full overflow-x-hidden pb-28 md:pb-0">{children}</div>
+      </main>
     </div>
   );
 }

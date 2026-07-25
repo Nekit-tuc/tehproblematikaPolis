@@ -34,9 +34,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { requireRole } from "@/lib/auth/server";
 import { addDays, formatDateDDMMYYYY, getNextWorkWeekRange, getWorkWeekRange, type WorkWeekRange } from "@/lib/date/work-week";
 import { priorityLabels, statusLabels } from "@/lib/labels";
-import { getCategories, getObjects } from "@/lib/supabase/queries";
-import { getTicketsGroupedByCategory, getWorkPlanningSummary, getWorkPlanningWeeksOverview, getWorkPlans, type PlanningFilters, type PlanningTicket, type WorkPlan, type WorkPlanStatus, type WorkPlanningSummary, type WorkPlanningWeekOverview } from "@/lib/supabase/work-plans";
-import { getActiveWorkers } from "@/lib/supabase/worker-queries";
+import { getWorkPlanningSummary, getWorkPlanningWeeksOverview, getWorkPlans, type PlanningFilters, type PlanningTicket, type WorkPlan, type WorkPlanStatus, type WorkPlanningSummary, type WorkPlanningWeekOverview } from "@/lib/supabase/work-plans";
 import { cn, formatDate } from "@/lib/utils";
 import type { TicketPriority, TicketStatus, WorkerWithCategories } from "@/types/domain";
 import { createWorkPlanAction, deleteWorkPlanAction, ensureAutoDraftPlansAction } from "./actions";
@@ -217,27 +215,20 @@ export default async function WorkPlanningPage({ searchParams }: { searchParams:
   const params = await searchParams;
   const view = params.view === "worker" || params.view === "object" ? params.view : "category";
   const createMode = params.create === "1";
-  const filters = filtersFromParams(params);
   const currentWorkWeek = getWorkWeekRange();
   const nextWorkWeek = getNextWorkWeekRange();
   const selectedWeek = isDateParam(params.week) ? weekRangeFromStart(params.week!) : nextWorkWeek;
   const weekOptions = buildPlanningWeeks(currentWorkWeek, selectedWeek);
 
-  const [groupsResult, plansResult, categoriesResult, objectsResult, workersResult, summaryResult, weeksOverviewResult] = await Promise.all([
-    getTicketsGroupedByCategory(filters),
+  const [plansResult, summaryResult, weeksOverviewResult] = await Promise.all([
     getWorkPlans({ from: selectedWeek.startDate, to: selectedWeek.endDate, limit: 100 }),
-    getCategories(),
-    getObjects(),
-    getActiveWorkers(),
     getWorkPlanningSummary(),
     getWorkPlanningWeeksOverview(weekOptions),
   ]);
 
-  const workersById = new Map(workersResult.data.map((worker) => [worker.id, worker]));
-  const error = groupsResult.error ?? plansResult.error ?? categoriesResult.error ?? objectsResult.error ?? workersResult.error ?? summaryResult.error ?? weeksOverviewResult.error;
+  const error = plansResult.error ?? summaryResult.error ?? weeksOverviewResult.error;
   const pageError = displayWorkPlanningError(error);
   const createError = displayWorkPlanningError(params.error);
-  const ticketCount = groupsResult.data.reduce((sum, group) => sum + group.tickets.length, 0);
   const planningSummary = summaryResult.data;
   const weekOverview = weeksOverviewResult.data;
   const selectedWeekBase = weekOptions.find((week) => week.startDate === selectedWeek.startDate) ?? { startDate: selectedWeek.startDate, endDate: selectedWeek.endDate, label: "future" as const };
@@ -252,7 +243,7 @@ export default async function WorkPlanningPage({ searchParams }: { searchParams:
           <p className="mt-1 max-w-[320px] text-[11px] leading-4 text-zinc-400 md:text-sm">Формування планів по виконавцях, категоріях і термінах заявок.</p>
         </div>
         <div className="flex shrink-0 items-start gap-2">
-          <PlanningSummaryBadge summary={planningSummary} fallbackCount={ticketCount} />
+          <PlanningSummaryBadge summary={planningSummary} fallbackCount={planningSummary.totalActive} />
           {!createMode ? (
             <Button asChild className="h-9 rounded-[13px] bg-gradient-to-r from-orange-500 to-orange-400 px-3 text-[11px] font-semibold text-white shadow-[0_8px_22px_rgba(249,115,22,0.22)] md:h-10 md:text-sm">
               <Link href="/work-planning?create=1"><Plus className="h-3.5 w-3.5" /><span className="md:hidden">План</span><span className="hidden md:inline">Створити план</span></Link>

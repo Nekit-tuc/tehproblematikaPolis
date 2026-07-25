@@ -27,7 +27,7 @@ import { TD, TH, THead, TBody, TR, Table } from "@/components/ui/table";
 import { canHardDeleteTicket } from "@/lib/auth/permissions";
 import { requireAuth } from "@/lib/auth/server";
 import { getPreviousWorkWeekRange, getWorkWeekRange } from "@/lib/date/work-week";
-import { getCategories, getTickets, getTicketsPage } from "@/lib/supabase/queries";
+import { getCategories, getTicketsCount, getTicketsPage } from "@/lib/supabase/queries";
 import { formatDate } from "@/lib/utils";
 import type { TicketPriority, TicketStatus, TicketWithRelations } from "@/types/domain";
 import { hardDeleteTicketAction } from "./[id]/actions";
@@ -190,10 +190,10 @@ export default async function TicketsPage({
   const activeTo = isDateParam(query.to) ? query.to ?? "" : "";
   const currentPage = Math.max(Number(query.page ?? 1) || 1, 1);
 
-  const [ticketsPageResult, categoriesResult, aiTicketsResult] = await Promise.all([
+  const [ticketsPageResult, categoriesResult, aiTicketsCountResult] = await Promise.all([
     getTicketsPage({ status: activeStatus, category: activeCategory, priority: activePriority, sort: activeSort, q: searchQuery, from: activeFrom, to: activeTo, page: currentPage, limit: PAGE_SIZE }),
     getCategories(),
-    getTickets({ status: "pending_review", source: ["telegram_group", "telegram_private_test"], limit: null }),
+    getTicketsCount({ status: "pending_review", source: ["telegram_group", "telegram_private_test"] }),
   ]);
 
   const tickets = ticketsPageResult.data.tickets;
@@ -202,8 +202,8 @@ export default async function TicketsPage({
   const safePage = Math.min(currentPage, totalPages);
   const shownFrom = totalTickets === 0 ? 0 : (safePage - 1) * PAGE_SIZE + 1;
   const shownTo = Math.min(safePage * PAGE_SIZE, totalTickets);
-  const aiTicketsCount = aiTicketsResult.data.length;
-  const error = ticketsPageResult.error ?? categoriesResult.error ?? aiTicketsResult.error;
+  const aiTicketsCount = aiTicketsCountResult.data;
+  const error = ticketsPageResult.error ?? categoriesResult.error ?? aiTicketsCountResult.error;
 
   const ticketHref = (updates: Record<string, string | undefined>) => {
     const params = new URLSearchParams();
@@ -399,7 +399,7 @@ function RepeatBadge({ ticket }: { ticket: TicketWithRelations }) {
   const lastRepeat = formatRepeatDate(ticket.last_repeat_at);
   return (
     <span className="inline-flex min-h-5 items-center gap-1 rounded-lg border border-orange-400/25 bg-orange-500/10 px-2 py-0.5 text-[9px] font-semibold text-orange-200 md:text-xs">
-      {"\u041F\u043E\u0432\u0442\u043E\u0440\u043D\u0430 \u00B7 "}{repeatCount}{lastRepeat ? <span className="font-normal text-orange-200/70">{"\u041E\u0441\u0442. "}{lastRepeat}</span> : null}
+      {"Повторна · "}{repeatCount}{lastRepeat ? <span className="font-normal text-orange-200/70">{"Ост. "}{lastRepeat}</span> : null}
     </span>
   );
 }
@@ -411,8 +411,8 @@ function DesktopTicketRow({ ticket, canDeleteTickets, returnTo }: { ticket: Tick
       <TD>
         <div>{ticket.title}</div>
         <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-          <span>{uaPriorityLabels[ticket.priority]} {"\u00B7"} {ticket.category?.name ?? "\u0411\u0435\u0437 \u043A\u0430\u0442\u0435\u0433\u043E\u0440\u0456\u0457"}</span>
-          {ticket.telegram_source_group_id ? <Badge tone="gray">{"\u0413\u0440\u0443\u043F\u043E\u0432\u0435 \u043F\u043E\u0432\u0456\u0434\u043E\u043C\u043B\u0435\u043D\u043D\u044F"}</Badge> : null}
+          <span>{uaPriorityLabels[ticket.priority]} {"·"} {ticket.category?.name ?? "Без категорії"}</span>
+          {ticket.telegram_source_group_id ? <Badge tone="gray">{"Групове повідомлення"}</Badge> : null}
           <RepeatBadge ticket={ticket} />
         </div>
       </TD>

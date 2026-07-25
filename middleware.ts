@@ -7,6 +7,8 @@ const protectedPrefixes = [
   "/dashboard",
   "/tickets",
   "/objects",
+  "/workers",
+  "/work-planning",
   "/users",
   "/reports",
   "/ai-test",
@@ -18,6 +20,17 @@ const protectedPrefixes = [
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request });
   const pathname = request.nextUrl.pathname;
+  const isPublicAsset =
+    pathname.startsWith("/_next/") ||
+    pathname.startsWith("/api/") ||
+    pathname.startsWith("/icons/") ||
+    pathname === "/favicon.ico" ||
+    pathname === "/manifest.json" ||
+    pathname === "/sw.js" ||
+    /\.(?:png|jpg|jpeg|svg|webp|ico|css|js|map)$/i.test(pathname);
+
+  if (isPublicAsset) return response;
+
   const isProtected = protectedPrefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
   const isLogin = pathname === "/login";
   const hasEnv = Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
@@ -52,5 +65,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|manifest.json|sw.js|icons/).*)"],
 };

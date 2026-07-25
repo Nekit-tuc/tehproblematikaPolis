@@ -18,9 +18,12 @@ function iconFor(type: AppNotification["type"]) {
   return ClipboardPlus;
 }
 
-export function NotificationsDrawer({ notifications, count = 0 }: { notifications: AppNotification[]; count?: number }) {
+export function NotificationsDrawer({ notifications: initialNotifications = [], count = 0 }: { notifications?: AppNotification[]; count?: number }) {
   const [open, setOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [notifications, setNotifications] = useState<AppNotification[]>(initialNotifications);
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     setMounted(true);
@@ -34,6 +37,32 @@ export function NotificationsDrawer({ notifications, count = 0 }: { notification
       document.body.style.overflow = previousOverflow;
     };
   }, [open]);
+
+  useEffect(() => {
+    if (!open || notifications.length > 0) return;
+    let cancelled = false;
+    setLoading(true);
+    setLoadError(null);
+    fetch("/api/notifications", { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("notifications_fetch_failed");
+        return response.json() as Promise<{ notifications?: AppNotification[]; error?: string }>;
+      })
+      .then((payload) => {
+        if (cancelled) return;
+        setNotifications(payload.notifications ?? []);
+        setLoadError(payload.error ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setLoadError("Не вдалося завантажити сповіщення");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, notifications.length]);
 
   const overlay = (
     <>
@@ -72,7 +101,15 @@ export function NotificationsDrawer({ notifications, count = 0 }: { notification
         <div className="min-h-0 flex-1 overscroll-contain overflow-y-auto p-3 pb-6">
           <div className="space-y-2">
             <PushNotificationManager />
-            {notifications.length === 0 ? (
+            {loading ? (
+              <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-center text-[12px] text-zinc-400">
+                Завантажуємо сповіщення...
+              </div>
+            ) : loadError ? (
+              <div className="rounded-2xl border border-red-400/20 bg-red-500/10 p-4 text-center text-[12px] text-red-200">
+                {loadError}
+              </div>
+            ) : notifications.length === 0 ? (
               <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.03] p-4 text-center text-[12px] text-zinc-400">
                 Нових сповіщень немає
               </div>

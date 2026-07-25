@@ -59,6 +59,18 @@ export async function getComputedNotifications(limit = 20): Promise<QueryResult<
 }
 
 export async function getAttentionNotificationCount(): Promise<QueryResult<number>> {
-  const notifications = await getComputedNotifications(30);
-  return { data: notifications.data.filter((item) => item.important).length, error: notifications.error };
+  if (!hasSupabaseEnv()) return { data: 0, error: missingSupabaseMessage };
+  const supabase = await createClient();
+  const [pendingAi, waitingAdmin, newTickets, failedDispatches] = await Promise.all([
+    supabase.from("tickets").select("id", { count: "exact", head: true }).eq("status", "pending_review").in("source", ["telegram_group", "telegram_private_test"]),
+    supabase.from("tickets").select("id", { count: "exact", head: true }).eq("status", "waiting_admin_confirmation"),
+    supabase.from("tickets").select("id", { count: "exact", head: true }).eq("status", "new"),
+    supabase.from("work_plan_dispatches").select("id", { count: "exact", head: true }).in("status", ["failed", "skipped_no_telegram"]),
+  ]);
+
+  const error = pendingAi.error ?? waitingAdmin.error ?? newTickets.error ?? failedDispatches.error;
+  return {
+    data: (pendingAi.count ?? 0) + (waitingAdmin.count ?? 0) + (newTickets.count ?? 0) + (failedDispatches.count ?? 0),
+    error: error?.message ?? null,
+  };
 }

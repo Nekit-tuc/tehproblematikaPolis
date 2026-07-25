@@ -1,10 +1,12 @@
 import { BriefcaseBusiness, CalendarDays, Camera, CheckCircle2, Clock, MapPin, MessageSquare, Send, Tag, Trash2, UserX } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { Suspense } from "react";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { SubmitButton } from "@/components/ui/submit-button";
 import { Textarea } from "@/components/ui/textarea";
 import { ConfirmSubmitButton } from "@/components/tickets/confirm-submit-button";
 import { PhotoSubmitButton } from "@/components/tickets/photo-submit-button";
@@ -43,68 +45,57 @@ export default async function TicketDetailsPage({
   const { profile } = await requireAuth();
   const { id } = await params;
   const query = await searchParams;
-  const [ticketResult, commentsResult, historyResult, photosResult, repeatsResult] = await Promise.all([
-    getTicket(id),
-    getTicketComments(id),
-    getTicketHistory(id),
-    getTicketPhotos(id),
-    getTicketRepeats(id, 5),
-  ]);
+  const ticketResult = await getTicket(id);
   const ticket = ticketResult.data;
   if (!ticket && !ticketResult.error) notFound();
-  let relatedResult = { data: [] as TicketWithRelations[], error: null as string | null };
   let workersResult = { data: [] as WorkerWithCategories[], error: null as string | null };
   let recommendedWorkersResult = { data: [] as WorkerWithCategories[], error: null as string | null };
   let assignedWorker: Worker | WorkerWithCategories | null = null;
 
   if (ticket) {
-    try {
-      relatedResult = ticket.telegram_source_group_id
-        ? await getRelatedTicketsBySourceGroup(ticket.telegram_source_group_id, ticket.id)
-        : { data: [], error: null };
-    } catch (loadError) {
-      console.error("[ticket-detail] load failed", { scope: "related_tickets", error: loadError });
-    }
+    const shouldLoadWorkerActions = canConfirmTicket(profile);
+    const [workersLoad, recommendedWorkersLoad, assignedWorkerLoad] = await Promise.allSettled([
+      shouldLoadWorkerActions ? getActiveWorkers() : Promise.resolve({ data: [] as WorkerWithCategories[], error: null as string | null }),
+      shouldLoadWorkerActions && ticket.category_id ? getWorkersByCategory(ticket.category_id) : Promise.resolve({ data: [] as WorkerWithCategories[], error: null as string | null }),
+      ticket.assignee_worker_id ? getWorkerById(ticket.assignee_worker_id) : Promise.resolve({ data: null as Worker | null, error: null as string | null }),
+    ]);
 
-    try {
-      workersResult = await getActiveWorkers();
+    if (workersLoad.status === "fulfilled") {
+      workersResult = workersLoad.value;
       if (workersResult.error) console.error("[ticket-detail] load failed", { scope: "workers", error: workersResult.error });
-    } catch (loadError) {
-      console.error("[ticket-detail] load failed", { scope: "workers", error: loadError });
+    } else {
+      console.error("[ticket-detail] load failed", { scope: "workers", error: workersLoad.reason });
     }
 
-    try {
-      recommendedWorkersResult = ticket.category_id ? await getWorkersByCategory(ticket.category_id) : { data: [], error: null };
+    if (recommendedWorkersLoad.status === "fulfilled") {
+      recommendedWorkersResult = recommendedWorkersLoad.value;
       if (recommendedWorkersResult.error) console.error("[ticket-detail] load failed", { scope: "recommended_workers", error: recommendedWorkersResult.error });
-    } catch (loadError) {
-      console.error("[ticket-detail] load failed", { scope: "recommended_workers", error: loadError });
+    } else {
+      console.error("[ticket-detail] load failed", { scope: "recommended_workers", error: recommendedWorkersLoad.reason });
     }
 
-    if (ticket.assignee_worker_id) {
-      try {
-        const workerResult = await getWorkerById(ticket.assignee_worker_id);
-        if (workerResult.error) console.error("[ticket-detail] load failed", { scope: "assigned_worker", error: workerResult.error });
-        assignedWorker = workerResult.data;
-      } catch (loadError) {
-        console.error("[ticket-detail] load failed", { scope: "assigned_worker", error: loadError });
-      }
+    if (assignedWorkerLoad.status === "fulfilled") {
+      if (assignedWorkerLoad.value.error) console.error("[ticket-detail] load failed", { scope: "assigned_worker", error: assignedWorkerLoad.value.error });
+      assignedWorker = assignedWorkerLoad.value.data;
+    } else {
+      console.error("[ticket-detail] load failed", { scope: "assigned_worker", error: assignedWorkerLoad.reason });
     }
   }
 
-  const error = ticketResult.error ?? commentsResult.error ?? historyResult.error ?? photosResult.error ?? repeatsResult.error ?? relatedResult.error;
+  const error = ticketResult.error ?? workersResult.error ?? recommendedWorkersResult.error;
 
   return (
     <div className="page-shell space-y-3 pb-32 md:space-y-5 md:pb-10">
-      {error ? <Alert title={"\u041D\u0435 \u0432\u0434\u0430\u043B\u043E\u0441\u044F \u0437\u0430\u0432\u0430\u043D\u0442\u0430\u0436\u0438\u0442\u0438 \u0434\u0430\u043D\u0456"}>{error}</Alert> : null}
-      {query.photoError ? <Alert title={"\u0424\u043E\u0442\u043E \u043D\u0435 \u0437\u0430\u0432\u0430\u043D\u0442\u0430\u0436\u0435\u043D\u043E"}>{decodeURIComponent(query.photoError)}</Alert> : null}
-      {query.photoSuccess ? <Alert title={"\u0424\u043E\u0442\u043E \u0434\u043E\u0434\u0430\u043D\u043E"}>{"\u0417\u0430\u0432\u0430\u043D\u0442\u0430\u0436\u0435\u043D\u043D\u044F \u0437\u0430\u0432\u0435\u0440\u0448\u0435\u043D\u043E \u0443\u0441\u043F\u0456\u0448\u043D\u043E."}</Alert> : null}
-      {query.commentError ? <Alert title={"\u041A\u043E\u043C\u0435\u043D\u0442\u0430\u0440 \u043D\u0435 \u0434\u043E\u0434\u0430\u043D\u043E"}>{decodeURIComponent(query.commentError)}</Alert> : null}
-      {query.commentSuccess ? <Alert title={"\u041A\u043E\u043C\u0435\u043D\u0442\u0430\u0440 \u0434\u043E\u0434\u0430\u043D\u043E"}>{"\u041F\u043E\u0432\u0456\u0434\u043E\u043C\u043B\u0435\u043D\u043D\u044F \u0437\u0431\u0435\u0440\u0435\u0436\u0435\u043D\u043E \u0432 \u0437\u0430\u044F\u0432\u0446\u0456."}</Alert> : null}
-      {query.statusError ? <Alert title={"\u0421\u0442\u0430\u0442\u0443\u0441 \u043D\u0435 \u0437\u043C\u0456\u043D\u0435\u043D\u043E"}>{decodeURIComponent(query.statusError)}</Alert> : null}
-      {query.statusSuccess ? <Alert title={"\u0421\u0442\u0430\u0442\u0443\u0441 \u043E\u043D\u043E\u0432\u043B\u0435\u043D\u043E"}>{"\u041D\u043E\u0432\u0438\u0439 \u0441\u0442\u0430\u0442\u0443\u0441 \u0437\u0430\u044F\u0432\u043A\u0438 \u0437\u0431\u0435\u0440\u0435\u0436\u0435\u043D\u043E."}</Alert> : null}
+      {error ? <Alert title={"Не вдалося завантажити дані"}>{error}</Alert> : null}
+      {query.photoError ? <Alert title={"Фото не завантажено"}>{decodeURIComponent(query.photoError)}</Alert> : null}
+      {query.photoSuccess ? <Alert title={"Фото додано"}>{"Завантаження завершено успішно."}</Alert> : null}
+      {query.commentError ? <Alert title={"Коментар не додано"}>{decodeURIComponent(query.commentError)}</Alert> : null}
+      {query.commentSuccess ? <Alert title={"Коментар додано"}>{"Повідомлення збережено в заявці."}</Alert> : null}
+      {query.statusError ? <Alert title={"Статус не змінено"}>{decodeURIComponent(query.statusError)}</Alert> : null}
+      {query.statusSuccess ? <Alert title={"Статус оновлено"}>{"Новий статус заявки збережено."}</Alert> : null}
 
       {!ticket ? (
-        <Card className="rounded-[20px] border-white/10 bg-white/[0.04]"><CardContent className="pt-5 text-sm text-muted-foreground">{"\u0417\u0430\u044F\u0432\u043A\u0443 \u043D\u0435 \u0437\u043D\u0430\u0439\u0434\u0435\u043D\u043E."}</CardContent></Card>
+        <Card className="rounded-[20px] border-white/10 bg-white/[0.04]"><CardContent className="pt-5 text-sm text-muted-foreground">{"Заявку не знайдено."}</CardContent></Card>
       ) : (
         <>
           <TicketHeroCard ticket={ticket} />
@@ -125,14 +116,26 @@ export default async function TicketDetailsPage({
                   canUnassign={canUnassignWorkerFromTicket(profile)}
                 />
               ) : null}
-              <TicketPhotosCard ticket={ticket} profile={profile} photos={photosResult.data} />
-              <TicketCommentsCard ticketId={ticket.id} comments={commentsResult.data} />
+              <Suspense fallback={<DetailBlockFallback title="Фото" />}>
+                <TicketPhotosSection ticket={ticket} profile={profile} />
+              </Suspense>
+              <Suspense fallback={<DetailBlockFallback title="Коментарі" />}>
+                <TicketCommentsSection ticketId={ticket.id} />
+              </Suspense>
             </div>
             <div className="order-1 min-w-0 space-y-3 md:space-y-5 lg:order-2">
               <TicketQuickActions ticket={ticket} profile={profile} />
-              <TicketHistoryCard history={historyResult.data} />
-              {relatedResult.data.length > 0 ? <RelatedTicketsCard tickets={relatedResult.data} /> : null}
-              {(ticket.repeat_count ?? 0) > 0 ? <TicketRepeatsCard ticket={ticket} repeats={repeatsResult.data} /> : null}
+              <Suspense fallback={<DetailBlockFallback title="Історія" />}>
+                <TicketHistorySection ticketId={ticket.id} />
+              </Suspense>
+              <Suspense fallback={<DetailBlockFallback title="Пов'язані заявки" />}>
+                <RelatedTicketsSection ticket={ticket} />
+              </Suspense>
+              {(ticket.repeat_count ?? 0) > 0 ? (
+                <Suspense fallback={<DetailBlockFallback title="Повторні звернення" />}>
+                  <TicketRepeatsSection ticket={ticket} />
+                </Suspense>
+              ) : null}
               {canHardDeleteTicket(profile) ? <TicketDangerZone ticketId={ticket.id} /> : null}
             </div>
           </div>
@@ -144,6 +147,59 @@ export default async function TicketDetailsPage({
 
 function SoftCard({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return <Card className={"min-w-0 rounded-[22px] border-white/[0.08] bg-[linear-gradient(145deg,rgba(255,255,255,0.065),rgba(255,255,255,0.025))] shadow-[0_12px_32px_rgba(0,0,0,0.28)] " + className}>{children}</Card>;
+}
+
+function DetailBlockFallback({ title }: { title: string }) {
+  return (
+    <SoftCard>
+      <CardContent className="space-y-3 p-3.5 md:p-4">
+        <SectionTitle title={title} />
+        <div className="h-16 animate-pulse rounded-[14px] border border-white/[0.07] bg-white/[0.035]" />
+      </CardContent>
+    </SoftCard>
+  );
+}
+
+function DetailBlockError({ title, error }: { title: string; error: string }) {
+  return (
+    <SoftCard>
+      <CardContent className="space-y-3 p-3.5 md:p-4">
+        <SectionTitle title={title} />
+        <p className="break-words text-[12px] text-red-200">{error}</p>
+      </CardContent>
+    </SoftCard>
+  );
+}
+
+async function TicketPhotosSection({ ticket, profile }: { ticket: TicketWithRelations; profile: Profile }) {
+  const photosResult = await getTicketPhotos(ticket.id);
+  if (photosResult.error) return <DetailBlockError title="Фото" error={photosResult.error} />;
+  return <TicketPhotosCard ticket={ticket} profile={profile} photos={photosResult.data} />;
+}
+
+async function TicketCommentsSection({ ticketId }: { ticketId: string }) {
+  const commentsResult = await getTicketComments(ticketId);
+  if (commentsResult.error) return <DetailBlockError title="Коментарі" error={commentsResult.error} />;
+  return <TicketCommentsCard ticketId={ticketId} comments={commentsResult.data} />;
+}
+
+async function TicketHistorySection({ ticketId }: { ticketId: string }) {
+  const historyResult = await getTicketHistory(ticketId);
+  if (historyResult.error) return <DetailBlockError title="Історія" error={historyResult.error} />;
+  return <TicketHistoryCard history={historyResult.data} />;
+}
+
+async function RelatedTicketsSection({ ticket }: { ticket: TicketWithRelations }) {
+  if (!ticket.telegram_source_group_id) return null;
+  const relatedResult = await getRelatedTicketsBySourceGroup(ticket.telegram_source_group_id, ticket.id);
+  if (relatedResult.error) return <DetailBlockError title="Пов'язані заявки" error={relatedResult.error} />;
+  return relatedResult.data.length > 0 ? <RelatedTicketsCard tickets={relatedResult.data} /> : null;
+}
+
+async function TicketRepeatsSection({ ticket }: { ticket: TicketWithRelations }) {
+  const repeatsResult = await getTicketRepeats(ticket.id, 5);
+  if (repeatsResult.error) return <DetailBlockError title="Повторні звернення" error={repeatsResult.error} />;
+  return <TicketRepeatsCard ticket={ticket} repeats={repeatsResult.data} />;
 }
 
 function SectionTitle({ icon: Icon, title, right }: { icon?: React.ElementType; title: string; right?: React.ReactNode }) {
@@ -176,7 +232,7 @@ function TicketHeroCard({ ticket }: { ticket: TicketWithRelations }) {
               <span className="min-w-0 truncate">{ticket.object?.name ?? "-"} {"\u00B7"} {ticketAddress(ticket)}</span>
             </div>
           </div>
-          {(ticket.repeat_count ?? 0) > 0 ? <Badge tone="orange" className="shrink-0 rounded-full px-2 py-1 text-[10px]">{"\u041F\u043E\u0432\u0442\u043E\u0440\u043D\u0430 \u00B7 "}{ticket.repeat_count}</Badge> : null}
+          {(ticket.repeat_count ?? 0) > 0 ? <Badge tone="orange" className="shrink-0 rounded-full px-2 py-1 text-[10px]">{"Повторна · "}{ticket.repeat_count}</Badge> : null}
         </div>
         <div className="mt-3 flex flex-wrap gap-1.5 pl-1">
           <Badge tone="orange" className="rounded-full px-2 py-1 text-[10px] md:text-xs">{statusLabels[ticket.status]}</Badge>
@@ -195,17 +251,17 @@ function TicketQuickActions({ ticket, profile }: { ticket: TicketWithRelations; 
   return (
     <SoftCard>
       <CardContent className="space-y-3 p-3.5">
-        <SectionTitle icon={CheckCircle2} title={"\u0428\u0432\u0438\u0434\u043A\u0456 \u0434\u0456\u0457"} />
+        <SectionTitle icon={CheckCircle2} title={"Швидкі дії"} />
         {canConfirm ? (
           <div className="grid grid-cols-2 gap-2">
-            <form action={confirmTicketAction.bind(null, ticket.id)}><Button type="submit" className="h-10 w-full rounded-[14px] bg-emerald-600 px-2 text-[11px] hover:bg-emerald-500 md:text-sm">{"\u041F\u0456\u0434\u0442\u0432\u0435\u0440\u0434\u0438\u0442\u0438"}</Button></form>
-            <form action={rejectTicketAction.bind(null, ticket.id)}><Button type="submit" variant="destructive" className="h-10 w-full rounded-[14px] px-2 text-[11px] md:text-sm">{"\u0412\u0456\u0434\u0445\u0438\u043B\u0438\u0442\u0438"}</Button></form>
+            <form action={confirmTicketAction.bind(null, ticket.id)}><SubmitButton type="submit" pendingText="Підтверджуємо..." className="h-10 w-full rounded-[14px] bg-emerald-600 px-2 text-[11px] hover:bg-emerald-500 md:text-sm">{"Підтвердити"}</SubmitButton></form>
+            <form action={rejectTicketAction.bind(null, ticket.id)}><SubmitButton type="submit" pendingText="Відхиляємо..." variant="destructive" className="h-10 w-full rounded-[14px] px-2 text-[11px] md:text-sm">{"Відхилити"}</SubmitButton></form>
           </div>
         ) : null}
         {editable ? (
           <form action={updateTicketStatusAction.bind(null, ticket.id)} className="grid grid-cols-2 gap-2">
             {(["new", "assigned", "in_progress", "waiting", "waiting_admin_confirmation", "done", "cancelled"] as TicketStatus[]).map((status) => (
-              <Button key={status} type="submit" name="status" value={status} variant={ticket.status === status ? "default" : "outline"} className="h-10 rounded-[14px] px-2 text-[10px] md:text-xs">{statusLabels[status]}</Button>
+              <SubmitButton key={status} type="submit" name="status" value={status} pendingText="Оновлюємо..." variant={ticket.status === status ? "default" : "outline"} className="h-10 rounded-[14px] px-2 text-[10px] md:text-xs">{statusLabels[status]}</SubmitButton>
             ))}
           </form>
         ) : null}
@@ -218,15 +274,15 @@ function TicketDescriptionCard({ ticket, assignedWorker }: { ticket: TicketWithR
   return (
     <SoftCard>
       <CardContent className="space-y-3 p-3.5 md:p-4">
-        <SectionTitle icon={MessageSquare} title={"\u041E\u043F\u0438\u0441"} />
+        <SectionTitle icon={MessageSquare} title={"Опис"} />
         <p className="break-words text-[13px] leading-5 text-zinc-200 md:text-sm md:leading-6">{ticket.description}</p>
         <div className="grid gap-2 text-[11px] md:grid-cols-2 md:text-xs">
-          <InlineInfo label={"\u041A\u0430\u0442\u0435\u0433\u043E\u0440\u0456\u044F"} value={ticket.category?.name ?? "-"} />
-          <InlineInfo label={"\u0412\u0438\u043A\u043E\u043D\u0430\u0432\u0435\u0446\u044C"} value={workerDisplayName(assignedWorker, ticket.assignee_worker_id)} />
-          <InlineInfo label={"\u041E\u0431\u2019\u0454\u043A\u0442"} value={ticket.object?.name ?? "-"} />
-          <InlineInfo label={"\u0410\u0434\u0440\u0435\u0441\u0430"} value={ticketAddress(ticket)} />
-          <InlineInfo label={"\u0421\u0442\u0432\u043E\u0440\u0435\u043D\u043E"} value={formatDate(ticket.created_at)} />
-          <InlineInfo label={"\u041E\u043D\u043E\u0432\u043B\u0435\u043D\u043E"} value={formatDate(ticket.updated_at)} />
+          <InlineInfo label={"Категорія"} value={ticket.category?.name ?? "-"} />
+          <InlineInfo label={"Виконавець"} value={workerDisplayName(assignedWorker, ticket.assignee_worker_id)} />
+          <InlineInfo label={"Об'єкт"} value={ticket.object?.name ?? "-"} />
+          <InlineInfo label={"Адреса"} value={ticketAddress(ticket)} />
+          <InlineInfo label={"Створено"} value={formatDate(ticket.created_at)} />
+          <InlineInfo label={"Оновлено"} value={formatDate(ticket.updated_at)} />
         </div>
       </CardContent>
     </SoftCard>
@@ -241,7 +297,7 @@ function TicketPhotosCard({ ticket, profile, photos }: { ticket: TicketWithRelat
   return (
     <SoftCard>
       <CardContent className="space-y-4 p-3.5 md:p-4">
-        <SectionTitle icon={Camera} title={"\u0424\u043E\u0442\u043E"} />
+        <SectionTitle icon={Camera} title={"Фото"} />
         <div className="grid gap-3 md:grid-cols-3">
           {photoGroups.map((type) => <PhotoGroup key={type} type={type} photos={photos.filter((photo) => photo.type === type)} canUpload={canAddTicketPhoto(profile, ticket, type)} action={uploadTicketPhotosAction.bind(null, ticket.id, type)} />)}
         </div>
@@ -254,9 +310,9 @@ function TicketCommentsCard({ ticketId, comments }: { ticketId: string; comments
   return (
     <SoftCard>
       <CardContent className="space-y-3 p-3.5 md:p-4">
-        <SectionTitle icon={MessageSquare} title={"\u041A\u043E\u043C\u0435\u043D\u0442\u0430\u0440\u0456"} />
-        {comments.length === 0 ? <p className="text-[12px] text-zinc-500">{"\u041A\u043E\u043C\u0435\u043D\u0442\u0430\u0440\u0456\u0432 \u043F\u043E\u043A\u0438 \u043D\u0435\u043C\u0430\u0454."}</p> : comments.map((comment) => <div key={comment.id} className="rounded-[13px] border border-white/[0.07] bg-black/20 p-3 text-[12px] md:text-sm"><div className="font-medium text-zinc-200">{comment.author?.full_name ?? "\u041A\u043E\u0440\u0438\u0441\u0442\u0443\u0432\u0430\u0447"}</div><p className="mt-1 break-words text-zinc-400">{comment.body}</p></div>)}
-        <form action={addTicketCommentAction.bind(null, ticketId)} className="space-y-2"><Textarea name="body" required placeholder={"\u0414\u043E\u0434\u0430\u0442\u0438 \u043A\u043E\u043C\u0435\u043D\u0442\u0430\u0440"} className="min-h-20 rounded-[14px] text-sm" /><Button type="submit" className="h-10 rounded-[14px] px-4 text-[12px]">{"\u041D\u0430\u0434\u0456\u0441\u043B\u0430\u0442\u0438"}</Button></form>
+        <SectionTitle icon={MessageSquare} title={"Коментарі"} />
+        {comments.length === 0 ? <p className="text-[12px] text-zinc-500">{"Коментарів поки немає."}</p> : comments.map((comment) => <div key={comment.id} className="rounded-[13px] border border-white/[0.07] bg-black/20 p-3 text-[12px] md:text-sm"><div className="font-medium text-zinc-200">{comment.author?.full_name ?? "Користувач"}</div><p className="mt-1 break-words text-zinc-400">{comment.body}</p></div>)}
+        <form action={addTicketCommentAction.bind(null, ticketId)} className="space-y-2"><Textarea name="body" required placeholder={"Додати коментар"} className="min-h-20 rounded-[14px] text-sm" /><SubmitButton type="submit" pendingText="Надсилаємо..." className="h-10 rounded-[14px] px-4 text-[12px]">{"Надіслати"}</SubmitButton></form>
       </CardContent>
     </SoftCard>
   );
@@ -266,23 +322,23 @@ function TicketHistoryCard({ history }: { history: TicketHistory[] }) {
   return (
     <SoftCard>
       <CardContent className="space-y-3 p-3.5 md:p-4">
-        <SectionTitle icon={Clock} title={"\u0406\u0441\u0442\u043E\u0440\u0456\u044F"} />
-        {history.length === 0 ? <p className="text-[12px] text-zinc-500">{"\u0406\u0441\u0442\u043E\u0440\u0456\u044F \u0449\u0435 \u043F\u043E\u0440\u043E\u0436\u043D\u044F."}</p> : history.slice(0, 6).map((item) => <div key={item.id} className="relative border-l border-orange-500/30 pl-3"><span className="absolute -left-[4px] top-1.5 h-2 w-2 rounded-full bg-orange-400" /><div className="break-words text-[12px] font-medium text-zinc-200 md:text-sm">{item.action}</div><div className="mt-0.5 text-[10px] text-zinc-500 md:text-xs">{item.actor?.full_name ?? "\u0421\u0438\u0441\u0442\u0435\u043C\u0430"} {"\u00B7"} {formatDate(item.created_at)}</div></div>)}
+        <SectionTitle icon={Clock} title={"Історія"} />
+        {history.length === 0 ? <p className="text-[12px] text-zinc-500">{"Історія ще порожня."}</p> : history.slice(0, 6).map((item) => <div key={item.id} className="relative border-l border-orange-500/30 pl-3"><span className="absolute -left-[4px] top-1.5 h-2 w-2 rounded-full bg-orange-400" /><div className="break-words text-[12px] font-medium text-zinc-200 md:text-sm">{item.action}</div><div className="mt-0.5 text-[10px] text-zinc-500 md:text-xs">{item.actor?.full_name ?? "Система"} {"·"} {formatDate(item.created_at)}</div></div>)}
       </CardContent>
     </SoftCard>
   );
 }
 
 function RelatedTicketsCard({ tickets }: { tickets: TicketWithRelations[] }) {
-  return <SoftCard><CardContent className="space-y-3 p-3.5 md:p-4"><SectionTitle title={"\u041F\u043E\u0432\u2019\u044F\u0437\u0430\u043D\u0456 \u0437\u0430\u044F\u0432\u043A\u0438"} />{tickets.map((relatedTicket) => <Link key={relatedTicket.id} href={"/tickets/" + relatedTicket.id} className="block rounded-[13px] border border-white/[0.07] bg-black/20 p-3 text-[12px] transition-colors hover:bg-white/[0.05]"><div className="font-medium text-orange-200">{relatedTicket.number}</div><div className="mt-1 line-clamp-2 break-words text-zinc-300">{relatedTicket.title}</div><div className="mt-2 flex flex-wrap gap-1.5"><Badge tone="gray" className="text-[10px]">{relatedTicket.category?.name ?? "-"}</Badge><Badge tone="orange" className="text-[10px]">{statusLabels[relatedTicket.status]}</Badge></div></Link>)}</CardContent></SoftCard>;
+  return <SoftCard><CardContent className="space-y-3 p-3.5 md:p-4"><SectionTitle title={"Пов'язані заявки"} />{tickets.map((relatedTicket) => <Link key={relatedTicket.id} href={"/tickets/" + relatedTicket.id} className="block rounded-[13px] border border-white/[0.07] bg-black/20 p-3 text-[12px] transition-colors hover:bg-white/[0.05]"><div className="font-medium text-orange-200">{relatedTicket.number}</div><div className="mt-1 line-clamp-2 break-words text-zinc-300">{relatedTicket.title}</div><div className="mt-2 flex flex-wrap gap-1.5"><Badge tone="gray" className="text-[10px]">{relatedTicket.category?.name ?? "-"}</Badge><Badge tone="orange" className="text-[10px]">{statusLabels[relatedTicket.status]}</Badge></div></Link>)}</CardContent></SoftCard>;
 }
 
 function TicketRepeatsCard({ ticket, repeats }: { ticket: TicketWithRelations; repeats: TicketRepeat[] }) {
-  return <SoftCard className="border-orange-500/20 bg-orange-500/[0.05]"><CardContent className="space-y-3 p-3.5 md:p-4"><SectionTitle title={"\u041F\u043E\u0432\u0442\u043E\u0440\u043D\u0456 \u0437\u0432\u0435\u0440\u043D\u0435\u043D\u043D\u044F"} right={<Badge tone="orange" className="rounded-full text-[10px]">{ticket.repeat_count}</Badge>} />{repeats.map((repeat) => <div key={repeat.id} className="rounded-[13px] border border-white/[0.07] bg-black/20 p-3 text-[12px]"><div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-zinc-500"><span>{repeat.created_by_name ?? "Telegram"}</span><span>{formatDate(repeat.created_at)}</span></div><p className="mt-1.5 line-clamp-3 break-words text-zinc-300">{repeat.raw_text}</p></div>)}{(ticket.repeat_count ?? 0) > repeats.length ? <p className="text-[11px] text-zinc-500">{"\u041F\u043E\u043A\u0430\u0437\u0430\u043D\u043E \u043E\u0441\u0442\u0430\u043D\u043D\u0456 5 \u0437 "}{ticket.repeat_count}</p> : null}</CardContent></SoftCard>;
+  return <SoftCard className="border-orange-500/20 bg-orange-500/[0.05]"><CardContent className="space-y-3 p-3.5 md:p-4"><SectionTitle title={"Повторні звернення"} right={<Badge tone="orange" className="rounded-full text-[10px]">{ticket.repeat_count}</Badge>} />{repeats.map((repeat) => <div key={repeat.id} className="rounded-[13px] border border-white/[0.07] bg-black/20 p-3 text-[12px]"><div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-zinc-500"><span>{repeat.created_by_name ?? "Telegram"}</span><span>{formatDate(repeat.created_at)}</span></div><p className="mt-1.5 line-clamp-3 break-words text-zinc-300">{repeat.raw_text}</p></div>)}{(ticket.repeat_count ?? 0) > repeats.length ? <p className="text-[11px] text-zinc-500">{"Показано останні 5 з "}{ticket.repeat_count}</p> : null}</CardContent></SoftCard>;
 }
 
 function TicketDangerZone({ ticketId }: { ticketId: string }) {
-  return <details className="rounded-[20px] border border-red-500/25 bg-red-950/10 p-3.5"><summary className="cursor-pointer list-none text-[13px] font-semibold text-red-200">{"\u041D\u0435\u0431\u0435\u0437\u043F\u0435\u0447\u043D\u0430 \u0434\u0456\u044F"}</summary><div className="mt-3 space-y-3"><p className="text-[11px] leading-4 text-red-100/70">{"\u0426\u044E \u0434\u0456\u044E \u043D\u0435\u043C\u043E\u0436\u043B\u0438\u0432\u043E \u0441\u043A\u0430\u0441\u0443\u0432\u0430\u0442\u0438."}</p><form action={hardDeleteTicketAction.bind(null, ticketId)}><ConfirmSubmitButton type="submit" variant="destructive" className="h-10 w-full rounded-[14px] text-[12px]" message={"\u0412\u0438 \u0442\u043E\u0447\u043D\u043E \u0445\u043E\u0447\u0435\u0442\u0435 \u043F\u043E\u0432\u043D\u0456\u0441\u0442\u044E \u0432\u0438\u0434\u0430\u043B\u0438\u0442\u0438 \u0437\u0430\u044F\u0432\u043A\u0443 \u0437 \u0431\u0430\u0437\u0438? \u0426\u044E \u0434\u0456\u044E \u043D\u0435 \u043C\u043E\u0436\u043D\u0430 \u0441\u043A\u0430\u0441\u0443\u0432\u0430\u0442\u0438."}><Trash2 className="h-4 w-4" />{"\u0412\u0438\u0434\u0430\u043B\u0438\u0442\u0438 \u0437\u0430\u044F\u0432\u043A\u0443"}</ConfirmSubmitButton></form></div></details>;
+  return <details className="rounded-[20px] border border-red-500/25 bg-red-950/10 p-3.5"><summary className="cursor-pointer list-none text-[13px] font-semibold text-red-200">{"Небезпечна дія"}</summary><div className="mt-3 space-y-3"><p className="text-[11px] leading-4 text-red-100/70">{"Цю дію неможливо скасувати."}</p><form action={hardDeleteTicketAction.bind(null, ticketId)}><ConfirmSubmitButton type="submit" variant="destructive" className="h-10 w-full rounded-[14px] text-[12px]" message={"Ви точно хочете повністю видалити заявку з бази? Цю дію не можна скасувати."}><Trash2 className="h-4 w-4" />{"Видалити заявку"}</ConfirmSubmitButton></form></div></details>;
 }
 
 function Info({ label, value }: { label: string; value: string }) {
@@ -329,14 +385,14 @@ function WorkerAssignmentCard({
   return (
     <SoftCard>
       <CardContent className="space-y-3 p-3.5 md:p-4">
-        <SectionTitle icon={BriefcaseBusiness} title={"\u0412\u0438\u043A\u043E\u043D\u0430\u0432\u0435\u0446\u044C"} />
+        <SectionTitle icon={BriefcaseBusiness} title={"Виконавець"} />
         <div className="rounded-[16px] border border-white/[0.07] bg-black/20 p-3">
           <div className="flex min-w-0 items-start gap-3">
             <div className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-orange-400/25 bg-orange-500/15 text-[12px] font-bold text-orange-200">{initials}</div>
             <div className="min-w-0 flex-1">
               <div className="break-words text-[14px] font-semibold text-zinc-100">{workerDisplayName(currentWorker, assignedWorkerId)}</div>
               <div className="mt-1 flex flex-wrap gap-1.5">
-                {currentWorker?.is_active !== undefined ? <Badge tone={currentWorker.is_active ? "green" : "gray"} className="rounded-full px-2 py-0.5 text-[10px]">{currentWorker.is_active ? "\u0410\u043A\u0442\u0438\u0432\u043D\u0438\u0439" : "\u041D\u0435\u0430\u043A\u0442\u0438\u0432\u043D\u0438\u0439"}</Badge> : null}
+                {currentWorker?.is_active !== undefined ? <Badge tone={currentWorker.is_active ? "green" : "gray"} className="rounded-full px-2 py-0.5 text-[10px]">{currentWorker.is_active ? "Активний" : "Неактивний"}</Badge> : null}
                 {currentWorker?.telegram_username ? <Badge tone="gray" className="rounded-full px-2 py-0.5 text-[10px]">@{currentWorker.telegram_username}</Badge> : null}
                 {currentWorker?.telegram_id ? <Badge tone="gray" className="rounded-full px-2 py-0.5 text-[10px]">Telegram ID: {currentWorker.telegram_id}</Badge> : null}
               </div>
@@ -344,29 +400,29 @@ function WorkerAssignmentCard({
             </div>
           </div>
           <div className="mt-3 grid gap-2 text-[11px] md:grid-cols-3">
-            <InlineInfo label={"\u041F\u0440\u0438\u0437\u043D\u0430\u0447\u0435\u043D\u043E"} value={formatDate(assignedAt)} />
+            <InlineInfo label={"Призначено"} value={formatDate(assignedAt)} />
             <InlineInfo label={"Telegram"} value={formatDate(sentAt)} />
-            <InlineInfo label={"\u0412\u0456\u0434\u043C\u0456\u0442\u043A\u0430"} value={formatDate(completedAt)} />
+            <InlineInfo label={"Відмітка"} value={formatDate(completedAt)} />
           </div>
         </div>
 
         <form action={assignWorkerAction.bind(null, ticketId)} className="grid gap-2 md:grid-cols-[1fr_auto]">
           <select name="workerId" required defaultValue={currentWorker?.id ?? recommendedWorkers[0]?.id ?? ""} className="h-10 w-full rounded-[14px] border border-white/[0.09] bg-black/25 px-3 text-[12px] text-zinc-100 outline-none focus:ring-2 focus:ring-orange-500/40">
-            <option value="">{"\u041E\u0431\u0435\u0440\u0456\u0442\u044C \u0432\u0438\u043A\u043E\u043D\u0430\u0432\u0446\u044F"}</option>
+            <option value="">{"Оберіть виконавця"}</option>
             {sortedWorkers.map((worker) => <option key={worker.id} value={worker.id}>{worker.name}{recommendedIds.has(worker.id) ? " ? recommended" : ""}</option>)}
           </select>
-          <Button type="submit" className="h-10 rounded-[14px] px-3 text-[12px]">{"\u041F\u0440\u0438\u0437\u043D\u0430\u0447\u0438\u0442\u0438"}</Button>
+          <SubmitButton type="submit" pendingText="Призначаємо..." className="h-10 rounded-[14px] px-3 text-[12px]">{"Призначити"}</SubmitButton>
         </form>
 
         {currentWorker ? (
           <div className="grid grid-cols-2 gap-2">
             <form action={sendTicketToWorkerAction.bind(null, ticketId)}>
               <input type="hidden" name="workerId" value={currentWorker.id} />
-              <Button type="submit" variant="outline" className="h-10 w-full rounded-[14px] px-2 text-[11px]"><Send className="h-3.5 w-3.5" />Telegram</Button>
+              <SubmitButton type="submit" pendingText="Надсилаємо..." variant="outline" className="h-10 w-full rounded-[14px] px-2 text-[11px]"><Send className="h-3.5 w-3.5" />Telegram</SubmitButton>
             </form>
             {canUnassign ? (
               <form action={unassignWorkerAction.bind(null, ticketId)}>
-                <ConfirmSubmitButton type="submit" variant="outline" className="h-10 w-full rounded-[14px] px-2 text-[11px]" message={"\u0417\u043D\u044F\u0442\u0438 \u043F\u0440\u0438\u0437\u043D\u0430\u0447\u0435\u043D\u043E\u0433\u043E \u0432\u0438\u043A\u043E\u043D\u0430\u0432\u0446\u044F \u0437 \u0446\u0456\u0454\u0457 \u0437\u0430\u044F\u0432\u043A\u0438?"}><UserX className="h-3.5 w-3.5" />{"\u0417\u043D\u044F\u0442\u0438"}</ConfirmSubmitButton>
+                <ConfirmSubmitButton type="submit" variant="outline" className="h-10 w-full rounded-[14px] px-2 text-[11px]" message={"Зняти призначеного виконавця з цієї заявки?"}><UserX className="h-3.5 w-3.5" />{"Зняти"}</ConfirmSubmitButton>
               </form>
             ) : null}
           </div>
@@ -374,16 +430,16 @@ function WorkerAssignmentCard({
 
         {status === "waiting_admin_confirmation" ? (
           <div className="rounded-[16px] border border-orange-500/25 bg-orange-500/10 p-3">
-            <p className="text-[12px] font-medium text-orange-100">{"\u0412\u0438\u043A\u043E\u043D\u0430\u0432\u0435\u0446\u044C \u043F\u043E\u0437\u043D\u0430\u0447\u0438\u0432 \u0437\u0430\u044F\u0432\u043A\u0443 \u0432\u0438\u043A\u043E\u043D\u0430\u043D\u043E\u044E."}</p>
+            <p className="text-[12px] font-medium text-orange-100">{"Виконавець позначив заявку виконаною."}</p>
             <div className="mt-3 grid gap-3">
               <form action={confirmWorkerCompletionAction.bind(null, ticketId)} className="grid gap-2">
                 <select name="rating" defaultValue="5" className="h-10 w-full rounded-[14px] border border-white/[0.09] bg-black/25 px-3 text-[12px] text-zinc-100 outline-none">{[5, 4, 3, 2, 1].map((rating) => <option key={rating} value={rating}>{rating} / 5</option>)}</select>
-                <Textarea name="feedback" placeholder={"\u041A\u043E\u043C\u0435\u043D\u0442\u0430\u0440 \u0430\u0434\u043C\u0456\u043D\u0456\u0441\u0442\u0440\u0430\u0442\u043E\u0440\u0430"} className="min-h-16 rounded-[14px] text-sm" />
-                <Button type="submit" className="h-10 rounded-[14px] bg-emerald-600 text-[12px] hover:bg-emerald-500">{"\u041F\u0456\u0434\u0442\u0432\u0435\u0440\u0434\u0438\u0442\u0438 \u0432\u0438\u043A\u043E\u043D\u0430\u043D\u043D\u044F"}</Button>
+                <Textarea name="feedback" placeholder={"Коментар адміністратора"} className="min-h-16 rounded-[14px] text-sm" />
+                <SubmitButton type="submit" pendingText="Підтверджуємо..." className="h-10 rounded-[14px] bg-emerald-600 text-[12px] hover:bg-emerald-500">{"Підтвердити виконання"}</SubmitButton>
               </form>
               <form action={returnWorkerCompletionAction.bind(null, ticketId)} className="grid gap-2">
-                <Textarea name="feedback" required placeholder={"\u0429\u043E \u043F\u043E\u0442\u0440\u0456\u0431\u043D\u043E \u0434\u043E\u0440\u043E\u0431\u0438\u0442\u0438?"} className="min-h-16 rounded-[14px] text-sm" />
-                <Button type="submit" variant="outline" className="h-10 rounded-[14px] text-[12px]">{"\u041F\u043E\u0432\u0435\u0440\u043D\u0443\u0442\u0438"}</Button>
+                <Textarea name="feedback" required placeholder={"Що потрібно доробити?"} className="min-h-16 rounded-[14px] text-sm" />
+                <SubmitButton type="submit" pendingText="Повертаємо..." variant="outline" className="h-10 rounded-[14px] text-[12px]">{"Повернути"}</SubmitButton>
               </form>
             </div>
           </div>
@@ -410,7 +466,7 @@ function PhotoGroup({
         <h3 className="truncate text-[11px] font-semibold uppercase tracking-wide text-orange-200">{photoTypeLabels[type]}</h3>
       </div>
       {photos.length === 0 ? (
-        <div className="grid h-24 place-items-center rounded-[13px] border border-dashed border-orange-700/50 bg-black/20 text-[11px] text-zinc-500">{"\u0424\u043E\u0442\u043E \u0449\u0435 \u043D\u0435\u043C\u0430\u0454"}</div>
+        <div className="grid h-24 place-items-center rounded-[13px] border border-dashed border-orange-700/50 bg-black/20 text-[11px] text-zinc-500">{"Фото ще немає"}</div>
       ) : (
         <div className="grid grid-cols-2 gap-2 md:grid-cols-1">
           {photos.map((photo) => (

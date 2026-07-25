@@ -3,15 +3,12 @@
 import { Menu } from "lucide-react";
 import { NotificationsDrawer } from "@/components/layout/notifications-drawer";
 import { Button } from "@/components/ui/button";
-import type { AppNotification } from "@/lib/supabase/notifications";
 
 export function MobileTopbar({
   onMenuClick,
-  notifications,
   notificationCount,
 }: {
   onMenuClick: () => void;
-  notifications: AppNotification[];
   notificationCount: number;
 }) {
   return (
@@ -35,7 +32,7 @@ export function MobileTopbar({
           </div>
         </div>
 
-        <NotificationsDrawer notifications={notifications} count={notificationCount} />
+        <NotificationsDrawer count={notificationCount} />
       </div>
     </header>
   );

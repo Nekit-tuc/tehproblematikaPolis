@@ -4,21 +4,16 @@ import { useEffect, useState } from "react";
 import { MobileBottomNav } from "@/components/layout/mobile-bottom-nav";
 import { MobileDrawer } from "@/components/layout/mobile-drawer";
 import { MobileTopbar } from "@/components/layout/mobile-topbar";
-import type { AppNotification } from "@/lib/supabase/notifications";
 import type { Profile } from "@/types/domain";
 
 export function MobileShell({
   profile,
   aiTicketsCount,
-  notifications,
   notificationCount,
-  children,
 }: {
   profile: Profile;
   aiTicketsCount: number;
-  notifications: AppNotification[];
   notificationCount: number;
-  children: React.ReactNode;
 }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
 
@@ -32,10 +27,9 @@ export function MobileShell({
   }, [drawerOpen]);
 
   return (
-    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-[#090909] text-stone-100 md:hidden">
-      <MobileTopbar onMenuClick={() => setDrawerOpen(true)} notifications={notifications} notificationCount={notificationCount} />
+    <div className="contents md:hidden">
+      <MobileTopbar onMenuClick={() => setDrawerOpen(true)} notificationCount={notificationCount} />
       <MobileDrawer profile={profile} open={drawerOpen} onClose={() => setDrawerOpen(false)} aiTicketsCount={aiTicketsCount} />
-      <main aria-hidden={drawerOpen} className={`w-full max-w-full overflow-x-hidden pb-28 ${drawerOpen ? "pointer-events-none" : ""}`}>{children}</main>
       <div aria-hidden={drawerOpen} className={drawerOpen ? "pointer-events-none" : ""}>
         <MobileBottomNav profile={profile} aiTicketsCount={aiTicketsCount} />
       </div>

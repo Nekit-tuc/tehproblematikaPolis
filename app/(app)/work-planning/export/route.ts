@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireRole } from "@/lib/auth/server";
 import { getWorkWeekRange } from "@/lib/date/work-week";
 import { priorityLabels, statusLabels } from "@/lib/labels";
-import { getWorkPlanItems, getWorkPlans, type WorkPlan, type WorkPlanItem } from "@/lib/supabase/work-plans";
+import { getWorkPlanItemsForPlans, getWorkPlans, type WorkPlan, type WorkPlanItem } from "@/lib/supabase/work-plans";
 import type { TicketPriority, TicketStatus } from "@/types/domain";
 
 export const runtime = "nodejs";
@@ -158,11 +158,17 @@ export async function GET(request: NextRequest) {
   if (plansResult.error) return NextResponse.json({ error: plansResult.error }, { status: 500 });
   if (plansResult.data.length === 0) return NextResponse.json({ error: "На цей тиждень планів не знайдено." }, { status: 404 });
 
-  const itemResults = await Promise.all(plansResult.data.map(async (plan) => ({ plan, result: await getWorkPlanItems(plan.id) })));
-  const firstError = itemResults.find((entry) => entry.result.error)?.result.error;
-  if (firstError) return NextResponse.json({ error: firstError }, { status: 500 });
+  const itemsResult = await getWorkPlanItemsForPlans(plansResult.data.map((plan) => plan.id));
+  if (itemsResult.error) return NextResponse.json({ error: itemsResult.error }, { status: 500 });
 
-  const workbook = await buildWorkbook(week, itemResults.map((entry) => ({ plan: entry.plan, items: entry.result.data })));
+  const itemsByPlanId = new Map<string, WorkPlanItem[]>();
+  for (const item of itemsResult.data) {
+    const items = itemsByPlanId.get(item.work_plan_id) ?? [];
+    items.push(item);
+    itemsByPlanId.set(item.work_plan_id, items);
+  }
+
+  const workbook = await buildWorkbook(week, plansResult.data.map((plan) => ({ plan, items: itemsByPlanId.get(plan.id) ?? [] })));
   const buffer = await workbook.xlsx.writeBuffer();
 
   return new NextResponse(Buffer.from(buffer as ArrayBuffer), {

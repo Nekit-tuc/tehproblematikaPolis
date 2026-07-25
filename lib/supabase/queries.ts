@@ -142,6 +142,23 @@ export async function getTickets(options: TicketQueryOptions = {}): Promise<Quer
   return { data: (data ?? []) as unknown as TicketWithRelations[], error: error?.message ?? null };
 }
 
+export async function getTicketsCount(options: TicketQueryOptions = {}): Promise<QueryResult<number>> {
+  if (!hasSupabaseEnv()) return emptyWithError(0);
+  const profile = await getCurrentProfile();
+  if (!profile) return emptyWithError(0);
+  const supabase = await createClient();
+  let query = supabase.from("tickets").select("id", { count: "exact", head: true });
+  if (profile.role === "worker") query = query.eq("assigned_to", profile.id);
+  if (profile.role === "store_manager") {
+    query = profile.object_id ? query.eq("object_id", profile.object_id) : query.eq("created_by", profile.id);
+  }
+  if (options.status) query = query.eq("status", options.status);
+  if (Array.isArray(options.source)) query = query.in("source", options.source);
+  else if (options.source) query = query.eq("source", options.source);
+  const { count, error } = await measureAsync("tickets:count", () => query);
+  return { data: count ?? 0, error: error?.message ?? null };
+}
+
 export async function getRecentTickets(limit = 8): Promise<QueryResult<TicketWithRelations[]>> {
   return getTickets({ limit });
 }
@@ -350,7 +367,7 @@ export type DashboardOverview = {
 
 const inactiveTicketStatuses = ["done", "cancelled", "rejected"];
 const inWorkTicketStatuses = ["assigned", "in_progress", "waiting", "waiting_admin_confirmation"];
-const dayLabels = ["\u0421\u0431", "\u041d\u0434", "\u041f\u043d", "\u0412\u0442", "\u0421\u0440", "\u0427\u0442", "\u041f\u0442"];
+const dayLabels = ["Сб", "Нд", "Пн", "Вт", "Ср", "Чт", "Пт"];
 const monthFormatter = new Intl.DateTimeFormat("uk-UA", { month: "long", year: "numeric" });
 
 function addDays(date: Date, days: number) {
