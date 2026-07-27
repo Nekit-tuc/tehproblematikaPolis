@@ -64,6 +64,23 @@ export type ActivePlannedTicket = {
   planPeriodEnd: string;
 };
 
+export type WorkPlanningDuplicateRepeat = {
+  id: string;
+  ticketId: string;
+  ticketNumber: string | null;
+  ticketTitle: string | null;
+  objectName: string | null;
+  objectAddress: string | null;
+  planId: string;
+  planTitle: string;
+  rawText: string;
+  confidence: number | null;
+  detectedBy: string | null;
+  sourceChatId: string | null;
+  sourceMessageId: string | null;
+  createdAt: string;
+};
+
 export type WorkPlanItem = {
   id: string;
   work_plan_id: string;
@@ -119,6 +136,7 @@ export type UpdateWorkPlanInput = {
 
 const planningStatuses: TicketStatus[] = ["new", "assigned", "in_progress", "waiting_admin_confirmation"];
 const activeWorkPlanStatuses: WorkPlanStatus[] = ["draft", "sent", "partially_done"];
+const closedTicketStatuses: TicketStatus[] = ["done", "cancelled", "rejected"];
 type AutoWorkPlanConfig = {
   title: string;
   categoryName: string;
@@ -498,8 +516,183 @@ export async function createWorkPlan(input: CreateWorkPlanInput): Promise<QueryR
   return { data: data as WorkPlan | null, error: error?.message ?? null };
 }
 
-export async function ensureWeeklyDraftPlansForAutoRouting(date = new Date()): Promise<QueryResult<{ periodStart: string; periodEnd: string; plans: WorkPlan[]; created: number }>> {
-  if (!hasSupabaseEnv()) return emptyWithError({ periodStart: "", periodEnd: "", plans: [], created: 0 });
+function dateOnly(value: Date) {
+  return value.toISOString().slice(0, 10);
+}
+
+function shiftDate(value: string, days: number) {
+  const date = new Date(`${value}T12:00:00`);
+  date.setDate(date.getDate() + days);
+  return dateOnly(date);
+}
+
+function ticketIsUnfinished(status?: string | null) {
+  return Boolean(status && !closedTicketStatuses.includes(status as TicketStatus));
+}
+
+type CarryOverItemRow = {
+  ticket_id: string;
+  worker_id?: string | null;
+  category?: string | null;
+  work_plan?: { id: string; title: string } | { id: string; title: string }[] | null;
+  ticket?: {
+    id: string;
+    status: TicketStatus;
+    category_id?: string | null;
+    assignee_worker_id?: string | null;
+    category?: { name?: string | null } | { name?: string | null }[] | null;
+  } | {
+    id: string;
+    status: TicketStatus;
+    category_id?: string | null;
+    assignee_worker_id?: string | null;
+    category?: { name?: string | null } | { name?: string | null }[] | null;
+  }[] | null;
+};
+
+function carryOverRowPlan(row: CarryOverItemRow) {
+  return Array.isArray(row.work_plan) ? row.work_plan[0] : row.work_plan;
+}
+
+function carryOverRowTicket(row: CarryOverItemRow) {
+  return Array.isArray(row.ticket) ? row.ticket[0] : row.ticket;
+}
+
+function carryOverRowCategoryName(row: CarryOverItemRow) {
+  const ticket = carryOverRowTicket(row);
+  const category = Array.isArray(ticket?.category) ? ticket?.category[0] : ticket?.category;
+  return row.category ?? category?.name ?? null;
+}
+
+async function carryOverUnfinishedTicketsToWeeklyDraftPlans(input: {
+  supabase: ReturnType<typeof createAdminClient>;
+  range: { startDate: string; endDate: string };
+  plans: WorkPlan[];
+}): Promise<QueryResult<{ carriedOver: number }>> {
+  const { supabase, range, plans } = input;
+  const targetDraftPlans = plans.filter((plan) => plan.status === "draft");
+  if (targetDraftPlans.length === 0) return { data: { carriedOver: 0 }, error: null };
+
+  const previousStart = shiftDate(range.startDate, -7);
+  const previousEnd = range.startDate;
+  const { data: previousPlansData, error: previousPlansError } = await measureAsync("work-planning:carry_previous_plans", () =>
+    supabase
+      .from("work_plans")
+      .select("id, title, period_start, period_end, status")
+      .gte("period_start", previousStart)
+      .lt("period_start", previousEnd)
+      .in("status", activeWorkPlanStatuses)
+      .limit(200),
+  );
+  if (previousPlansError) return { data: { carriedOver: 0 }, error: previousPlansError.message };
+
+  const previousPlans = (previousPlansData ?? []) as Array<Pick<WorkPlan, "id" | "title">>;
+  if (previousPlans.length === 0) return { data: { carriedOver: 0 }, error: null };
+
+  const { data: previousItemsData, error: previousItemsError } = await measureAsync("work-planning:carry_previous_items", () =>
+    supabase
+      .from("work_plan_items")
+      .select(`
+        ticket_id,
+        worker_id,
+        category,
+        work_plan:work_plans!inner(id,title),
+        ticket:tickets!inner(id,status,category_id,assignee_worker_id,category:categories(name))
+      `)
+      .in("work_plan_id", previousPlans.map((plan) => plan.id))
+      .limit(5000),
+  );
+  if (previousItemsError) return { data: { carriedOver: 0 }, error: previousItemsError.message };
+
+  const targetPlanIds = targetDraftPlans.map((plan) => plan.id);
+  const { data: existingTargetItemsData, error: existingTargetItemsError } = await measureAsync("work-planning:carry_existing_target_items", () =>
+    supabase
+      .from("work_plan_items")
+      .select("ticket_id, work_plan_id")
+      .in("work_plan_id", targetPlanIds)
+      .limit(5000),
+  );
+  if (existingTargetItemsError) return { data: { carriedOver: 0 }, error: existingTargetItemsError.message };
+
+  const existingTargetTicketIds = new Set(((existingTargetItemsData ?? []) as Array<{ ticket_id?: string | null }>).map((item) => item.ticket_id).filter(Boolean) as string[]);
+  const targetPlanByTitle = new Map(targetDraftPlans.map((plan) => [plan.title, plan]));
+  const baseSortOrderByPlanId = new Map<string, number>();
+  for (const plan of targetDraftPlans) baseSortOrderByPlanId.set(plan.id, 0);
+  for (const item of (existingTargetItemsData ?? []) as Array<{ work_plan_id?: string | null }>) {
+    if (!item.work_plan_id) continue;
+    baseSortOrderByPlanId.set(item.work_plan_id, (baseSortOrderByPlanId.get(item.work_plan_id) ?? 0) + 1);
+  }
+
+  const workerCache = new Map<string, string | null>();
+  const seenTicketIds = new Set<string>();
+  const rows: Array<{ work_plan_id: string; ticket_id: string; worker_id: string | null; category: string | null; sort_order: number }> = [];
+  const historyRows: Array<{ ticket_id: string; actor_id: null; action: string; metadata: Record<string, unknown> }> = [];
+
+  for (const row of (previousItemsData ?? []) as unknown as CarryOverItemRow[]) {
+    const ticket = carryOverRowTicket(row);
+    const previousPlan = carryOverRowPlan(row);
+    if (!ticket || !previousPlan || !ticketIsUnfinished(ticket.status)) continue;
+    if (seenTicketIds.has(ticket.id) || existingTargetTicketIds.has(ticket.id)) continue;
+
+    const categoryName = carryOverRowCategoryName(row);
+    const config = autoPlanConfigForCategory(categoryName) ?? autoPlanConfigForTitle(previousPlan.title);
+    if (!config) continue;
+
+    const targetPlan = targetPlanByTitle.get(config.title);
+    if (!targetPlan) continue;
+
+    let workerId = ticket.assignee_worker_id ?? row.worker_id ?? null;
+    if (!workerId) {
+      if (!workerCache.has(config.title)) workerCache.set(config.title, await findAutoPlanWorkerId(supabase, config));
+      workerId = workerCache.get(config.title) ?? null;
+    }
+
+    const sortOrder = baseSortOrderByPlanId.get(targetPlan.id) ?? 0;
+    baseSortOrderByPlanId.set(targetPlan.id, sortOrder + 1);
+    seenTicketIds.add(ticket.id);
+    rows.push({
+      work_plan_id: targetPlan.id,
+      ticket_id: ticket.id,
+      worker_id: workerId,
+      category: categoryName,
+      sort_order: sortOrder,
+    });
+    historyRows.push({
+      ticket_id: ticket.id,
+      actor_id: null,
+      action: `Автоматично перенесено в план наступного тижня: ${targetPlan.title}`,
+      metadata: {
+        source: "weekly_carry_over",
+        from_work_plan_id: previousPlan.id,
+        from_work_plan_title: previousPlan.title,
+        to_work_plan_id: targetPlan.id,
+        to_work_plan_title: targetPlan.title,
+        category: categoryName,
+        worker_id: workerId,
+      },
+    });
+  }
+
+  if (rows.length === 0) return { data: { carriedOver: 0 }, error: null };
+
+  const { error: insertError } = await measureAsync("work-planning:carry_insert_items", () =>
+    supabase.from("work_plan_items").insert(rows),
+  );
+  if (insertError) {
+    if (insertError.code === "23505") return { data: { carriedOver: 0 }, error: null };
+    return { data: { carriedOver: 0 }, error: insertError.message };
+  }
+
+  const { error: historyError } = await measureAsync("work-planning:carry_history", () =>
+    supabase.from("ticket_history").insert(historyRows),
+  );
+  if (historyError) console.warn("[work-planning:carry-over] history insert failed", { error: historyError.message, count: historyRows.length });
+
+  return { data: { carriedOver: rows.length }, error: null };
+}
+
+export async function ensureWeeklyDraftPlansForAutoRouting(date = new Date()): Promise<QueryResult<{ periodStart: string; periodEnd: string; plans: WorkPlan[]; created: number; carriedOver: number }>> {
+  if (!hasSupabaseEnv()) return emptyWithError({ periodStart: "", periodEnd: "", plans: [], created: 0, carriedOver: 0 });
   const supabase = createAdminClient();
   const range = getNextWorkWeekRange(date);
   const titles = autoWorkPlanConfigs.map((config) => config.title);
@@ -513,7 +706,7 @@ export async function ensureWeeklyDraftPlansForAutoRouting(date = new Date()): P
       .in("title", titles)
       .in("status", activeWorkPlanStatuses),
   );
-  if (existingError) return { data: { periodStart: range.startDate, periodEnd: range.endDate, plans: [], created: 0 }, error: existingError.message };
+  if (existingError) return { data: { periodStart: range.startDate, periodEnd: range.endDate, plans: [], created: 0, carriedOver: 0 }, error: existingError.message };
 
   const existing = (existingData ?? []) as WorkPlan[];
   const existingTitles = new Set(existing.map((plan) => plan.title));
@@ -533,7 +726,7 @@ export async function ensureWeeklyDraftPlansForAutoRouting(date = new Date()): P
         })))
         .select("id, title, period_start, period_end, status, created_by, created_at, updated_at, sent_at, notes"),
     );
-    if (insertError) return { data: { periodStart: range.startDate, periodEnd: range.endDate, plans: existing, created: 0 }, error: insertError.message };
+    if (insertError) return { data: { periodStart: range.startDate, periodEnd: range.endDate, plans: existing, created: 0, carriedOver: 0 }, error: insertError.message };
     createdPlans = (inserted ?? []) as WorkPlan[];
   }
 
@@ -549,12 +742,17 @@ export async function ensureWeeklyDraftPlansForAutoRouting(date = new Date()): P
     else plan.notes = expectedNote;
   }));
 
+  const plans = [...existing, ...createdPlans];
+  const carryResult = await carryOverUnfinishedTicketsToWeeklyDraftPlans({ supabase, range, plans });
+  if (carryResult.error) return { data: { periodStart: range.startDate, periodEnd: range.endDate, plans, created: createdPlans.length, carriedOver: 0 }, error: carryResult.error };
+
   return {
     data: {
       periodStart: range.startDate,
       periodEnd: range.endDate,
-      plans: [...existing, ...createdPlans],
+      plans,
       created: createdPlans.length,
+      carriedOver: carryResult.data.carriedOver,
     },
     error: null,
   };
@@ -738,6 +936,110 @@ export async function getWorkPlans(filters: { from?: string; to?: string; limit?
     };
   });
   return { data: plans, error: error?.message ?? null };
+}
+
+type DuplicateRepeatPlanItemRow = {
+  ticket_id: string;
+  work_plan?: { id: string; title: string } | { id: string; title: string }[] | null;
+  ticket?: {
+    id: string;
+    number?: string | null;
+    title?: string | null;
+    object?: { name?: string | null; address?: string | null } | { name?: string | null; address?: string | null }[] | null;
+  } | {
+    id: string;
+    number?: string | null;
+    title?: string | null;
+    object?: { name?: string | null; address?: string | null } | { name?: string | null; address?: string | null }[] | null;
+  }[] | null;
+};
+
+type DuplicateRepeatRow = {
+  id: string;
+  ticket_id: string;
+  raw_text?: string | null;
+  confidence?: number | null;
+  detected_by?: string | null;
+  source_chat_id?: string | null;
+  source_message_id?: string | null;
+  created_at: string;
+};
+
+function duplicateRepeatPlan(row: DuplicateRepeatPlanItemRow) {
+  return Array.isArray(row.work_plan) ? row.work_plan[0] : row.work_plan;
+}
+
+function duplicateRepeatTicket(row: DuplicateRepeatPlanItemRow) {
+  return Array.isArray(row.ticket) ? row.ticket[0] : row.ticket;
+}
+
+function duplicateRepeatTicketObject(ticket: NonNullable<ReturnType<typeof duplicateRepeatTicket>>) {
+  return Array.isArray(ticket.object) ? ticket.object[0] : ticket.object;
+}
+
+export async function getWorkPlanningDuplicateRepeatsForWeek(week: { startDate: string; endDate: string }): Promise<QueryResult<WorkPlanningDuplicateRepeat[]>> {
+  if (!hasSupabaseEnv()) return emptyWithError([]);
+  const supabase = await createClient();
+
+  const { data: planItemsData, error: planItemsError } = await measureAsync("work-planning:duplicate_week_items", () =>
+    supabase
+      .from("work_plan_items")
+      .select(`
+        ticket_id,
+        work_plan:work_plans!inner(id,title,period_start,period_end,status),
+        ticket:tickets(id,number,title,object:objects(name,address))
+      `)
+      .gte("work_plan.period_start", week.startDate)
+      .lt("work_plan.period_start", week.endDate)
+      .in("work_plan.status", activeWorkPlanStatuses)
+      .limit(5000),
+  );
+  if (planItemsError) return { data: [], error: planItemsError.message };
+
+  const items = (planItemsData ?? []) as unknown as DuplicateRepeatPlanItemRow[];
+  const ticketIds = Array.from(new Set(items.map((item) => item.ticket_id).filter(Boolean)));
+  if (ticketIds.length === 0) return { data: [], error: null };
+
+  const { data: repeatsData, error: repeatsError } = await measureAsync("work-planning:duplicate_week_repeats", () =>
+    supabase
+      .from("ticket_repeats")
+      .select("id,ticket_id,raw_text,confidence,detected_by,source_chat_id,source_message_id,created_at")
+      .in("ticket_id", ticketIds)
+      .order("created_at", { ascending: false })
+      .limit(50),
+  );
+  if (repeatsError) return { data: [], error: repeatsError.message };
+
+  const itemByTicketId = new Map<string, DuplicateRepeatPlanItemRow>();
+  for (const item of items) {
+    if (!itemByTicketId.has(item.ticket_id)) itemByTicketId.set(item.ticket_id, item);
+  }
+
+  return {
+    data: ((repeatsData ?? []) as DuplicateRepeatRow[]).map((repeat) => {
+      const item = itemByTicketId.get(repeat.ticket_id);
+      const plan = item ? duplicateRepeatPlan(item) : null;
+      const ticket = item ? duplicateRepeatTicket(item) : null;
+      const object = ticket ? duplicateRepeatTicketObject(ticket) : null;
+      return {
+        id: repeat.id,
+        ticketId: repeat.ticket_id,
+        ticketNumber: ticket?.number ?? null,
+        ticketTitle: ticket?.title ?? null,
+        objectName: object?.name ?? null,
+        objectAddress: object?.address ?? null,
+        planId: plan?.id ?? "",
+        planTitle: plan?.title ?? "",
+        rawText: repeat.raw_text ?? "",
+        confidence: repeat.confidence ?? null,
+        detectedBy: repeat.detected_by ?? null,
+        sourceChatId: repeat.source_chat_id ?? null,
+        sourceMessageId: repeat.source_message_id ?? null,
+        createdAt: repeat.created_at,
+      };
+    }),
+    error: null,
+  };
 }
 
 function emptyWeekOverview(week: Pick<WorkPlanningWeekOverview, "startDate" | "endDate" | "label">): WorkPlanningWeekOverview {

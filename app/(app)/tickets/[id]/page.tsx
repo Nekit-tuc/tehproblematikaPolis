@@ -132,7 +132,7 @@ export default async function TicketDetailsPage({
                 <RelatedTicketsSection ticket={ticket} />
               </Suspense>
               {(ticket.repeat_count ?? 0) > 0 ? (
-                <Suspense fallback={<DetailBlockFallback title="Повторні звернення" />}>
+                <Suspense fallback={<DetailBlockFallback title="Дублі / повторні звернення" />}>
                   <TicketRepeatsSection ticket={ticket} />
                 </Suspense>
               ) : null}
@@ -198,7 +198,7 @@ async function RelatedTicketsSection({ ticket }: { ticket: TicketWithRelations }
 
 async function TicketRepeatsSection({ ticket }: { ticket: TicketWithRelations }) {
   const repeatsResult = await getTicketRepeats(ticket.id, 5);
-  if (repeatsResult.error) return <DetailBlockError title="Повторні звернення" error={repeatsResult.error} />;
+  if (repeatsResult.error) return <DetailBlockError title="Дублі / повторні звернення" error={repeatsResult.error} />;
   return <TicketRepeatsCard ticket={ticket} repeats={repeatsResult.data} />;
 }
 
@@ -334,7 +334,7 @@ function RelatedTicketsCard({ tickets }: { tickets: TicketWithRelations[] }) {
 }
 
 function TicketRepeatsCard({ ticket, repeats }: { ticket: TicketWithRelations; repeats: TicketRepeat[] }) {
-  return <SoftCard className="border-orange-500/20 bg-orange-500/[0.05]"><CardContent className="space-y-3 p-3.5 md:p-4"><SectionTitle title={"Повторні звернення"} right={<Badge tone="orange" className="rounded-full text-[10px]">{ticket.repeat_count}</Badge>} />{repeats.map((repeat) => <div key={repeat.id} className="rounded-[13px] border border-white/[0.07] bg-black/20 p-3 text-[12px]"><div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-zinc-500"><span>{repeat.created_by_name ?? "Telegram"}</span><span>{formatDate(repeat.created_at)}</span></div><p className="mt-1.5 line-clamp-3 break-words text-zinc-300">{repeat.raw_text}</p></div>)}{(ticket.repeat_count ?? 0) > repeats.length ? <p className="text-[11px] text-zinc-500">{"Показано останні 5 з "}{ticket.repeat_count}</p> : null}</CardContent></SoftCard>;
+  return <SoftCard className="border-orange-500/20 bg-orange-500/[0.05]"><CardContent className="space-y-3 p-3.5 md:p-4"><SectionTitle title={"Дублі / повторні звернення"} right={<Badge tone="orange" className="rounded-full text-[10px]">{ticket.repeat_count}</Badge>} />{repeats.map((repeat) => <div key={repeat.id} className="rounded-[13px] border border-white/[0.07] bg-black/20 p-3 text-[12px]"><div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-zinc-500"><span>{repeat.created_by_name ?? "Telegram"}</span><span>{formatDate(repeat.created_at)}</span></div><p className="mt-1.5 line-clamp-3 break-words text-zinc-300">{repeat.raw_text}</p></div>)}{(ticket.repeat_count ?? 0) > repeats.length ? <p className="text-[11px] text-zinc-500">{"Показано останні 5 з "}{ticket.repeat_count}</p> : null}</CardContent></SoftCard>;
 }
 
 function TicketDangerZone({ ticketId }: { ticketId: string }) {

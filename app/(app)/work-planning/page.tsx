@@ -1,6 +1,7 @@
 ﻿import Link from "next/link";
 import type React from "react";
 import {
+  AlertTriangle,
   Building2,
   CalendarDays,
   CalendarPlus,
@@ -34,7 +35,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { requireRole } from "@/lib/auth/server";
 import { addDays, formatDateDDMMYYYY, getNextWorkWeekRange, getWorkWeekRange, type WorkWeekRange } from "@/lib/date/work-week";
 import { priorityLabels, statusLabels } from "@/lib/labels";
-import { getWorkPlanningSummary, getWorkPlanningWeeksOverview, getWorkPlans, type PlanningFilters, type PlanningTicket, type WorkPlan, type WorkPlanStatus, type WorkPlanningSummary, type WorkPlanningWeekOverview } from "@/lib/supabase/work-plans";
+import { getWorkPlanningDuplicateRepeatsForWeek, getWorkPlanningSummary, getWorkPlanningWeeksOverview, getWorkPlans, type PlanningFilters, type PlanningTicket, type WorkPlan, type WorkPlanStatus, type WorkPlanningDuplicateRepeat, type WorkPlanningSummary, type WorkPlanningWeekOverview } from "@/lib/supabase/work-plans";
 import { cn, formatDate } from "@/lib/utils";
 import type { TicketPriority, TicketStatus, WorkerWithCategories } from "@/types/domain";
 import { createWorkPlanAction, deleteWorkPlanAction, ensureAutoDraftPlansAction } from "./actions";
@@ -51,6 +52,7 @@ type SearchParams = {
   create?: string;
   week?: string;
   created?: string;
+  carried?: string;
   success?: string;
   error?: string;
 };
@@ -225,8 +227,9 @@ export default async function WorkPlanningPage({ searchParams }: { searchParams:
     getWorkPlanningSummary(),
     getWorkPlanningWeeksOverview(weekOptions),
   ]);
+  const duplicatesResult = await getWorkPlanningDuplicateRepeatsForWeek(selectedWeek);
 
-  const error = plansResult.error ?? summaryResult.error ?? weeksOverviewResult.error;
+  const error = plansResult.error ?? summaryResult.error ?? weeksOverviewResult.error ?? duplicatesResult.error;
   const pageError = displayWorkPlanningError(error);
   const createError = displayWorkPlanningError(params.error);
   const planningSummary = summaryResult.data;
@@ -277,7 +280,7 @@ export default async function WorkPlanningPage({ searchParams }: { searchParams:
       {params.success === "auto_drafts" ? (
         <div className="min-w-0 max-w-full overflow-hidden break-words whitespace-normal">
           <Alert title={"Авто-чернетки оновлено"}>
-            <span className="break-words whitespace-normal">{"Створено нових планів: "}{params.created ?? "0"}</span>
+            <span className="break-words whitespace-normal">{"Створено нових планів: "}{params.created ?? "0"}{". Перенесено невиконаних заявок: "}{params.carried ?? "0"}{"."}</span>
           </Alert>
         </div>
       ) : null}
@@ -323,6 +326,7 @@ export default async function WorkPlanningPage({ searchParams }: { searchParams:
       ) : null}
 
       <PlansSection plans={plansResult.data} selectedWeek={selectedWeek} />
+      <DuplicateRepeatsSection repeats={duplicatesResult.data} />
 
 
     </div>
@@ -405,6 +409,53 @@ function PlansSection({ plans, selectedWeek }: { plans: WorkPlan[]; selectedWeek
           {plans.map((plan) => <PlanCard key={plan.id} plan={plan} />)}
         </div>
       )}
+    </section>
+  );
+}
+
+function DuplicateRepeatsSection({ repeats }: { repeats: WorkPlanningDuplicateRepeat[] }) {
+  if (repeats.length === 0) return null;
+
+  return (
+    <section className="rounded-[24px] border border-orange-400/20 bg-[radial-gradient(circle_at_0%_0%,rgba(249,115,22,0.11),transparent_32%),rgba(255,255,255,0.035)] p-3.5 shadow-[0_18px_42px_rgba(0,0,0,0.34)] md:p-5">
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex min-w-0 items-center gap-2">
+            <AlertTriangle className="h-4 w-4 shrink-0 text-orange-300" />
+            <h2 className="text-xl font-bold leading-none text-zinc-100 md:text-2xl">Дублі заявок</h2>
+          </div>
+          <p className="mt-1.5 text-xs leading-4 text-zinc-400 md:text-sm">Повідомлення з Telegram, які схожі на вже заплановані заявки.</p>
+        </div>
+        <span className="shrink-0 rounded-full border border-orange-400/25 bg-orange-500/10 px-3 py-1.5 text-xs font-bold text-orange-200">{repeats.length} дублікатів</span>
+      </div>
+      <div className="space-y-2.5 md:grid md:grid-cols-2 md:gap-3 md:space-y-0">
+        {repeats.map((repeat) => (
+          <article key={repeat.id} className="min-w-0 rounded-[20px] border border-white/[0.09] bg-black/20 p-3">
+            <div className="flex min-w-0 items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-orange-300">{repeat.ticketNumber ?? "Основна заявка"}</div>
+                <h3 className="mt-1 line-clamp-2 break-words text-sm font-semibold leading-5 text-zinc-100">{repeat.ticketTitle ?? "Повторне звернення"}</h3>
+              </div>
+              {repeat.confidence !== null ? <Badge tone="orange" className="shrink-0 text-[10px]">{Math.round(repeat.confidence * 100)}%</Badge> : null}
+            </div>
+            <div className="mt-2 grid gap-1.5 text-[11px] leading-4 text-zinc-400">
+              <MetaItem icon={Building2}>{repeat.objectName ?? "Об'єкт не вказано"}</MetaItem>
+              <MetaItem icon={CalendarDays}>{formatDate(repeat.createdAt)}</MetaItem>
+              <MetaItem icon={FolderKanban}>{repeat.planTitle || "Активний план"}</MetaItem>
+            </div>
+            {repeat.objectAddress ? <p className="mt-2 line-clamp-1 break-words text-[11px] text-zinc-500">{repeat.objectAddress}</p> : null}
+            <p className="mt-2 line-clamp-3 break-words rounded-[14px] border border-white/[0.07] bg-white/[0.035] p-2 text-[12px] leading-5 text-zinc-300">{repeat.rawText}</p>
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+              <div className="text-[10px] text-zinc-500">
+                {repeat.detectedBy ? `detected: ${repeat.detectedBy}` : "detected: rule"}
+              </div>
+              <Button asChild variant="outline" className="h-8 rounded-[11px] border-white/[0.10] bg-white/[0.04] px-3 text-[11px] text-orange-200 hover:bg-orange-500/10">
+                <Link href={`/tickets/${repeat.ticketId}`}>Відкрити основну заявку</Link>
+              </Button>
+            </div>
+          </article>
+        ))}
+      </div>
     </section>
   );
 }

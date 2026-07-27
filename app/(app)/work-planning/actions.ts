@@ -112,5 +112,5 @@ export async function ensureAutoDraftPlansAction() {
   }
 
   revalidatePath("/work-planning");
-  redirect(`/work-planning?week=${result.data.periodStart}&success=auto_drafts&created=${result.data.created}`);
+  redirect(`/work-planning?week=${result.data.periodStart}&success=auto_drafts&created=${result.data.created}&carried=${result.data.carriedOver}`);
 }

@@ -121,7 +121,7 @@ async function recordRepeatTicket({
   await supabase.from("ticket_history").insert({
     ticket_id: ticketId,
     actor_id: requester.id,
-    action: "\u041F\u043E\u0432\u0442\u043E\u0440\u043D\u0435 \u0437\u0432\u0435\u0440\u043D\u0435\u043D\u043D\u044F \u0437 Telegram-\u0433\u0440\u0443\u043F\u0438. \u0422\u0435\u043A\u0441\u0442: " + rawText.slice(0, 240),
+    action: "Отримано дубль заявки з Telegram. Додано в розділ дублів. Текст: " + rawText.slice(0, 240),
     metadata: {
       source: "telegram_repeat",
       telegram_chat_id: sourceChatId,
