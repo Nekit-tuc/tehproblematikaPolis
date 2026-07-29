@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { TH, THead, TBody, TR, Table } from "@/components/ui/table";
 import { objectTypeLabels } from "@/lib/labels";
 import { requireRole } from "@/lib/auth/server";
-import { getObjects, getProfiles } from "@/lib/supabase/queries";
+import { getObjectManagers, getObjectsDirectoryMeta, getObjectsPage } from "@/lib/supabase/queries";
 import type { CompanyObject, ObjectType, Profile } from "@/types/domain";
 import { CreateObjectForm } from "./create-object-form";
 import { setObjectActiveAction, updateObjectAction } from "./actions";
@@ -66,24 +66,31 @@ function filterObjects(objects: CompanyObject[], filters: { q?: string; type?: s
 export default async function ObjectsPage({ searchParams }: { searchParams: Promise<{ q?: string; type?: string; status?: string; district?: string; error?: string; success?: string; view?: string; page?: string }> }) {
   const { profile } = await requireRole(["admin", "management", "tech_manager"]);
   const params = await searchParams;
-  const [objectsResult, profilesResult] = await Promise.all([getObjects(), getProfiles()]);
-  const error = objectsResult.error ?? profilesResult.error ?? (params.error ? decodeURIComponent(params.error) : null);
-  const filteredObjects = filterObjects(objectsResult.data, {
-    q: params.q,
-    type: params.type ?? "all",
-    status: params.status ?? "active",
-    district: params.district ?? "all",
-  });
-  const managers = profilesResult.data.filter((item) => item.role === "store_manager" || item.role === "management" || item.role === "tech_manager" || item.role === "admin");
-  const canManage = profile.role === "admin";
-  const nextObjectNumber = getNextObjectNumber(objectsResult.data);
-  const districts = getDistricts(objectsResult.data);
-  const mobileView = params.view === "table" ? "table" : "cards";
   const pageSize = 25;
   const currentPage = Math.max(1, Number.parseInt(params.page ?? "1", 10) || 1);
-  const totalPages = Math.max(1, Math.ceil(filteredObjects.length / pageSize));
+  const [objectsResult, objectsMetaResult, managersResult] = await Promise.all([
+    getObjectsPage({
+      q: params.q,
+      type: params.type ?? "all",
+      status: params.status ?? "active",
+      district: params.district ?? "all",
+      page: currentPage,
+      limit: pageSize,
+    }),
+    getObjectsDirectoryMeta(),
+    getObjectManagers(),
+  ]);
+  const error = objectsResult.error ?? objectsMetaResult.error ?? managersResult.error ?? (params.error ? decodeURIComponent(params.error) : null);
+  const filteredObjects = objectsResult.data.objects;
+  const managers = managersResult.data;
+  const canManage = profile.role === "admin";
+  const nextObjectNumber = getNextObjectNumber(objectsMetaResult.data.objects as CompanyObject[]);
+  const districts = getDistricts(objectsMetaResult.data.objects as CompanyObject[]);
+  const mobileView = params.view === "table" ? "table" : "cards";
+  const totalObjects = objectsResult.data.total;
+  const totalPages = Math.max(1, Math.ceil(totalObjects / pageSize));
   const safePage = Math.min(currentPage, totalPages);
-  const pagedObjects = filteredObjects.slice((safePage - 1) * pageSize, safePage * pageSize);
+  const pagedObjects = filteredObjects;
   const mobileHref = (updates: Record<string, string | number | undefined>) => {
     const next = new URLSearchParams();
     for (const key of ["q", "type", "status", "district", "view", "page"] as const) {
@@ -137,7 +144,7 @@ export default async function ObjectsPage({ searchParams }: { searchParams: Prom
       <details className="mobile-card p-2 md:hidden">
         <summary className="flex min-h-9 cursor-pointer list-none items-center justify-between rounded-lg bg-white/[0.04] px-3 text-[12px] font-semibold text-orange-200">
           Фільтри
-          <span className="text-xs text-stone-500">{filteredObjects.length}</span>
+          <span className="text-xs text-stone-500">{totalObjects}</span>
         </summary>
         <form className="mt-3 grid gap-3">
           <Field label="Пошук"><Input name="q" defaultValue={params.q ?? ""} placeholder="Назва, номер, адреса, місто" className="min-h-8 rounded-lg text-[10px]" /></Field>
@@ -221,7 +228,7 @@ export default async function ObjectsPage({ searchParams }: { searchParams: Prom
       </details>
 
       <div className="space-y-3 md:hidden">
-        {filteredObjects.length === 0 ? (
+        {totalObjects === 0 ? (
           <div className="mobile-card p-3 text-[11px] text-stone-500">Об'єктів за цими фільтрами немає.</div>
         ) : mobileView === "table" ? (
           <div className="max-w-full overflow-x-auto rounded-2xl border border-white/10 bg-white/[0.04]">
@@ -255,50 +262,35 @@ export default async function ObjectsPage({ searchParams }: { searchParams: Prom
             {pagedObjects.map((object) => (
               <MobileObjectCard key={object.id} object={object} managers={managers} canManage={canManage} districts={districts} />
             ))}
-            {totalPages > 1 ? (
-              <div className="mobile-card flex items-center justify-between gap-2 p-3 text-sm">
-                {safePage > 1 ? (
-                  <Button asChild variant="outline" size="sm" className="min-h-8 rounded-lg text-[10px]">
-                    <a href={mobileHref({ page: safePage - 1 })}>Назад</a>
-                  </Button>
-                ) : (
-                  <Button variant="outline" size="sm" className="min-h-8 rounded-lg text-[10px]" disabled>Назад</Button>
-                )}
-                <span className="text-stone-400">Сторінка {safePage} з {totalPages}</span>
-                {safePage < totalPages ? (
-                  <Button asChild variant="outline" size="sm" className="min-h-8 rounded-lg text-[10px]">
-                    <a href={mobileHref({ page: safePage + 1 })}>Далі</a>
-                  </Button>
-                ) : (
-                  <Button variant="outline" size="sm" className="min-h-8 rounded-lg text-[10px]" disabled>Далі</Button>
-                )}
-              </div>
-            ) : null}
           </>
         )}
+        <ObjectPagination safePage={safePage} totalPages={totalPages} hrefForPage={(page) => mobileHref({ page })} mobile />
       </div>
 
       <Card className="hidden md:block">
         <CardHeader>
           <CardTitle>Довідник об'єктів</CardTitle>
-          <CardDescription>Знайдено: {filteredObjects.length}</CardDescription>
+          <CardDescription>Знайдено: {totalObjects}</CardDescription>
         </CardHeader>
         <CardContent>
-          {filteredObjects.length === 0 ? (
+          {totalObjects === 0 ? (
             <p className="text-sm text-muted-foreground">Об'єктів за цими фільтрами немає.</p>
           ) : (
-            <Table>
-              <THead>
-                <TR>
-                  <TH>Назва</TH><TH>№</TH><TH>Тип</TH><TH>Місто / район</TH><TH>Адреса</TH><TH>Керуючий</TH><TH>Статус</TH>
-                </TR>
-              </THead>
-              <TBody>
-                {filteredObjects.map((object) => (
-                  <ObjectRow key={object.id} object={object} managers={managers} canManage={canManage} districts={districts} />
-                ))}
-              </TBody>
-            </Table>
+            <>
+              <Table>
+                <THead>
+                  <TR>
+                    <TH>Назва</TH><TH>№</TH><TH>Тип</TH><TH>Місто / район</TH><TH>Адреса</TH><TH>Керуючий</TH><TH>Статус</TH>
+                  </TR>
+                </THead>
+                <TBody>
+                  {filteredObjects.map((object) => (
+                    <ObjectRow key={object.id} object={object} managers={managers} canManage={canManage} districts={districts} />
+                  ))}
+                </TBody>
+              </Table>
+              <ObjectPagination safePage={safePage} totalPages={totalPages} hrefForPage={(page) => mobileHref({ page })} />
+            </>
           )}
         </CardContent>
       </Card>
@@ -312,6 +304,30 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 function Select({ children, ...props }: React.SelectHTMLAttributes<HTMLSelectElement>) {
   return <select {...props} className="h-10 w-full rounded-md border border-input bg-stone-950/30 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring">{children}</select>;
+}
+
+function ObjectPagination({ safePage, totalPages, hrefForPage, mobile = false }: { safePage: number; totalPages: number; hrefForPage: (page: number) => string; mobile?: boolean }) {
+  if (totalPages <= 1) return null;
+
+  return (
+    <div className={mobile ? "mobile-card flex items-center justify-between gap-2 p-3 text-sm" : "mt-4 flex items-center justify-between gap-2 border-t border-white/10 pt-4 text-sm"}>
+      {safePage > 1 ? (
+        <Button asChild variant="outline" size="sm" className="min-h-8 rounded-lg text-[10px]">
+          <a href={hrefForPage(safePage - 1)}>Назад</a>
+        </Button>
+      ) : (
+        <Button variant="outline" size="sm" className="min-h-8 rounded-lg text-[10px]" disabled>Назад</Button>
+      )}
+      <span className="text-stone-400">Сторінка {safePage} з {totalPages}</span>
+      {safePage < totalPages ? (
+        <Button asChild variant="outline" size="sm" className="min-h-8 rounded-lg text-[10px]">
+          <a href={hrefForPage(safePage + 1)}>Далі</a>
+        </Button>
+      ) : (
+        <Button variant="outline" size="sm" className="min-h-8 rounded-lg text-[10px]" disabled>Далі</Button>
+      )}
+    </div>
+  );
 }
 
 function MobileObjectCard({ object, managers, canManage, districts }: { object: CompanyObject; managers: Profile[]; canManage: boolean; districts: string[] }) {

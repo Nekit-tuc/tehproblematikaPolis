@@ -48,41 +48,15 @@ export default async function TicketDetailsPage({
   const ticketResult = await getTicket(id);
   const ticket = ticketResult.data;
   if (!ticket && !ticketResult.error) notFound();
-  let workersResult = { data: [] as WorkerWithCategories[], error: null as string | null };
-  let recommendedWorkersResult = { data: [] as WorkerWithCategories[], error: null as string | null };
   let assignedWorker: Worker | WorkerWithCategories | null = null;
 
-  if (ticket) {
-    const shouldLoadWorkerActions = canConfirmTicket(profile);
-    const [workersLoad, recommendedWorkersLoad, assignedWorkerLoad] = await Promise.allSettled([
-      shouldLoadWorkerActions ? getActiveWorkers() : Promise.resolve({ data: [] as WorkerWithCategories[], error: null as string | null }),
-      shouldLoadWorkerActions && ticket.category_id ? getWorkersByCategory(ticket.category_id) : Promise.resolve({ data: [] as WorkerWithCategories[], error: null as string | null }),
-      ticket.assignee_worker_id ? getWorkerById(ticket.assignee_worker_id) : Promise.resolve({ data: null as Worker | null, error: null as string | null }),
-    ]);
-
-    if (workersLoad.status === "fulfilled") {
-      workersResult = workersLoad.value;
-      if (workersResult.error) console.error("[ticket-detail] load failed", { scope: "workers", error: workersResult.error });
-    } else {
-      console.error("[ticket-detail] load failed", { scope: "workers", error: workersLoad.reason });
-    }
-
-    if (recommendedWorkersLoad.status === "fulfilled") {
-      recommendedWorkersResult = recommendedWorkersLoad.value;
-      if (recommendedWorkersResult.error) console.error("[ticket-detail] load failed", { scope: "recommended_workers", error: recommendedWorkersResult.error });
-    } else {
-      console.error("[ticket-detail] load failed", { scope: "recommended_workers", error: recommendedWorkersLoad.reason });
-    }
-
-    if (assignedWorkerLoad.status === "fulfilled") {
-      if (assignedWorkerLoad.value.error) console.error("[ticket-detail] load failed", { scope: "assigned_worker", error: assignedWorkerLoad.value.error });
-      assignedWorker = assignedWorkerLoad.value.data;
-    } else {
-      console.error("[ticket-detail] load failed", { scope: "assigned_worker", error: assignedWorkerLoad.reason });
-    }
+  if (ticket?.assignee_worker_id) {
+    const assignedWorkerLoad = await getWorkerById(ticket.assignee_worker_id);
+    if (assignedWorkerLoad.error) console.error("[ticket-detail] load failed", { scope: "assigned_worker", error: assignedWorkerLoad.error });
+    assignedWorker = assignedWorkerLoad.data;
   }
 
-  const error = ticketResult.error ?? workersResult.error ?? recommendedWorkersResult.error;
+  const error = ticketResult.error;
 
   return (
     <div className="page-shell space-y-3 pb-32 md:space-y-5 md:pb-10">
@@ -103,18 +77,9 @@ export default async function TicketDetailsPage({
             <div className="order-2 min-w-0 space-y-3 md:space-y-5 lg:order-1">
               <TicketDescriptionCard ticket={ticket} assignedWorker={assignedWorker} />
               {canConfirmTicket(profile) ? (
-                <WorkerAssignmentCard
-                  ticketId={ticket.id}
-                  assignedWorkerId={ticket.assignee_worker_id}
-                  currentWorker={assignedWorker}
-                  workers={workersResult.data}
-                  recommendedWorkers={recommendedWorkersResult.data}
-                  status={ticket.status}
-                  assignedAt={ticket.assigned_at}
-                  sentAt={ticket.sent_to_worker_at}
-                  completedAt={ticket.worker_completed_at}
-                  canUnassign={canUnassignWorkerFromTicket(profile)}
-                />
+                <Suspense fallback={<DetailBlockFallback title="Виконавець" />}>
+                  <WorkerAssignmentSection ticket={ticket} profile={profile} assignedWorker={assignedWorker} />
+                </Suspense>
               ) : null}
               <Suspense fallback={<DetailBlockFallback title="Фото" />}>
                 <TicketPhotosSection ticket={ticket} profile={profile} />
@@ -168,6 +133,34 @@ function DetailBlockError({ title, error }: { title: string; error: string }) {
         <p className="break-words text-[12px] text-red-200">{error}</p>
       </CardContent>
     </SoftCard>
+  );
+}
+
+async function WorkerAssignmentSection({ ticket, profile, assignedWorker }: { ticket: TicketWithRelations; profile: Profile; assignedWorker: Worker | WorkerWithCategories | null }) {
+  const [workersLoad, recommendedWorkersLoad] = await Promise.allSettled([
+    getActiveWorkers(),
+    ticket.category_id ? getWorkersByCategory(ticket.category_id) : Promise.resolve({ data: [] as WorkerWithCategories[], error: null as string | null }),
+  ]);
+
+  const workersResult = workersLoad.status === "fulfilled" ? workersLoad.value : { data: [] as WorkerWithCategories[], error: String(workersLoad.reason) };
+  const recommendedWorkersResult = recommendedWorkersLoad.status === "fulfilled" ? recommendedWorkersLoad.value : { data: [] as WorkerWithCategories[], error: String(recommendedWorkersLoad.reason) };
+
+  if (workersResult.error) console.error("[ticket-detail] load failed", { scope: "workers", error: workersResult.error });
+  if (recommendedWorkersResult.error) console.error("[ticket-detail] load failed", { scope: "recommended_workers", error: recommendedWorkersResult.error });
+
+  return (
+    <WorkerAssignmentCard
+      ticketId={ticket.id}
+      assignedWorkerId={ticket.assignee_worker_id}
+      currentWorker={assignedWorker}
+      workers={workersResult.data}
+      recommendedWorkers={recommendedWorkersResult.data}
+      status={ticket.status}
+      assignedAt={ticket.assigned_at}
+      sentAt={ticket.sent_to_worker_at}
+      completedAt={ticket.worker_completed_at}
+      canUnassign={canUnassignWorkerFromTicket(profile)}
+    />
   );
 }
 

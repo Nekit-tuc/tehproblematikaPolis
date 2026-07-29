@@ -1,5 +1,6 @@
 ﻿import { createClient } from "@/lib/supabase/server";
 import { hasSupabaseEnv, missingSupabaseMessage } from "@/lib/supabase/env";
+import { cache } from "react";
 import { measureAsync } from "@/lib/performance";
 import type { Category, Ticket, TicketWithRelations, Worker, WorkerStats, WorkerWithCategories } from "@/types/domain";
 import type { QueryResult } from "./queries";
@@ -49,7 +50,7 @@ export async function getWorkers(): Promise<QueryResult<WorkerWithCategories[]>>
   return { data: ((data ?? []) as unknown as WorkerWithCategories[]).map(normalizeWorker), error: error?.message ?? null };
 }
 
-export async function getActiveWorkers(): Promise<QueryResult<WorkerWithCategories[]>> {
+export const getActiveWorkers = cache(async function getActiveWorkers(): Promise<QueryResult<WorkerWithCategories[]>> {
   if (!hasSupabaseEnv()) return emptyWithError([]);
   const supabase = await createClient();
   const { data, error } = await measureAsync("workers:active", () => supabase
@@ -59,7 +60,7 @@ export async function getActiveWorkers(): Promise<QueryResult<WorkerWithCategori
     .order("name"));
 
   return { data: ((data ?? []) as unknown as WorkerWithCategories[]).map(normalizeWorker), error: error?.message ?? null };
-}
+});
 
 export async function getWorkerById(id: string): Promise<QueryResult<WorkerWithCategories | null>> {
   if (!hasSupabaseEnv()) return { data: null, error: missingSupabaseMessage };

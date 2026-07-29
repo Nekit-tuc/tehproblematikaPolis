@@ -1445,7 +1445,7 @@ export async function getWorkPlanningSummary(): Promise<QueryResult<WorkPlanning
 
   const [activeTicketsResult, plannedRowsResult] = await Promise.all([
     measureAsync("work-planning:summary_active_tickets", () =>
-      supabase.from("tickets").select("id", { count: "exact" }).in("status", activeStatuses),
+      supabase.from("tickets").select("id", { count: "exact", head: true }).in("status", activeStatuses),
     ),
     measureAsync("work-planning:summary_planned_items", () =>
       supabase

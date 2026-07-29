@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
 import { hasSupabaseEnv, missingSupabaseMessage } from "@/lib/supabase/env";
 import { getCurrentProfile } from "@/lib/auth/server";
@@ -25,6 +26,19 @@ export async function getProfiles(): Promise<QueryResult<Profile[]>> {
   return { data: (data ?? []) as Profile[], error: error?.message ?? null };
 }
 
+export async function getObjectManagers(): Promise<QueryResult<Profile[]>> {
+  if (!hasSupabaseEnv()) return emptyWithError([]);
+  const supabase = await createClient();
+  const { data, error } = await measureAsync("profiles:object_managers", () =>
+    supabase
+      .from("profiles")
+      .select("id, full_name, email, role, object_id, default_object_id, telegram_id, telegram_username, phone, is_active, created_at")
+      .in("role", ["store_manager", "management", "tech_manager", "admin"])
+      .order("full_name"),
+  );
+  return { data: (data ?? []) as Profile[], error: error?.message ?? null };
+}
+
 export async function getObjects(): Promise<QueryResult<CompanyObject[]>> {
   if (!hasSupabaseEnv()) return emptyWithError([]);
   const profile = await getCurrentProfile();
@@ -37,6 +51,77 @@ export async function getObjects(): Promise<QueryResult<CompanyObject[]>> {
   if (profile.role === "store_manager" && profile.object_id) query = query.eq("id", profile.object_id);
   const { data, error } = await measureAsync("objects:list", () => query);
   return { data: (data ?? []) as CompanyObject[], error: error?.message ?? null };
+}
+
+export type ObjectListFilters = {
+  q?: string;
+  type?: string;
+  status?: string;
+  district?: string;
+  page?: number;
+  limit?: number;
+};
+
+export type ObjectPageResult = {
+  objects: CompanyObject[];
+  total: number;
+  page: number;
+  limit: number;
+};
+
+export type ObjectsDirectoryMeta = {
+  objects: Array<Pick<CompanyObject, "id" | "object_number" | "district">>;
+};
+
+function applyObjectFilters(query: any, filters: ObjectListFilters) {
+  if (filters.type && filters.type !== "all") query = query.eq("type", filters.type);
+  if (filters.status === "active") query = query.eq("is_active", true);
+  if (filters.status === "inactive") query = query.eq("is_active", false);
+  if (filters.district && filters.district !== "all") query = query.eq("district", filters.district);
+
+  const search = filters.q?.trim();
+  if (search) {
+    const escaped = search.replace(/[%_,]/g, "");
+    query = query.or(`name.ilike.%${escaped}%,object_number.ilike.%${escaped}%,address.ilike.%${escaped}%,city.ilike.%${escaped}%,district.ilike.%${escaped}%`);
+  }
+
+  return query;
+}
+
+export async function getObjectsPage(filters: ObjectListFilters = {}): Promise<QueryResult<ObjectPageResult>> {
+  const limit = Math.min(Math.max(filters.limit ?? 25, 1), 100);
+  const page = Math.max(filters.page ?? 1, 1);
+  if (!hasSupabaseEnv()) return emptyWithError({ objects: [], total: 0, page, limit });
+  const profile = await getCurrentProfile();
+  if (!profile) return emptyWithError({ objects: [], total: 0, page, limit });
+  const supabase = await createClient();
+  const from = (page - 1) * limit;
+  const to = from + limit - 1;
+
+  let query = supabase
+    .from("objects")
+    .select("id, name, type, object_number, city, district, address, aliases, manager_id, is_active, created_at", { count: "exact" })
+    .order("name");
+  if (profile.role === "store_manager" && profile.object_id) query = query.eq("id", profile.object_id);
+  query = applyObjectFilters(query, filters).range(from, to);
+
+  const { data, count, error } = await measureAsync("objects:page", () => query);
+  return { data: { objects: (data ?? []) as CompanyObject[], total: count ?? 0, page, limit }, error: error?.message ?? null };
+}
+
+export async function getObjectsDirectoryMeta(): Promise<QueryResult<ObjectsDirectoryMeta>> {
+  if (!hasSupabaseEnv()) return emptyWithError({ objects: [] });
+  const profile = await getCurrentProfile();
+  if (!profile) return emptyWithError({ objects: [] });
+  const supabase = await createClient();
+  let query = supabase
+    .from("objects")
+    .select("id, object_number, district")
+    .order("object_number");
+  if (profile.role === "store_manager" && profile.object_id) query = query.eq("id", profile.object_id);
+
+  const { data, error } = await measureAsync("objects:directory_meta", () => query);
+  return { data: { objects: (data ?? []) as ObjectsDirectoryMeta["objects"] }, error: error?.message ?? null };
 }
 
 export async function getCategories(): Promise<QueryResult<Category[]>> {
@@ -97,6 +182,29 @@ const ticketListSelect = `
   category:categories(id, name, description, is_active, created_at),
   assignee:profiles!tickets_assigned_to_fkey(id, full_name, email, role, object_id, default_object_id, telegram_id, telegram_username, phone, is_active, created_at),
   worker:workers(id, name, phone, telegram_username, telegram_id, is_active, notes, created_at, updated_at)
+`;
+
+const ticketPageSelect = `
+  id,
+  number,
+  title,
+  status,
+  priority,
+  object_id,
+  category_id,
+  assigned_to,
+  assignee_worker_id,
+  due_at,
+  source,
+  telegram_source_group_id,
+  repeat_count,
+  last_repeat_at,
+  created_at,
+  updated_at,
+  object:objects(id, name, type, object_number, city, district, address, is_active, created_at),
+  category:categories(id, name, is_active, created_at),
+  assignee:profiles!tickets_assigned_to_fkey(id, full_name, email, role, is_active, created_at),
+  worker:workers(id, name, telegram_username, telegram_id, is_active, created_at, updated_at)
 `;
 
 type TicketQueryOptions = {
@@ -194,7 +302,7 @@ export async function getTicketsPage(filters: TicketListFilters = {}): Promise<Q
   const from = (page - 1) * limit;
   const to = from + limit - 1;
 
-  let query = supabase.from("tickets").select(ticketListSelect, { count: "exact" });
+  let query = supabase.from("tickets").select(ticketPageSelect, { count: "exact" });
   query = applyTicketAccess(query, profile);
   query = applyTicketFilters(query, filters);
   if (filters.sort === "priority_asc" || filters.sort === "priority_desc") {
@@ -442,10 +550,6 @@ function dashboardWeekLabel(startDate: string, endDate: string) {
   return `${formatter.format(new Date(`${startDate}T12:00:00`))} \u2014 ${formatter.format(new Date(`${endDate}T12:00:00`))}`;
 }
 
-function plannedTicketFromRow(row: any): TicketWithRelations | null {
-  return Array.isArray(row.ticket) ? row.ticket[0] ?? null : row.ticket ?? null;
-}
-
 export async function getDashboardOverview(): Promise<QueryResult<DashboardOverview>> {
   const emptyRange = getWorkWeekRange();
   const empty: DashboardOverview = {
@@ -470,33 +574,73 @@ export async function getDashboardOverview(): Promise<QueryResult<DashboardOverv
   const weekStartIso = weekStart.toISOString();
   const weekEndIso = weekEnd.toISOString();
 
-  const [currentWeekTickets, activePlanItems, currentWeekPlanItems] = await Promise.all([
-    queryTicketsForProfile(supabase, profile, "dashboard-overview:intake", (query) =>
-      query.gte("created_at", weekStartIso).lt("created_at", weekEndIso).order("created_at", { ascending: false }).limit(1000),
-    ),
-    measureAsync("dashboard-overview:active_plan_items", () =>
+  const [currentWeekTickets, activePlans, currentWeekPlans] = await Promise.all([
+    measureAsync("dashboard-overview:intake_minimal", () => {
+      let query = supabase
+        .from("tickets")
+        .select("id,status,priority")
+        .gte("created_at", weekStartIso)
+        .lt("created_at", weekEndIso)
+        .limit(1000);
+      query = applyTicketAccess(query, profile);
+      return query;
+    }),
+    measureAsync("dashboard-overview:active_plan_ids", () =>
       supabase
-        .from("work_plan_items")
-        .select("ticket_id, work_plan:work_plans!inner(id,status,period_start)")
-        .in("work_plan.status", ["draft", "sent", "partially_done"])
-        .limit(2000),
+        .from("work_plans")
+        .select("id")
+        .in("status", ["draft", "sent", "partially_done"])
+        .limit(500),
     ),
-    measureAsync("dashboard-overview:current_plan_items", () =>
+    measureAsync("dashboard-overview:current_week_plans", () =>
       supabase
-        .from("work_plan_items")
-        .select(`ticket_id, ticket:tickets(${ticketListSelect}), work_plan:work_plans!inner(id,status,period_start)`)
-        .in("work_plan.status", ["draft", "sent", "partially_done"])
-        .gte("work_plan.period_start", currentRange.startDate)
-        .lt("work_plan.period_start", currentRange.endDate)
-        .limit(2000),
+        .from("work_plans")
+        .select("id")
+        .in("status", ["draft", "sent", "partially_done"])
+        .gte("period_start", currentRange.startDate)
+        .lt("period_start", currentRange.endDate)
+        .limit(200),
     ),
   ]);
 
-  const tickets = currentWeekTickets.data;
+  type DashboardTicketRow = { id: string; status: string; priority: string | null };
+  type DashboardPlannedTicketRow = { id: string; status: string };
+  type DashboardPlanItemRow = {
+    ticket_id?: string | null;
+    ticket?: { id: string; status: string } | { id: string; status: string }[] | null;
+  };
+
+  const tickets = (currentWeekTickets.data ?? []) as DashboardTicketRow[];
+  const currentTicketIds = tickets.map((ticket) => ticket.id);
+  const activePlanIds = ((activePlans.data ?? []) as Array<{ id: string }>).map((plan) => plan.id);
+  const currentPlanIds = ((currentWeekPlans.data ?? []) as Array<{ id: string }>).map((plan) => plan.id);
+
+  const [activePlanItems, currentWeekPlanItems] = await Promise.all([
+    currentTicketIds.length === 0 || activePlanIds.length === 0
+      ? Promise.resolve({ data: [] as Array<{ ticket_id?: string | null }>, error: null })
+      : measureAsync("dashboard-overview:active_plan_items_for_intake", () =>
+          supabase
+            .from("work_plan_items")
+            .select("ticket_id")
+            .in("work_plan_id", activePlanIds)
+            .in("ticket_id", currentTicketIds)
+            .limit(Math.max(currentTicketIds.length * 3, 1)),
+        ),
+    currentPlanIds.length === 0
+      ? Promise.resolve({ data: [] as DashboardPlanItemRow[], error: null })
+      : measureAsync("dashboard-overview:current_plan_items_minimal", () =>
+      supabase
+        .from("work_plan_items")
+            .select("ticket_id, ticket:tickets(id,status)")
+            .in("work_plan_id", currentPlanIds)
+        .limit(2000),
+        ),
+  ]);
+
   const activePlannedTicketIds = new Set(((activePlanItems.data ?? []) as Array<{ ticket_id?: string | null }>).map((row) => row.ticket_id).filter(Boolean) as string[]);
-  const currentPlanTickets = new Map<string, TicketWithRelations>();
-  for (const row of (currentWeekPlanItems.data ?? []) as any[]) {
-    const ticket = plannedTicketFromRow(row);
+  const currentPlanTickets = new Map<string, DashboardPlannedTicketRow>();
+  for (const row of (currentWeekPlanItems.data ?? []) as DashboardPlanItemRow[]) {
+    const ticket = Array.isArray(row.ticket) ? row.ticket[0] ?? null : row.ticket ?? null;
     if (ticket?.id) currentPlanTickets.set(ticket.id, ticket);
   }
   const plannedTickets = Array.from(currentPlanTickets.values());
@@ -536,7 +680,7 @@ export async function getDashboardOverview(): Promise<QueryResult<DashboardOverv
         notDone,
       },
     },
-    error: currentWeekTickets.error ?? activePlanItems.error?.message ?? currentWeekPlanItems.error?.message ?? null,
+    error: currentWeekTickets.error?.message ?? activePlans.error?.message ?? currentWeekPlans.error?.message ?? activePlanItems.error?.message ?? currentWeekPlanItems.error?.message ?? null,
   };
 }
 
@@ -703,7 +847,7 @@ export async function getWeeklyDashboardCommandCenter(): Promise<QueryResult<Wee
 }
 
 
-export async function getTicket(id: string): Promise<QueryResult<TicketWithRelations | null>> {
+export const getTicket = cache(async function getTicket(id: string): Promise<QueryResult<TicketWithRelations | null>> {
   if (!hasSupabaseEnv()) return { data: null, error: missingSupabaseMessage };
   const profile = await getCurrentProfile();
   if (!profile) return { data: null, error: "Потрібно увійти в систему." };
@@ -714,7 +858,7 @@ export async function getTicket(id: string): Promise<QueryResult<TicketWithRelat
   const ticket = data as TicketWithRelations | null;
   if (ticket && !canViewTicket(profile, ticket)) return { data: null, error: "Недостатньо прав для перегляду цієї заявки." };
   return { data: ticket, error: error?.message ?? null };
-}
+});
 
 export async function getRelatedTicketsBySourceGroup(sourceGroupId: string, currentTicketId: string): Promise<QueryResult<TicketWithRelations[]>> {
   if (!hasSupabaseEnv()) return emptyWithError([]);

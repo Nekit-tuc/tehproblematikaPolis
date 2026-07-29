@@ -222,12 +222,12 @@ export default async function WorkPlanningPage({ searchParams }: { searchParams:
   const selectedWeek = isDateParam(params.week) ? weekRangeFromStart(params.week!) : nextWorkWeek;
   const weekOptions = buildPlanningWeeks(currentWorkWeek, selectedWeek);
 
-  const [plansResult, summaryResult, weeksOverviewResult] = await Promise.all([
+  const [plansResult, summaryResult, weeksOverviewResult, duplicatesResult] = await Promise.all([
     getWorkPlans({ from: selectedWeek.startDate, to: selectedWeek.endDate, limit: 100 }),
     getWorkPlanningSummary(),
     getWorkPlanningWeeksOverview(weekOptions),
+    getWorkPlanningDuplicateRepeatsForWeek(selectedWeek),
   ]);
-  const duplicatesResult = await getWorkPlanningDuplicateRepeatsForWeek(selectedWeek);
 
   const error = plansResult.error ?? summaryResult.error ?? weeksOverviewResult.error ?? duplicatesResult.error;
   const pageError = displayWorkPlanningError(error);
