@@ -33,7 +33,7 @@ import { Label } from "@/components/ui/label";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { Textarea } from "@/components/ui/textarea";
 import { requireRole } from "@/lib/auth/server";
-import { addDays, formatDateDDMMYYYY, getNextWorkWeekRange, getWorkWeekRange, type WorkWeekRange } from "@/lib/date/work-week";
+import { addDays, formatWorkWeekDateRange, getNextWorkWeekRange, getWorkWeekRange, type WorkWeekRange } from "@/lib/date/work-week";
 import { priorityLabels, statusLabels } from "@/lib/labels";
 import { getWorkPlanningDuplicateRepeatsForWeek, getWorkPlanningSummary, getWorkPlanningWeeksOverview, getWorkPlans, type PlanningFilters, type PlanningTicket, type WorkPlan, type WorkPlanStatus, type WorkPlanningDuplicateRepeat, type WorkPlanningSummary, type WorkPlanningWeekOverview } from "@/lib/supabase/work-plans";
 import { cn, formatDate } from "@/lib/utils";
@@ -177,13 +177,13 @@ function planningHref(params: Record<string, string | undefined | null>) {
 }
 
 function weekRangeFromStart(startDate: string): WorkWeekRange {
-  return getWorkWeekRange(new Date(`${startDate}T12:00:00`));
+  return getWorkWeekRange(new Date(`${startDate}T15:00:00`));
 }
 
 function buildPlanningWeeks(currentWeek: WorkWeekRange, selectedWeek: WorkWeekRange) {
   const baseStart = currentWeek.start;
   const starts = [-14, -7, 0, 7, 14, 21, 28].map((offset) => addDays(baseStart, offset));
-  if (!starts.some((date) => formatDateDDMMYYYY(date) === formatDateDDMMYYYY(selectedWeek.start))) starts.push(selectedWeek.start);
+  if (!starts.some((date) => date.getTime() === selectedWeek.start.getTime())) starts.push(selectedWeek.start);
   return starts
     .sort((a, b) => a.getTime() - b.getTime())
     .map((start) => {
@@ -195,7 +195,7 @@ function buildPlanningWeeks(currentWeek: WorkWeekRange, selectedWeek: WorkWeekRa
 }
 
 function shortWeekPeriod(week: Pick<WorkPlanningWeekOverview, "startDate" | "endDate">) {
-  return `${formatDateDDMMYYYY(week.startDate).slice(0, 5)}—${formatDateDDMMYYYY(week.endDate).slice(0, 5)} · 15:00`;
+  return formatWorkWeekDateRange(week.startDate, week.endDate);
 }
 
 function weekBadgeLabel(label: WorkPlanningWeekOverview["label"]) {

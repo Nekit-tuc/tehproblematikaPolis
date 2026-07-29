@@ -12,7 +12,7 @@ import { SubmitButton } from "@/components/ui/submit-button";
 import { Textarea } from "@/components/ui/textarea";
 import { canConfirmTicket, canEditTicket } from "@/lib/auth/permissions";
 import { requireRole } from "@/lib/auth/server";
-import { getWorkWeekLabel } from "@/lib/date/work-week";
+import { formatWorkWeekDateRange } from "@/lib/date/work-week";
 import { priorityLabels, statusLabels } from "@/lib/labels";
 import { getCategories } from "@/lib/supabase/queries";
 import { getDraftWorkPlansForMove, getWorkPlanById, getWorkPlanDispatches, getWorkPlanItems, type WorkPlan, type WorkPlanDispatch, type WorkPlanItem, type WorkPlanStatus } from "@/lib/supabase/work-plans";
@@ -221,7 +221,7 @@ export default async function WorkPlanDetailPage({ params, searchParams }: PageP
                   <Clock className="h-2.5 w-2.5" />{planStatusLabels[plan.status]}
                 </span>
               </div>
-              <p className="mt-1 break-words text-[12px] leading-4 text-zinc-400 md:text-sm">{getWorkWeekLabel(plan.period_start, plan.period_end)}</p>
+              <p className="mt-1 break-words text-[12px] leading-4 text-zinc-400 md:text-sm">{formatWorkWeekDateRange(plan.period_start, plan.period_end)}</p>
             </div>
           </div>
         </div>

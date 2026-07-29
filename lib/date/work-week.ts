@@ -42,6 +42,10 @@ export function formatDateTimeDDMMYYYYHHMM(date: Date | string) {
   return new Intl.DateTimeFormat("uk-UA", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(value);
 }
 
+export function formatWorkWeekDateRange(start: Date | string, end: Date | string) {
+  return `${formatDateDDMMYYYY(start).slice(0, 5)} — ${formatDateDDMMYYYY(end).slice(0, 5)}`;
+}
+
 export function addDays(date: Date, days: number) {
   const value = new Date(date);
   value.setDate(value.getDate() + days);

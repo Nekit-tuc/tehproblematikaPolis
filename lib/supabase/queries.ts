@@ -4,7 +4,7 @@ import { hasSupabaseEnv, missingSupabaseMessage } from "@/lib/supabase/env";
 import { getCurrentProfile } from "@/lib/auth/server";
 import { canViewTicket } from "@/lib/auth/permissions";
 import { measureAsync } from "@/lib/performance";
-import { getNextWorkWeekRange, getPreviousWorkWeekRange, getWorkWeekLabel, getWorkWeekRange } from "@/lib/date/work-week";
+import { formatWorkWeekDateRange, getNextWorkWeekRange, getPreviousWorkWeekRange, getWorkWeekLabel, getWorkWeekRange } from "@/lib/date/work-week";
 import { getLatestArchivedWeeklyPeriod } from "@/lib/supabase/weekly-control";
 import type { Category, CompanyObject, Profile, TicketCommentWithAuthor, TicketHistory, TicketPhotoWithUrl, TicketWithRelations } from "@/types/domain";
 
@@ -552,7 +552,7 @@ async function queryTicketsForProfile(supabase: Awaited<ReturnType<typeof create
 }
 
 function dashboardWeekLabel(startDate: string | Date, endDate: string | Date) {
-  return getWorkWeekLabel(startDate, endDate);
+  return formatWorkWeekDateRange(startDate, endDate);
 }
 
 export async function getDashboardOverview(): Promise<QueryResult<DashboardOverview>> {
