@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireRole } from "@/lib/auth/server";
+import { getWorkWeekLabel } from "@/lib/date/work-week";
 import { addKeyValueSection, addTable, addTitle, createReportWorkbook, formatDate, safeWorksheetName, setupWorksheet, workbookToBuffer, XLSX_CONTENT_TYPE, type ReportColumn } from "@/lib/reports/excel";
 import { getWeeklyPeriodDetails } from "@/lib/supabase/weekly-control";
 
@@ -62,7 +63,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   const workbook = createReportWorkbook();
   const worksheet = workbook.addWorksheet(safeWorksheetName("Weekly Control", "Weekly Control"));
   setupWorksheet(worksheet, columns);
-  addTitle(worksheet, "POLISSYA SERVICE DESK AI", `Тижневий контроль: ${formatDate(period.week_start)} - ${formatDate(period.week_end)}`, columns.length);
+  addTitle(worksheet, "POLISSYA SERVICE DESK AI", `Тижневий контроль: ${getWorkWeekLabel(period.week_start, period.week_end)}`, columns.length);
   addKeyValueSection(worksheet, "Підсумок", [
     ["Статус тижня", period.status, period.title ?? ""],
     ["Створено", summary.totalCreated, "Заявки, створені за тиждень"],
@@ -93,7 +94,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   );
 
   const buffer = await workbookToBuffer(workbook);
-  const filename = `weekly-control-${period.week_start}-${period.week_end}.xlsx`;
+  const filename = `weekly-control-${period.week_start.slice(0, 10)}-${period.week_end.slice(0, 10)}.xlsx`;
   return new NextResponse(buffer, {
     headers: {
       "Content-Type": XLSX_CONTENT_TYPE,

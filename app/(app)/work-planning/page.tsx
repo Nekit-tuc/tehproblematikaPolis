@@ -195,7 +195,7 @@ function buildPlanningWeeks(currentWeek: WorkWeekRange, selectedWeek: WorkWeekRa
 }
 
 function shortWeekPeriod(week: Pick<WorkPlanningWeekOverview, "startDate" | "endDate">) {
-  return `${formatDateDDMMYYYY(week.startDate).slice(0, 5)}—${formatDateDDMMYYYY(week.endDate).slice(0, 5)}`;
+  return `${formatDateDDMMYYYY(week.startDate).slice(0, 5)}—${formatDateDDMMYYYY(week.endDate).slice(0, 5)} · 15:00`;
 }
 
 function weekBadgeLabel(label: WorkPlanningWeekOverview["label"]) {
@@ -223,7 +223,7 @@ export default async function WorkPlanningPage({ searchParams }: { searchParams:
   const weekOptions = buildPlanningWeeks(currentWorkWeek, selectedWeek);
 
   const [plansResult, summaryResult, weeksOverviewResult, duplicatesResult] = await Promise.all([
-    getWorkPlans({ from: selectedWeek.startDate, to: selectedWeek.endDate, limit: 100 }),
+    getWorkPlans({ from: selectedWeek.startIso, to: selectedWeek.endIso, limit: 100 }),
     getWorkPlanningSummary(),
     getWorkPlanningWeeksOverview(weekOptions),
     getWorkPlanningDuplicateRepeatsForWeek(selectedWeek),

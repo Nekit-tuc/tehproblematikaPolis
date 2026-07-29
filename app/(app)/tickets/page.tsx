@@ -26,7 +26,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { TD, TH, THead, TBody, TR, Table } from "@/components/ui/table";
 import { canHardDeleteTicket } from "@/lib/auth/permissions";
 import { requireAuth } from "@/lib/auth/server";
-import { getPreviousWorkWeekRange, getWorkWeekRange } from "@/lib/date/work-week";
 import { getCategories, getTicketsCount, getTicketsPage } from "@/lib/supabase/queries";
 import { formatDate } from "@/lib/utils";
 import type { TicketPriority, TicketStatus, TicketWithRelations } from "@/types/domain";
@@ -169,6 +168,7 @@ export default async function TicketsPage({
     success?: string;
     error?: string;
     deleted?: string;
+    period?: string;
     from?: string;
     to?: string;
   }>;
@@ -186,12 +186,13 @@ export default async function TicketsPage({
     : "all";
   const activeSort = query.sort === "priority_asc" ? "priority_asc" : query.sort === "priority_desc" ? "priority_desc" : "newest";
   const searchQuery = (query.q ?? "").trim();
+  const activePeriod = query.period === "this_week" || query.period === "previous_week" ? query.period : undefined;
   const activeFrom = isDateParam(query.from) ? query.from ?? "" : "";
   const activeTo = isDateParam(query.to) ? query.to ?? "" : "";
   const currentPage = Math.max(Number(query.page ?? 1) || 1, 1);
 
   const [ticketsPageResult, categoriesResult, aiTicketsCountResult] = await Promise.all([
-    getTicketsPage({ status: activeStatus, category: activeCategory, priority: activePriority, sort: activeSort, q: searchQuery, from: activeFrom, to: activeTo, page: currentPage, limit: PAGE_SIZE }),
+    getTicketsPage({ status: activeStatus, category: activeCategory, priority: activePriority, sort: activeSort, q: searchQuery, period: activePeriod, from: activeFrom, to: activeTo, page: currentPage, limit: PAGE_SIZE }),
     getCategories(),
     getTicketsCount({ status: "pending_review", source: ["telegram_group", "telegram_private_test"] }),
   ]);
@@ -212,6 +213,7 @@ export default async function TicketsPage({
     if (activePriority !== "all") params.set("priority", activePriority);
     if (activeSort !== "newest") params.set("sort", activeSort);
     if (searchQuery) params.set("q", searchQuery);
+    if (activePeriod) params.set("period", activePeriod);
     if (activeFrom) params.set("from", activeFrom);
     if (activeTo) params.set("to", activeTo);
     if (safePage > 1) params.set("page", String(safePage));
@@ -223,6 +225,11 @@ export default async function TicketsPage({
         params.set(key, value);
       }
     }
+    if (updates.period) {
+      params.delete("from");
+      params.delete("to");
+    }
+    if (updates.from || updates.to) params.delete("period");
     if (Object.keys(updates).some((key) => key !== "page")) params.delete("page");
 
     const search = params.toString();
@@ -232,13 +239,11 @@ export default async function TicketsPage({
   const returnTo = ticketHref({ page: String(safePage) });
   const printHref = ticketHref({ page: undefined }).replace(/^\/tickets/, "/tickets/print");
   const exportHref = ticketHref({ page: undefined }).replace(/^\/tickets/, "/tickets/export");
-  const currentWorkWeek = getWorkWeekRange();
-  const previousWorkWeek = getPreviousWorkWeekRange();
   const periodLinks = {
-    thisWeek: ticketHref({ from: currentWorkWeek.startDate, to: currentWorkWeek.endDate }),
-    previousWeek: ticketHref({ from: previousWorkWeek.startDate, to: previousWorkWeek.endDate }),
+    thisWeek: ticketHref({ period: "this_week" }),
+    previousWeek: ticketHref({ period: "previous_week" }),
     thisMonth: ticketHref({ from: toInputDate(startOfMonth()), to: toInputDate(endOfMonth()) }),
-    clear: ticketHref({ from: undefined, to: undefined }),
+    clear: ticketHref({ period: undefined, from: undefined, to: undefined }),
   };
 
   return (
@@ -286,8 +291,8 @@ export default async function TicketsPage({
             </FilterGroup>
             <PeriodFilterForm activeFrom={activeFrom} activeTo={activeTo} searchQuery={searchQuery} activeStatus={activeStatus} activeCategory={activeCategory} activePriority={activePriority} activeSort={activeSort} />
             <div className="flex max-w-full gap-1.5 overflow-x-auto pb-0.5">
-              <FilterButton href={periodLinks.thisWeek} active={false}>Цей тиждень</FilterButton>
-              <FilterButton href={periodLinks.previousWeek} active={false}>Минулий тиждень</FilterButton>
+              <FilterButton href={periodLinks.thisWeek} active={activePeriod === "this_week"}>Цей тиждень</FilterButton>
+              <FilterButton href={periodLinks.previousWeek} active={activePeriod === "previous_week"}>Минулий тиждень</FilterButton>
               <FilterButton href={periodLinks.thisMonth} active={false}>Цей місяць</FilterButton>
               <FilterButton href={periodLinks.clear} active={!activeFrom && !activeTo}>Очистити</FilterButton>
             </div>
@@ -319,8 +324,8 @@ export default async function TicketsPage({
             <div className="rounded-2xl border border-white/[0.08] bg-black/20 p-3">
               <div className="flex flex-wrap items-end gap-2">
                 <PeriodFilterForm activeFrom={activeFrom} activeTo={activeTo} searchQuery={searchQuery} activeStatus={activeStatus} activeCategory={activeCategory} activePriority={activePriority} activeSort={activeSort} />
-                <Button asChild variant="outline" size="sm"><Link href={periodLinks.thisWeek}>Цей тиждень</Link></Button>
-                <Button asChild variant="outline" size="sm"><Link href={periodLinks.previousWeek}>Минулий тиждень</Link></Button>
+                <Button asChild variant={activePeriod === "this_week" ? "default" : "outline"} size="sm"><Link href={periodLinks.thisWeek}>Цей тиждень</Link></Button>
+                <Button asChild variant={activePeriod === "previous_week" ? "default" : "outline"} size="sm"><Link href={periodLinks.previousWeek}>Минулий тиждень</Link></Button>
                 <Button asChild variant="outline" size="sm"><Link href={periodLinks.thisMonth}>Цей місяць</Link></Button>
                 <Button asChild variant="ghost" size="sm"><Link href={periodLinks.clear}>Очистити</Link></Button>
                 <Button asChild size="sm"><Link href={printHref}><Printer className="h-4 w-4" />Друк звіту</Link></Button>

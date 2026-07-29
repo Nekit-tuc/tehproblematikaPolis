@@ -1,4 +1,4 @@
-import { getPreviousWorkWeekRange, getWorkWeekRange } from "@/lib/date/work-week";
+import { getPreviousWorkWeekRange, getWorkWeekLabel, getWorkWeekRange } from "@/lib/date/work-week";
 import { getCategories, getObjects, getTickets, type QueryResult } from "@/lib/supabase/queries";
 import { createClient } from "@/lib/supabase/server";
 import { getWorkers } from "@/lib/supabase/worker-queries";
@@ -11,6 +11,8 @@ export type ReportsPeriodRange = {
   period: ReportsPeriod;
   from: string;
   to: string;
+  fromIso: string;
+  toIso: string;
   label: string;
 };
 
@@ -196,22 +198,30 @@ export function getReportsPeriodRange(period: string | undefined, customFrom?: s
     const range = getPreviousWorkWeekRange(now);
     const from = range.startDate;
     const to = range.endDate;
-    return { period: selected, from, to, label: `Минулий тиждень · ${formatRangeLabel(from, to)}` };
+    return { period: selected, from, to, fromIso: range.startIso, toIso: range.endIso, label: `Минулий тиждень · ${getWorkWeekLabel(range.start, range.end)}` };
   }
   if (selected === "month") {
     const start = new Date(now.getFullYear(), now.getMonth(), 1);
     const end = now;
     const from = isoDate(start);
     const to = isoDate(end);
-    return { period: selected, from, to, label: `Поточний місяць · ${formatRangeLabel(from, to)}` };
+    const toExclusive = addDays(atStartOfDay(end), 1);
+    return { period: selected, from, to, fromIso: atStartOfDay(start).toISOString(), toIso: toExclusive.toISOString(), label: `Поточний місяць · ${formatRangeLabel(from, to)}` };
   }
   if (selected === "custom" && customFrom && customTo) {
-    return { period: selected, from: customFrom, to: customTo, label: `Період · ${formatRangeLabel(customFrom, customTo)}` };
+    return {
+      period: selected,
+      from: customFrom,
+      to: customTo,
+      fromIso: atStartOfDay(new Date(`${customFrom}T00:00:00`)).toISOString(),
+      toIso: addDays(atStartOfDay(new Date(`${customTo}T00:00:00`)), 1).toISOString(),
+      label: `Період · ${formatRangeLabel(customFrom, customTo)}`,
+    };
   }
   const range = getWorkWeekRange(now);
   const from = range.startDate;
   const to = range.endDate;
-  return { period: "this_week", from, to, label: `Цей тиждень · ${formatRangeLabel(from, to)}` };
+  return { period: "this_week", from, to, fromIso: range.startIso, toIso: range.endIso, label: `Цей тиждень · ${getWorkWeekLabel(range.start, range.end)}` };
 }
 
 
@@ -242,6 +252,12 @@ export function reportsPeriodHref(basePath: string, period: ReportsPeriod, from:
 function ticketCreatedInRange(ticket: TicketWithRelations, from: Date, to: Date) {
   const createdAt = new Date(ticket.created_at);
   return createdAt >= from && createdAt < to;
+}
+
+function dateInRange(value: string | null | undefined, from: Date, to: Date) {
+  if (!value) return false;
+  const date = new Date(value);
+  return date >= from && date < to;
 }
 
 function completionDate(ticket: TicketWithRelations) {
@@ -403,12 +419,12 @@ function buildTrend(tickets: TicketWithRelations[], from: Date, to: Date): Repor
     const date = addDays(from, index);
     const iso = isoDate(date);
     const dayStart = atStartOfDay(date);
-    const dayEnd = atEndOfDay(date);
+    const dayEnd = addDays(dayStart, 1);
     return {
       iso,
       label: formatter.format(date),
       count: tickets.filter((ticket) => ticketCreatedInRange(ticket, dayStart, dayEnd)).length,
-      completed: tickets.filter((ticket) => ticketCompletedInRange(ticket, dayStart, dayEnd)).length,
+      completed: tickets.filter((ticket) => ticketCompletedInRange(ticket, dayStart, addDays(dayStart, 1))).length,
     };
   });
 }
@@ -664,7 +680,7 @@ function buildSnapshotTrend(rows: WeeklyPeriodTicket[], from: string, to: string
 function snapshotPeriodRange(details: WeeklyPeriodDetails): ReportsPeriodRange {
   const from = details.period?.week_start ?? isoDate(new Date());
   const to = details.period?.week_end ?? from;
-  return { period: "custom", from, to, label: `${details.period?.title ?? "\u0410\u0440\u0445\u0456\u0432\u043D\u0438\u0439 \u0442\u0438\u0436\u0434\u0435\u043D\u044C"} \u00B7 ${formatRangeLabel(from, to)}` };
+  return { period: "custom", from: from.slice(0, 10), to: to.slice(0, 10), fromIso: new Date(from).toISOString(), toIso: new Date(to).toISOString(), label: `${details.period?.title ?? "Архівний тиждень"} · ${getWorkWeekLabel(from, to)}` };
 }
 
 function buildSnapshotReportsData(details: WeeklyPeriodDetails, periodId: string): ReportsDashboardData {
@@ -715,14 +731,14 @@ export async function getReportsDashboardData(periodParam?: string, customFrom?:
     return { data: buildSnapshotReportsData(snapshotResult.data, periodId), error: snapshotResult.error };
   }
   const periodRange = getReportsPeriodRange(periodParam, customFrom, customTo);
-  const fromDate = atStartOfDay(new Date(`${periodRange.from}T00:00:00`));
-  const toDate = periodRange.period === "this_week" || periodRange.period === "previous_week" ? new Date(`${periodRange.to}T00:00:00`) : atEndOfDay(new Date(`${periodRange.to}T00:00:00`));
+  const fromDate = new Date(periodRange.fromIso);
+  const toDate = new Date(periodRange.toIso);
   const [ticketsResult, objectsResult, categoriesResult, workersResult, plannedResult] = await Promise.all([
     getTickets({ limit: null }),
     getObjects(),
     getCategories(),
     getWorkers(),
-    getPlannedAssignmentsForPeriod(periodRange.from, periodRange.to),
+    getPlannedAssignmentsForPeriod(periodRange.fromIso, periodRange.toIso),
   ]);
 
   const tickets = ticketsResult.data;
@@ -730,12 +746,17 @@ export async function getReportsDashboardData(periodParam?: string, customFrom?:
   const completedInPeriod = tickets.filter((ticket) => ticketCompletedInRange(ticket, fromDate, toDate));
   const plannedAssignments = plannedResult.data;
   const plannedTickets = hydratePlannedWorkerNames(plannedAssignments.map((assignment) => assignment.ticket), plannedAssignments);
-  const periodTickets = uniqueTickets([...createdInPeriod, ...completedInPeriod, ...plannedTickets]);
+  const waitingInPeriod = tickets.filter(
+    (ticket) =>
+      ticket.status === "waiting_admin_confirmation" &&
+      (dateInRange(ticket.worker_completed_at, fromDate, toDate) || ticketCreatedInRange(ticket, fromDate, toDate)),
+  );
+  const periodTickets = uniqueTickets([...createdInPeriod, ...plannedTickets, ...completedInPeriod, ...waitingInPeriod]);
   const completedTicketIds = new Set(completedInPeriod.map((ticket) => ticket.id));
   const plannedTicketIds = new Set(plannedTickets.map((ticket) => ticket.id));
   const plannedByTicket = plannedWorkerMap(plannedAssignments);
-  const unresolvedInPeriod = periodTickets.filter((ticket) => (ticketCreatedInRange(ticket, fromDate, toDate) || plannedTicketIds.has(ticket.id)) && isUnresolved(ticket));
-  const waitingConfirmation = periodTickets.filter((ticket) => ticket.status === "waiting_admin_confirmation" && (plannedTicketIds.has(ticket.id) || ticketCreatedInRange(ticket, fromDate, toDate) || (ticket.worker_completed_at ? new Date(ticket.worker_completed_at) >= fromDate && new Date(ticket.worker_completed_at) < toDate : false)));
+  const unresolvedInPeriod = periodTickets.filter(isUnresolved);
+  const waitingConfirmation = periodTickets.filter((ticket) => ticket.status === "waiting_admin_confirmation");
   const problematicInPeriod = periodTickets.filter((ticket) => isProblematic(ticket) || (plannedTicketIds.has(ticket.id) && isUnresolved(ticket)));
   const categoryTopRows = topCategories(periodTickets);
   const objectTopRows = topObjects(problematicInPeriod.length ? problematicInPeriod : periodTickets);

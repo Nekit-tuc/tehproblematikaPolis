@@ -4,7 +4,7 @@ import { hasSupabaseEnv, missingSupabaseMessage } from "@/lib/supabase/env";
 import { getCurrentProfile } from "@/lib/auth/server";
 import { canViewTicket } from "@/lib/auth/permissions";
 import { measureAsync } from "@/lib/performance";
-import { getNextWorkWeekRange, getPreviousWorkWeekRange, getWorkWeekRange } from "@/lib/date/work-week";
+import { getNextWorkWeekRange, getPreviousWorkWeekRange, getWorkWeekLabel, getWorkWeekRange } from "@/lib/date/work-week";
 import { getLatestArchivedWeeklyPeriod } from "@/lib/supabase/weekly-control";
 import type { Category, CompanyObject, Profile, TicketCommentWithAuthor, TicketHistory, TicketPhotoWithUrl, TicketWithRelations } from "@/types/domain";
 
@@ -219,6 +219,7 @@ export type TicketListFilters = {
   priority?: string;
   q?: string;
   sort?: string;
+  period?: "this_week" | "previous_week";
   from?: string;
   to?: string;
   page?: number;
@@ -282,8 +283,13 @@ function applyTicketFilters(query: any, filters: TicketListFilters) {
   if (filters.status && filters.status !== "all") query = query.eq("status", filters.status);
   if (filters.category && filters.category !== "all") query = query.eq("category_id", filters.category);
   if (filters.priority && filters.priority !== "all") query = query.eq("priority", filters.priority);
-  if (filters.from) query = query.gte("created_at", `${filters.from}T00:00:00`);
-  if (filters.to) query = query.lte("created_at", `${filters.to}T23:59:59.999`);
+  if (filters.period === "this_week" || filters.period === "previous_week") {
+    const range = filters.period === "previous_week" ? getPreviousWorkWeekRange() : getWorkWeekRange();
+    query = query.gte("created_at", range.startIso).lt("created_at", range.endIso);
+  } else {
+    if (filters.from) query = query.gte("created_at", `${filters.from}T00:00:00`);
+    if (filters.to) query = query.lte("created_at", `${filters.to}T23:59:59.999`);
+  }
   const search = filters.q?.trim();
   if (search) {
     const escaped = search.replace(/[%_,]/g, "");
@@ -545,9 +551,8 @@ async function queryTicketsForProfile(supabase: Awaited<ReturnType<typeof create
   return { data: (data ?? []) as unknown as TicketWithRelations[], error: error?.message ?? null };
 }
 
-function dashboardWeekLabel(startDate: string, endDate: string) {
-  const formatter = new Intl.DateTimeFormat("uk-UA", { day: "2-digit", month: "2-digit" });
-  return `${formatter.format(new Date(`${startDate}T12:00:00`))} \u2014 ${formatter.format(new Date(`${endDate}T12:00:00`))}`;
+function dashboardWeekLabel(startDate: string | Date, endDate: string | Date) {
+  return getWorkWeekLabel(startDate, endDate);
 }
 
 export async function getDashboardOverview(): Promise<QueryResult<DashboardOverview>> {
@@ -557,7 +562,7 @@ export async function getDashboardOverview(): Promise<QueryResult<DashboardOverv
     week: {
       startDate: emptyRange.startDate,
       endDate: emptyRange.endDate,
-      label: dashboardWeekLabel(emptyRange.startDate, emptyRange.endDate),
+      label: dashboardWeekLabel(emptyRange.start, emptyRange.end),
     },
     intake: { total: 0, pendingReview: 0, confirmed: 0, awaitingPlanning: 0, critical: 0 },
     execution: { planned: 0, inProgress: 0, done: 0, waitingConfirmation: 0, notDone: 0 },
@@ -571,8 +576,8 @@ export async function getDashboardOverview(): Promise<QueryResult<DashboardOverv
   const currentRange = getWorkWeekRange();
   const weekStart = currentRange.start;
   const weekEnd = currentRange.end;
-  const weekStartIso = weekStart.toISOString();
-  const weekEndIso = weekEnd.toISOString();
+  const weekStartIso = currentRange.startIso;
+  const weekEndIso = currentRange.endIso;
 
   const [currentWeekTickets, activePlans, currentWeekPlans] = await Promise.all([
     measureAsync("dashboard-overview:intake_minimal", () => {
@@ -597,8 +602,8 @@ export async function getDashboardOverview(): Promise<QueryResult<DashboardOverv
         .from("work_plans")
         .select("id")
         .in("status", ["draft", "sent", "partially_done"])
-        .gte("period_start", currentRange.startDate)
-        .lt("period_start", currentRange.endDate)
+        .gte("period_start", currentRange.startIso)
+        .lt("period_start", currentRange.endIso)
         .limit(200),
     ),
   ]);
@@ -663,7 +668,7 @@ export async function getDashboardOverview(): Promise<QueryResult<DashboardOverv
       week: {
         startDate: currentRange.startDate,
         endDate: currentRange.endDate,
-        label: dashboardWeekLabel(currentRange.startDate, currentRange.endDate),
+        label: dashboardWeekLabel(currentRange.start, currentRange.end),
       },
       intake: {
         total: tickets.length,
@@ -689,12 +694,12 @@ export async function getWeeklyDashboardCommandCenter(): Promise<QueryResult<Wee
     period: {
       weekNumber: weekNumber(new Date()),
       monthLabel: monthFormatter.format(new Date()),
-      startIso: getWorkWeekRange().startDate,
-      endIso: getWorkWeekRange().endDate,
-      previousStartIso: getPreviousWorkWeekRange().startDate,
-      previousEndIso: getPreviousWorkWeekRange().endDate,
-      nextStartIso: getNextWorkWeekRange().startDate,
-      nextEndIso: getNextWorkWeekRange().endDate,
+      startIso: getWorkWeekRange().startIso,
+      endIso: getWorkWeekRange().endIso,
+      previousStartIso: getPreviousWorkWeekRange().startIso,
+      previousEndIso: getPreviousWorkWeekRange().endIso,
+      nextStartIso: getNextWorkWeekRange().startIso,
+      nextEndIso: getNextWorkWeekRange().endIso,
     },
     kpi: { currentWeekTicketCount: 0, inWorkCount: 0, completedThisWeekCount: 0, problematicCount: 0, pendingAiCount: 0, waitingAdminConfirmationCount: 0 },
     calendarDays: [],
@@ -804,12 +809,12 @@ export async function getWeeklyDashboardCommandCenter(): Promise<QueryResult<Wee
       period: {
         weekNumber: weekNumber(now),
         monthLabel: monthFormatter.format(now),
-        startIso: currentRange.startDate,
-        endIso: currentRange.endDate,
-        previousStartIso: previousRange.startDate,
-        previousEndIso: previousRange.endDate,
-        nextStartIso: nextRange.startDate,
-        nextEndIso: nextRange.endDate,
+        startIso: currentRange.startIso,
+        endIso: currentRange.endIso,
+        previousStartIso: previousRange.startIso,
+        previousEndIso: previousRange.endIso,
+        nextStartIso: nextRange.startIso,
+        nextEndIso: nextRange.endIso,
       },
       kpi: {
         currentWeekTicketCount: currentTickets.length,

@@ -1,7 +1,7 @@
 import ExcelJS from "exceljs";
 import { NextRequest, NextResponse } from "next/server";
 import { requireRole } from "@/lib/auth/server";
-import { getWorkWeekRange } from "@/lib/date/work-week";
+import { getWorkWeekLabel, getWorkWeekRange, type WorkWeekRange } from "@/lib/date/work-week";
 import { priorityLabels, statusLabels } from "@/lib/labels";
 import { getWorkPlanItemsForPlans, getWorkPlans, type WorkPlan, type WorkPlanItem } from "@/lib/supabase/work-plans";
 import type { TicketPriority, TicketStatus } from "@/types/domain";
@@ -50,7 +50,7 @@ function filename(week: { startDate: string; endDate: string }) {
 
 type WeeklyPlanRows = Array<{ plan: WorkPlan; items: WorkPlanItem[] }>;
 
-async function buildWorkbook(week: { startDate: string; endDate: string }, rowsByPlan: WeeklyPlanRows) {
+async function buildWorkbook(week: WorkWeekRange, rowsByPlan: WeeklyPlanRows) {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = "Service Desk AI";
   workbook.created = new Date();
@@ -87,7 +87,7 @@ async function buildWorkbook(week: { startDate: string; endDate: string }, rowsB
   worksheet.getCell("A1").font = { bold: true, size: 12, color: { argb: "FFF97316" } };
   worksheet.getCell("A2").value = "Плани робіт за тиждень";
   worksheet.getCell("A2").font = { bold: true, size: 20, color: { argb: "FF111827" } };
-  worksheet.getCell("A3").value = `Період: ${formatDate(week.startDate)} - ${formatDate(week.endDate)}`;
+  worksheet.getCell("A3").value = `Період: ${getWorkWeekLabel(week.start, week.end)}`;
   worksheet.getCell("A4").value = `Сформовано: ${formatDateTime(new Date())}`;
   for (const rowNumber of [1, 2, 3, 4]) {
     worksheet.getRow(rowNumber).alignment = { vertical: "middle", horizontal: "left" };
@@ -152,9 +152,9 @@ export async function GET(request: NextRequest) {
   await requireRole(["admin", "management", "tech_manager"]);
   const url = new URL(request.url);
   const weekParam = url.searchParams.get("week");
-  const week = getWorkWeekRange(weekParam ? new Date(`${weekParam}T12:00:00`) : new Date());
+  const week = getWorkWeekRange(weekParam ? new Date(`${weekParam}T15:00:00`) : new Date());
 
-  const plansResult = await getWorkPlans({ from: week.startDate, to: week.endDate, limit: 300 });
+  const plansResult = await getWorkPlans({ from: week.startIso, to: week.endIso, limit: 300 });
   if (plansResult.error) return NextResponse.json({ error: plansResult.error }, { status: 500 });
   if (plansResult.data.length === 0) return NextResponse.json({ error: "На цей тиждень планів не знайдено." }, { status: 404 });
 

@@ -1,6 +1,7 @@
 import ExcelJS from "exceljs";
 import { NextResponse } from "next/server";
 import { requireRole } from "@/lib/auth/server";
+import { getWorkWeekLabel } from "@/lib/date/work-week";
 import { priorityLabels, statusLabels } from "@/lib/labels";
 import { getWorkPlanById, getWorkPlanItems, type WorkPlan, type WorkPlanItem } from "@/lib/supabase/work-plans";
 import type { TicketPriority, TicketStatus } from "@/types/domain";
@@ -38,7 +39,7 @@ const thinBorder: Partial<ExcelJS.Borders> = {
 };
 
 function filename(plan: Pick<WorkPlan, "period_start" | "period_end">) {
-  return `work-plan-${plan.period_start}-${plan.period_end}.xlsx`;
+  return `work-plan-${plan.period_start.slice(0, 10)}-${plan.period_end.slice(0, 10)}.xlsx`;
 }
 
 function formatDate(value?: string | null) {
@@ -186,7 +187,7 @@ async function buildWorkbook(plan: WorkPlan, items: WorkPlanItem[]) {
   worksheet.getCell("A2").font = { bold: true, size: 20, color: { argb: "FF111827" } };
   worksheet.getCell("A2").alignment = { vertical: "middle", horizontal: "left" };
 
-  worksheet.getCell("A3").value = `Період: ${formatDate(plan.period_start)} - ${formatDate(plan.period_end)}`;
+  worksheet.getCell("A3").value = `Період: ${getWorkWeekLabel(plan.period_start, plan.period_end)}`;
   worksheet.getCell("A4").value = `Назва плану: ${plan.title}`;
   for (const rowNumber of [3, 4]) {
     worksheet.getRow(rowNumber).font = { size: 10, color: { argb: "FF6B7280" } };

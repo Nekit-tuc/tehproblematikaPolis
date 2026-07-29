@@ -5,21 +5,21 @@ import { Alert } from "@/components/ui/alert";
 import { getDashboardOverview } from "@/lib/supabase/queries";
 
 const text = {
-  forbiddenTitle: "\u041D\u0435\u0434\u043E\u0441\u0442\u0430\u0442\u043D\u044C\u043E \u043F\u0440\u0430\u0432",
-  forbiddenBody: "\u0412\u0430\u0448\u0456\u0439 \u0440\u043E\u043B\u0456 \u043D\u0435 \u0432\u0456\u0434\u043A\u0440\u0438\u0442\u043E \u0434\u043E\u0441\u0442\u0443\u043F \u0434\u043E \u0446\u044C\u043E\u0433\u043E \u0440\u043E\u0437\u0434\u0456\u043B\u0443.",
-  supabaseTitle: "\u0414\u0430\u043D\u0456 Supabase \u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u043D\u0456",
+  forbiddenTitle: "Недостатньо прав",
+  forbiddenBody: "Вашій ролі не відкрито доступ до цього розділу.",
+  supabaseTitle: "Дані Supabase недоступні",
   label: "Service Desk AI",
-  title: "\u041A\u043E\u043D\u0442\u0440\u043E\u043B\u044C \u043C\u0430\u0433\u0430\u0437\u0438\u043D\u0456\u0432 \u041F\u043E\u043B\u0456\u0441\u0441\u044F",
-  greeting: "\u0412\u0456\u0442\u0430\u044E",
-  workWeek: "\u0420\u043E\u0431\u043E\u0447\u0438\u0439 \u0442\u0438\u0436\u0434\u0435\u043D\u044C",
-  intakeTitle: "\u0417\u0430\u044F\u0432\u043A\u0438 \u0446\u044C\u043E\u0433\u043E \u0442\u0438\u0436\u043D\u044F",
-  intakeSubtitle: "\u0417\u0430\u044F\u0432\u043A\u0438, \u044F\u043A\u0456 \u043D\u0430\u0434\u0456\u0439\u0448\u043B\u0438 \u0432\u0456\u0434 \u043C\u0430\u0433\u0430\u0437\u0438\u043D\u0456\u0432 \u0443 \u043F\u043E\u0442\u043E\u0447\u043D\u043E\u043C\u0443 \u0440\u043E\u0431\u043E\u0447\u043E\u043C\u0443 \u0442\u0438\u0436\u043D\u0456",
-  executionTitle: "\u0412\u0438\u043A\u043E\u043D\u0430\u043D\u043D\u044F \u0446\u044C\u043E\u0433\u043E \u0442\u0438\u0436\u043D\u044F",
-  executionSubtitle: "\u0417\u0430\u044F\u0432\u043A\u0438 \u0437 \u043F\u043B\u0430\u043D\u0456\u0432, \u044F\u043A\u0456 \u043C\u0430\u044E\u0442\u044C \u0432\u0438\u043A\u043E\u043D\u0443\u0432\u0430\u0442\u0438\u0441\u044C \u0443 \u043F\u043E\u0442\u043E\u0447\u043D\u043E\u043C\u0443 \u0440\u043E\u0431\u043E\u0447\u043E\u043C\u0443 \u0442\u0438\u0436\u043D\u0456",
-  viewTickets: "\u041F\u0435\u0440\u0435\u0433\u043B\u044F\u043D\u0443\u0442\u0438 \u0437\u0430\u044F\u0432\u043A\u0438",
-  openPlans: "\u0412\u0456\u0434\u043A\u0440\u0438\u0442\u0438 \u043F\u043B\u0430\u043D\u0438 \u0442\u0438\u0436\u043D\u044F",
-  noTickets: "\u041D\u043E\u0432\u0438\u0445 \u0437\u0430\u044F\u0432\u043E\u043A \u0437\u0430 \u0446\u0435\u0439 \u0440\u043E\u0431\u043E\u0447\u0438\u0439 \u0442\u0438\u0436\u0434\u0435\u043D\u044C \u0449\u0435 \u043D\u0435\u043C\u0430\u0454.",
-  noPlans: "\u041D\u0430 \u0446\u0435\u0439 \u0440\u043E\u0431\u043E\u0447\u0438\u0439 \u0442\u0438\u0436\u0434\u0435\u043D\u044C \u0449\u0435 \u043D\u0435\u043C\u0430\u0454 \u0430\u043A\u0442\u0438\u0432\u043D\u0438\u0445 \u043F\u043B\u0430\u043D\u0456\u0432.",
+  title: "Контроль магазинів Полісся",
+  greeting: "Вітаю",
+  workWeek: "Робочий тиждень",
+  intakeTitle: "Заявки цього тижня",
+  intakeSubtitle: "Заявки, які надійшли від магазинів у поточному робочому тижні",
+  executionTitle: "Виконання цього тижня",
+  executionSubtitle: "Заявки з планів, які мають виконуватись у поточному робочому тижні",
+  viewTickets: "Переглянути заявки",
+  openPlans: "Відкрити плани тижня",
+  noTickets: "Нових заявок за цей робочий тиждень ще немає.",
+  noPlans: "На цей робочий тиждень ще немає активних планів.",
 };
 
 export default async function DashboardPage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
@@ -59,11 +59,11 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
             actionLabel={text.viewTickets}
             empty={data.intake.total === 0 ? text.noTickets : null}
             stats={[
-              { label: "\u041D\u0430\u0434\u0456\u0439\u0448\u043B\u043E", value: data.intake.total, icon: ClipboardList, tone: "text-orange-300" },
-              { label: "AI-\u043F\u0435\u0440\u0435\u0432\u0456\u0440\u043A\u0430", value: data.intake.pendingReview, icon: Sparkles, tone: "text-sky-300" },
-              { label: "\u041F\u0456\u0434\u0442\u0432\u0435\u0440\u0434\u0436\u0435\u043D\u043E", value: data.intake.confirmed, icon: CheckCircle2, tone: "text-emerald-300" },
-              { label: "\u041E\u0447\u0456\u043A\u0443\u044E\u0442\u044C \u043F\u043B\u0430\u043D\u0443\u0432\u0430\u043D\u043D\u044F", value: data.intake.awaitingPlanning, icon: ListChecks, tone: "text-amber-300" },
-              { label: "\u041A\u0440\u0438\u0442\u0438\u0447\u043D\u0456", value: data.intake.critical, icon: AlertTriangle, tone: "text-red-300" },
+              { label: "Надійшло", value: data.intake.total, icon: ClipboardList, tone: "text-orange-300" },
+              { label: "AI-перевірка", value: data.intake.pendingReview, icon: Sparkles, tone: "text-sky-300" },
+              { label: "Підтверджено", value: data.intake.confirmed, icon: CheckCircle2, tone: "text-emerald-300" },
+              { label: "Очікують планування", value: data.intake.awaitingPlanning, icon: ListChecks, tone: "text-amber-300" },
+              { label: "Критичні", value: data.intake.critical, icon: AlertTriangle, tone: "text-red-300" },
             ]}
           />
 
@@ -75,11 +75,11 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
             actionLabel={text.openPlans}
             empty={data.execution.planned === 0 ? text.noPlans : null}
             stats={[
-              { label: "\u0417\u0430\u043F\u043B\u0430\u043D\u043E\u0432\u0430\u043D\u043E", value: data.execution.planned, icon: CalendarCheck, tone: "text-orange-300" },
-              { label: "\u0412 \u0440\u043E\u0431\u043E\u0442\u0456", value: data.execution.inProgress, icon: ListChecks, tone: "text-blue-300" },
-              { label: "\u0412\u0438\u043A\u043E\u043D\u0430\u043D\u043E", value: data.execution.done, icon: CheckCircle2, tone: "text-emerald-300" },
-              { label: "\u041D\u0430 \u043F\u0456\u0434\u0442\u0432\u0435\u0440\u0434\u0436\u0435\u043D\u043D\u0456", value: data.execution.waitingConfirmation, icon: Hourglass, tone: "text-amber-300" },
-              { label: "\u041D\u0435 \u0432\u0438\u043A\u043E\u043D\u0430\u043D\u043E", value: data.execution.notDone, icon: AlertTriangle, tone: "text-red-300" },
+              { label: "Заплановано", value: data.execution.planned, icon: CalendarCheck, tone: "text-orange-300" },
+              { label: "В роботі", value: data.execution.inProgress, icon: ListChecks, tone: "text-blue-300" },
+              { label: "Виконано", value: data.execution.done, icon: CheckCircle2, tone: "text-emerald-300" },
+              { label: "На підтвердженні", value: data.execution.waitingConfirmation, icon: Hourglass, tone: "text-amber-300" },
+              { label: "Не виконано", value: data.execution.notDone, icon: AlertTriangle, tone: "text-red-300" },
             ]}
           />
         </section>

@@ -1,6 +1,6 @@
 import { getCurrentUser } from "@/lib/auth/server";
 import { measureAsync } from "@/lib/performance";
-import { getNextWorkWeekRange, getWorkWeekRange } from "@/lib/date/work-week";
+import { getNextWorkWeekRange, getWorkWeekLabel, getWorkWeekRange } from "@/lib/date/work-week";
 import { createClient } from "@/lib/supabase/server";
 import { hasSupabaseEnv, missingSupabaseMessage } from "@/lib/supabase/env";
 import type { QueryResult } from "@/lib/supabase/queries";
@@ -107,16 +107,20 @@ export function getCurrentWeekRange(date = new Date()) {
   return {
     start: current.start,
     end: current.end,
-    startIso: current.startDate,
-    endIso: current.endDate,
-    nextStartIso: next.startDate,
-    nextEndIso: next.endDate,
+    startIso: current.startIso,
+    endIso: current.endIso,
+    nextStartIso: next.startIso,
+    nextEndIso: next.endIso,
   };
 }
 
 function formatPeriodTitle(startIso: string, endIso: string) {
-  const format = new Intl.DateTimeFormat("uk-UA", { day: "2-digit", month: "2-digit" });
-  return `Тиждень ${format.format(new Date(`${startIso}T12:00:00`))}-${format.format(new Date(`${endIso}T12:00:00`))}`;
+  return `Тиждень ${getWorkWeekLabel(startIso, endIso)}`;
+}
+
+function parsePeriodBoundary(value: string) {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return new Date(`${value}T00:00:00`);
+  return new Date(value);
 }
 
 function normalizeSummary(raw: unknown): WeeklySummary {
@@ -314,8 +318,8 @@ function chunks<T>(items: T[], size: number) {
 }
 
 async function buildWeeklySnapshotRows(supabase: Awaited<ReturnType<typeof createClient>>, period: WeeklyPeriod) {
-  const start = new Date(`${period.week_start}T00:00:00`);
-  const end = new Date(`${period.week_end}T00:00:00`);
+  const start = parsePeriodBoundary(period.week_start);
+  const end = parsePeriodBoundary(period.week_end);
   const startIso = start.toISOString();
   const endIso = end.toISOString();
 
@@ -423,7 +427,7 @@ export async function createWeeklySnapshot(periodId: string): Promise<QueryResul
   );
   if (updateError && !mutationError) mutationError = updateError.message;
 
-  const periodEnd = new Date(`${period.week_end}T00:00:00`);
+  const periodEnd = parsePeriodBoundary(period.week_end);
   const nextRange = getCurrentWeekRange(periodEnd);
   await getOrCreatePeriodForRange(nextRange.startIso, nextRange.endIso, "current");
 
@@ -446,11 +450,11 @@ export async function rebuildArchivedWeeklySnapshot(periodId: string): Promise<Q
   );
   if (periodError) return { data: { period: null, summary: emptySummary, snapshotCount: 0, removedStaleRows: 0, message: periodError.message }, error: periodError.message };
   const period = periodData as WeeklyPeriod | null;
-  if (!period) return { data: { period: null, summary: emptySummary, snapshotCount: 0, removedStaleRows: 0, message: "\u041F\u0435\u0440\u0456\u043E\u0434 \u043D\u0435 \u0437\u043D\u0430\u0439\u0434\u0435\u043D\u043E." }, error: "\u041F\u0435\u0440\u0456\u043E\u0434 \u043D\u0435 \u0437\u043D\u0430\u0439\u0434\u0435\u043D\u043E." };
+  if (!period) return { data: { period: null, summary: emptySummary, snapshotCount: 0, removedStaleRows: 0, message: "Період не знайдено." }, error: "Період не знайдено." };
   if (period.status !== "archived" && period.status !== "closed") {
     return {
-      data: { period, summary: periodToSummary(period), snapshotCount: 0, removedStaleRows: 0, message: "\u041F\u0435\u0440\u0435\u0440\u0430\u0445\u0443\u043D\u043E\u043A \u0434\u043E\u0441\u0442\u0443\u043F\u043D\u0438\u0439 \u0442\u0456\u043B\u044C\u043A\u0438 \u0434\u043B\u044F \u0437\u0430\u043A\u0440\u0438\u0442\u0438\u0445 \u0430\u0440\u0445\u0456\u0432\u0456\u0432." },
-      error: "\u041F\u0435\u0440\u0435\u0440\u0430\u0445\u0443\u043D\u043E\u043A \u0434\u043E\u0441\u0442\u0443\u043F\u043D\u0438\u0439 \u0442\u0456\u043B\u044C\u043A\u0438 \u0434\u043B\u044F \u0437\u0430\u043A\u0440\u0438\u0442\u0438\u0445 \u0430\u0440\u0445\u0456\u0432\u0456\u0432.",
+      data: { period, summary: periodToSummary(period), snapshotCount: 0, removedStaleRows: 0, message: "Перерахунок доступний тільки для закритих архівів." },
+      error: "Перерахунок доступний тільки для закритих архівів.",
     };
   }
 
@@ -507,7 +511,7 @@ export async function rebuildArchivedWeeklySnapshot(periodId: string): Promise<Q
       summary,
       snapshotCount: upsertRows.length,
       removedStaleRows: staleIds.length,
-      message: "\u0410\u0440\u0445\u0456\u0432 \u043F\u0435\u0440\u0435\u0440\u0430\u0445\u043E\u0432\u0430\u043D\u043E \u0437\u0430 \u043D\u043E\u0432\u043E\u044E \u043B\u043E\u0433\u0456\u043A\u043E\u044E.",
+      message: "Архів перераховано за новою логікою.",
     },
     error: null,
   };

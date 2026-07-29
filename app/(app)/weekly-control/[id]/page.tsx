@@ -41,8 +41,8 @@ export default async function WeeklyPeriodDetailsPage({ params, searchParams }: 
   return (
     <div className="page-shell mx-auto max-w-6xl space-y-4 pb-28 md:pb-8">
       {query.success === "closed" ? <Alert title="Тиждень закрито">Snapshot створено. Архів доступний для перегляду та експорту.</Alert> : null}
-      {query.success === "recalculated" ? <Alert title={"\u0410\u0440\u0445\u0456\u0432 \u043F\u0435\u0440\u0435\u0440\u0430\u0445\u043E\u0432\u0430\u043D\u043E"}>{"Snapshot \u0442\u0430 \u0441\u0442\u0430\u0442\u0438\u0441\u0442\u0438\u043A\u0443 \u043E\u043D\u043E\u0432\u043B\u0435\u043D\u043E \u0437\u0430 \u043F\u043E\u0442\u043E\u0447\u043D\u043E\u044E \u043B\u043E\u0433\u0456\u043A\u043E\u044E \u0442\u0438\u0436\u043D\u044F."}</Alert> : null}
-      {query.error === "rebuild-failed" ? <Alert title={"\u041D\u0435 \u0432\u0434\u0430\u043B\u043E\u0441\u044F \u043F\u0435\u0440\u0435\u0440\u0430\u0445\u0443\u0432\u0430\u0442\u0438 \u0430\u0440\u0445\u0456\u0432"}>{"\u041F\u0435\u0440\u0435\u0432\u0456\u0440\u0442\u0435 \u0434\u043E\u0441\u0442\u0443\u043F \u0434\u043E Supabase \u0430\u0431\u043E \u043F\u043E\u0432\u0442\u043E\u0440\u0456\u0442\u044C \u043F\u0456\u0437\u043D\u0456\u0448\u0435."}</Alert> : null}
+      {query.success === "recalculated" ? <Alert title="Архів перераховано">Snapshot та статистику оновлено за поточною логікою тижня.</Alert> : null}
+      {query.error === "rebuild-failed" ? <Alert title="Не вдалося перерахувати архів">Перевірте доступ до Supabase або повторіть пізніше.</Alert> : null}
       {result.error ? <Alert title="Дані архіву завантажено частково">{result.error}</Alert> : null}
 
       <section className="rounded-[20px] border border-white/[0.08] bg-white/[0.04] p-4 shadow-sm shadow-black/20 md:p-5">
@@ -62,10 +62,10 @@ export default async function WeeklyPeriodDetailsPage({ params, searchParams }: 
                   type="submit"
                   variant="outline"
                   size="sm"
-                  message={"\u041F\u0435\u0440\u0435\u0440\u0430\u0445\u0443\u0432\u0430\u0442\u0438 snapshot \u0446\u044C\u043E\u0433\u043E \u0430\u0440\u0445\u0456\u0432\u0443 \u0437\u0430 \u043D\u043E\u0432\u043E\u044E \u043B\u043E\u0433\u0456\u043A\u043E\u044E? \u0417\u0430\u044F\u0432\u043A\u0438 \u0442\u0430 \u043F\u043B\u0430\u043D\u0438 \u043D\u0435 \u0437\u043C\u0456\u043D\u044F\u0442\u044C\u0441\u044F."}
-                  pendingText={"\u041F\u0435\u0440\u0435\u0440\u0430\u0445\u043E\u0432\u0443\u0454\u0442\u044C\u0441\u044F..."}
+                  message="Перерахувати snapshot цього архіву за новою логікою? Заявки та плани не зміняться."
+                  pendingText="Перераховується..."
                 >
-                  <RotateCcw className="mr-1 h-3.5 w-3.5" />{"\u041F\u0435\u0440\u0435\u0440\u0430\u0445\u0443\u0432\u0430\u0442\u0438"}
+                  <RotateCcw className="mr-1 h-3.5 w-3.5" />Перерахувати
                 </ConfirmSubmitButton>
               </form>
             ) : null}
@@ -95,11 +95,11 @@ export default async function WeeklyPeriodDetailsPage({ params, searchParams }: 
 
 function ReportsForWeek({ periodId }: { periodId: string }) {
   const reports = [
-    { title: "\u0422\u0438\u0436\u043D\u0435\u0432\u0438\u0439 \u0437\u0432\u0456\u0442", href: `/reports/weekly?periodId=${periodId}` },
-    { title: "\u041F\u043E \u043E\u0431\u0027\u0454\u043A\u0442\u0430\u0445", href: `/reports/objects?periodId=${periodId}` },
-    { title: "\u041F\u043E \u0432\u0438\u043A\u043E\u043D\u0430\u0432\u0446\u044F\u0445", href: `/reports/workers?periodId=${periodId}` },
-    { title: "\u041F\u043E \u043A\u0430\u0442\u0435\u0433\u043E\u0440\u0456\u044F\u0445", href: `/reports/categories?periodId=${periodId}` },
-    { title: "\u0417\u0432\u0456\u0442 \u0434\u043B\u044F \u0434\u0438\u0440\u0435\u043A\u0442\u043E\u0440\u0430", href: `/reports/director?periodId=${periodId}` },
+    { title: "Тижневий звіт", href: `/reports/weekly?periodId=${periodId}` },
+    { title: "По об'єктах", href: `/reports/objects?periodId=${periodId}` },
+    { title: "По виконавцях", href: `/reports/workers?periodId=${periodId}` },
+    { title: "По категоріях", href: `/reports/categories?periodId=${periodId}` },
+    { title: "Звіт для директора", href: `/reports/director?periodId=${periodId}` },
   ];
   const exports = [
     { title: "Weekly Excel", href: `/reports/export?type=weekly&periodId=${periodId}` },
@@ -109,8 +109,8 @@ function ReportsForWeek({ periodId }: { periodId: string }) {
     <section className="rounded-[18px] border border-orange-400/15 bg-orange-500/[0.04] p-3 shadow-sm shadow-black/20">
       <div className="flex flex-col gap-1 md:flex-row md:items-end md:justify-between">
         <div>
-          <h2 className="text-[14px] font-semibold text-stone-100">{"\u0417\u0432\u0456\u0442\u0438 \u0437\u0430 \u0446\u0435\u0439 \u0442\u0438\u0436\u0434\u0435\u043D\u044C"}</h2>
-          <p className="mt-1 text-[11px] text-stone-500">{"\u0426\u0456 \u043F\u043E\u0441\u0438\u043B\u0430\u043D\u043D\u044F \u0432\u0438\u043A\u043E\u0440\u0438\u0441\u0442\u043E\u0432\u0443\u044E\u0442\u044C \u0430\u0440\u0445\u0456\u0432\u043D\u0438\u0439 snapshot weekly_period_tickets, \u0430 \u043D\u0435 live-\u0437\u0430\u044F\u0432\u043A\u0438."}</p>
+          <h2 className="text-[14px] font-semibold text-stone-100">Звіти за цей тиждень</h2>
+          <p className="mt-1 text-[11px] text-stone-500">Ці посилання використовують архівний snapshot weekly_period_tickets, а не live-заявки.</p>
         </div>
       </div>
       <div className="mt-3 grid gap-2 md:grid-cols-3 xl:grid-cols-5">
@@ -197,5 +197,6 @@ function groupByRole(tickets: WeeklyPeriodTicket[]) {
 }
 
 function formatDate(iso: string) {
-  return new Intl.DateTimeFormat("uk-UA", { day: "2-digit", month: "2-digit", year: "numeric" }).format(new Date(`${iso}T12:00:00`));
+  const value = /^\d{4}-\d{2}-\d{2}$/.test(iso) ? new Date(`${iso}T00:00:00`) : new Date(iso);
+  return new Intl.DateTimeFormat("uk-UA", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(value);
 }

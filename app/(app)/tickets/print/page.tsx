@@ -2,7 +2,7 @@ import Link from "next/link";
 import type React from "react";
 import { PrintButton } from "@/components/reports/print-button";
 import { requireAuth } from "@/lib/auth/server";
-import { getWorkWeekRange } from "@/lib/date/work-week";
+import { getPreviousWorkWeekRange, getWorkWeekLabel, getWorkWeekRange } from "@/lib/date/work-week";
 import { formatDateDDMMYYYY, formatDateTimeDDMMYYYYHHMM, getTicketReportRows, getTicketReportSummary } from "@/lib/reports/ticket-report-format";
 import { getTicketsForPrint } from "@/lib/supabase/queries";
 
@@ -17,13 +17,18 @@ function buildBackHref(params: Record<string, string>) {
   return query ? `/tickets?${query}` : "/tickets";
 }
 
-export default async function TicketsPrintPage({ searchParams }: { searchParams: Promise<{ from?: string; to?: string; status?: string; category?: string; priority?: string; q?: string; sort?: string }> }) {
+export default async function TicketsPrintPage({ searchParams }: { searchParams: Promise<{ period?: string; from?: string; to?: string; status?: string; category?: string; priority?: string; q?: string; sort?: string }> }) {
   await requireAuth();
   const params = await searchParams;
   const currentWorkWeek = getWorkWeekRange();
-  const from = isDateParam(params.from) ? params.from! : currentWorkWeek.startDate;
-  const to = isDateParam(params.to) ? params.to! : currentWorkWeek.endDate;
+  const previousWorkWeek = getPreviousWorkWeekRange();
+  const activePeriod: "this_week" | "previous_week" | undefined = params.period === "previous_week" ? "previous_week" : params.period === "this_week" ? "this_week" : undefined;
+  const activeWorkWeek = activePeriod === "previous_week" ? previousWorkWeek : currentWorkWeek;
+  const from = activePeriod ? activeWorkWeek.startDate : isDateParam(params.from) ? params.from! : currentWorkWeek.startDate;
+  const to = activePeriod ? activeWorkWeek.endDate : isDateParam(params.to) ? params.to! : currentWorkWeek.endDate;
+  const periodLabel = activePeriod ? getWorkWeekLabel(activeWorkWeek.start, activeWorkWeek.end) : `${formatDateDDMMYYYY(from)} - ${formatDateDDMMYYYY(to)}`;
   const filters = {
+    period: activePeriod,
     from,
     to,
     status: params.status,
@@ -36,7 +41,7 @@ export default async function TicketsPrintPage({ searchParams }: { searchParams:
   const ticketsResult = await getTicketsForPrint(filters);
   const rows = getTicketReportRows(ticketsResult.data);
   const summary = getTicketReportSummary(rows);
-  const backHref = buildBackHref({ from, to, status: params.status ?? "", category: params.category ?? "", priority: params.priority ?? "", q: params.q ?? "", sort: params.sort ?? "" });
+  const backHref = buildBackHref({ period: activePeriod ?? "", from: activePeriod ? "" : from, to: activePeriod ? "" : to, status: params.status ?? "", category: params.category ?? "", priority: params.priority ?? "", q: params.q ?? "", sort: params.sort ?? "" });
 
   return (
     <main className="min-h-screen bg-neutral-100 px-3 py-4 text-neutral-950 print:bg-white print:p-0">
@@ -60,7 +65,7 @@ export default async function TicketsPrintPage({ searchParams }: { searchParams:
         <div className="border-b-2 border-orange-500 pb-3">
           <p className="text-xs font-bold uppercase tracking-[0.28em] text-orange-600">POLISSYA SERVICE DESK AI</p>
           <h1 className="mt-1 text-2xl font-bold text-neutral-950">Звіт по заявках</h1>
-          <p className="mt-1 text-sm text-neutral-600">Період: {formatDateDDMMYYYY(from)} - {formatDateDDMMYYYY(to)}</p>
+          <p className="mt-1 text-sm text-neutral-600">Період: {periodLabel}</p>
           <p className="text-sm text-neutral-600">Дата формування: {formatDateTimeDDMMYYYYHHMM(new Date())}</p>
           {ticketsResult.error ? <p className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{ticketsResult.error}</p> : null}
         </div>

@@ -123,6 +123,53 @@ export async function updateTicketStatusAction(ticketId: string, formData: FormD
   redirect(`/tickets/${ticketId}?statusSuccess=1`);
 }
 
+export async function updateTicketCategoryAction(ticketId: string, formData: FormData) {
+  const { user, profile } = await requireAuth();
+  const ticketResult = await getTicket(ticketId);
+  const ticket = ticketResult.data;
+  if (!ticket) redirectWith(ticketId, "statusError", ticketResult.error ?? "Заявку не знайдено");
+  if (!canConfirmTicket(profile)) redirectWith(ticketId, "statusError", "Недостатньо прав для зміни категорії.");
+
+  const categoryId = readString(formData, "categoryId");
+  if (!categoryId) redirectWith(ticketId, "statusError", "Оберіть категорію.");
+  if (categoryId === ticket.category_id) redirect(`/tickets/${ticketId}?statusSuccess=category`);
+
+  const supabase = await createClient();
+  const { data: category, error: categoryError } = await supabase
+    .from("categories")
+    .select("id,name,is_active")
+    .eq("id", categoryId)
+    .eq("is_active", true)
+    .maybeSingle();
+  if (categoryError) redirectWith(ticketId, "statusError", categoryError.message);
+  if (!category) redirectWith(ticketId, "statusError", "Активну категорію не знайдено.");
+
+  const { error } = await supabase
+    .from("tickets")
+    .update({ category_id: categoryId, updated_at: new Date().toISOString() })
+    .eq("id", ticketId);
+  if (error) redirectWith(ticketId, "statusError", error.message);
+
+  await supabase.from("ticket_history").insert({
+    ticket_id: ticketId,
+    actor_id: user.id,
+    action: `Категорію заявки змінено: ${ticket.category?.name ?? "Без категорії"} → ${category.name}`,
+    metadata: {
+      from_category_id: ticket.category_id,
+      to_category_id: categoryId,
+      from_category_name: ticket.category?.name ?? null,
+      to_category_name: category.name,
+      source: "ticket_detail",
+    },
+  });
+
+  revalidatePath(`/tickets/${ticketId}`);
+  revalidatePath("/tickets");
+  revalidatePath("/dashboard");
+  revalidatePath("/work-planning");
+  redirect(`/tickets/${ticketId}?statusSuccess=category`);
+}
+
 export async function confirmTicketAction(ticketId: string) {
   const { user, profile } = await requireAuth();
   const ticketResult = await getTicket(ticketId);

@@ -13,12 +13,12 @@ import { PhotoSubmitButton } from "@/components/tickets/photo-submit-button";
 import { canAddTicketPhoto, canConfirmTicket, canEditTicket, canHardDeleteTicket, canUnassignWorkerFromTicket } from "@/lib/auth/permissions";
 import { requireAuth } from "@/lib/auth/server";
 import { photoTypeLabels } from "@/lib/photos";
-import { getRelatedTicketsBySourceGroup, getTicket, getTicketComments, getTicketHistory, getTicketPhotos } from "@/lib/supabase/queries";
+import { getCategories, getRelatedTicketsBySourceGroup, getTicket, getTicketComments, getTicketHistory, getTicketPhotos } from "@/lib/supabase/queries";
 import { getTicketRepeats, type TicketRepeat } from "@/lib/supabase/ticket-repeats";
 import { getActiveWorkers, getWorkerById, getWorkersByCategory } from "@/lib/supabase/worker-queries";
 import { priorityLabels, statusLabels } from "@/lib/labels";
 import { formatDate } from "@/lib/utils";
-import type { PhotoType, Profile, TicketCommentWithAuthor, TicketHistory, TicketPhotoWithUrl, TicketStatus, TicketWithRelations, Worker, WorkerWithCategories } from "@/types/domain";
+import type { Category, PhotoType, Profile, TicketCommentWithAuthor, TicketHistory, TicketPhotoWithUrl, TicketStatus, TicketWithRelations, Worker, WorkerWithCategories } from "@/types/domain";
 import {
   addTicketCommentAction,
   assignWorkerAction,
@@ -29,6 +29,7 @@ import {
   returnWorkerCompletionAction,
   sendTicketToWorkerAction,
   unassignWorkerAction,
+  updateTicketCategoryAction,
   updateTicketStatusAction,
   uploadTicketPhotosAction,
 } from "./actions";
@@ -49,11 +50,18 @@ export default async function TicketDetailsPage({
   const ticket = ticketResult.data;
   if (!ticket && !ticketResult.error) notFound();
   let assignedWorker: Worker | WorkerWithCategories | null = null;
+  let categories: Category[] = [];
 
   if (ticket?.assignee_worker_id) {
     const assignedWorkerLoad = await getWorkerById(ticket.assignee_worker_id);
     if (assignedWorkerLoad.error) console.error("[ticket-detail] load failed", { scope: "assigned_worker", error: assignedWorkerLoad.error });
     assignedWorker = assignedWorkerLoad.data;
+  }
+
+  if (ticket && canConfirmTicket(profile)) {
+    const categoriesResult = await getCategories();
+    if (categoriesResult.error) console.error("[ticket-detail] load failed", { scope: "categories", error: categoriesResult.error });
+    categories = categoriesResult.data;
   }
 
   const error = ticketResult.error;
@@ -89,7 +97,7 @@ export default async function TicketDetailsPage({
               </Suspense>
             </div>
             <div className="order-1 min-w-0 space-y-3 md:space-y-5 lg:order-2">
-              <TicketQuickActions ticket={ticket} profile={profile} />
+              <TicketQuickActions ticket={ticket} profile={profile} categories={categories} />
               <Suspense fallback={<DetailBlockFallback title="Історія" />}>
                 <TicketHistorySection ticketId={ticket.id} />
               </Suspense>
@@ -237,10 +245,11 @@ function TicketHeroCard({ ticket }: { ticket: TicketWithRelations }) {
   );
 }
 
-function TicketQuickActions({ ticket, profile }: { ticket: TicketWithRelations; profile: Profile }) {
+function TicketQuickActions({ ticket, profile, categories }: { ticket: TicketWithRelations; profile: Profile; categories: Category[] }) {
   const canConfirm = canConfirmTicket(profile) && ticket.status === "pending_review";
   const editable = canEditTicket(profile, ticket);
-  if (!canConfirm && !editable) return null;
+  const canChangeCategory = canConfirmTicket(profile) && categories.length > 0;
+  if (!canConfirm && !editable && !canChangeCategory) return null;
   return (
     <SoftCard>
       <CardContent className="space-y-3 p-3.5">
@@ -256,6 +265,18 @@ function TicketQuickActions({ ticket, profile }: { ticket: TicketWithRelations; 
             {(["new", "assigned", "in_progress", "waiting", "waiting_admin_confirmation", "done", "cancelled"] as TicketStatus[]).map((status) => (
               <SubmitButton key={status} type="submit" name="status" value={status} pendingText="Оновлюємо..." variant={ticket.status === status ? "default" : "outline"} className="h-10 rounded-[14px] px-2 text-[10px] md:text-xs">{statusLabels[status]}</SubmitButton>
             ))}
+          </form>
+        ) : null}
+        {canChangeCategory ? (
+          <form action={updateTicketCategoryAction.bind(null, ticket.id)} className="grid gap-2">
+            <div className="text-[11px] font-semibold text-zinc-400">Змінити категорію</div>
+            <div className="grid gap-2 md:grid-cols-[1fr_auto]">
+              <select name="categoryId" defaultValue={ticket.category_id} required className="h-10 w-full rounded-[14px] border border-white/[0.09] bg-black/25 px-3 text-[12px] text-zinc-100 outline-none focus:ring-2 focus:ring-orange-500/40">
+                {categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
+              </select>
+              <SubmitButton type="submit" pendingText="Зберігаємо..." className="h-10 rounded-[14px] px-3 text-[12px]">Зберегти</SubmitButton>
+            </div>
+            <p className="text-[10px] leading-4 text-zinc-500">Категорія зміниться у заявці. План виконавця не змінюється автоматично.</p>
           </form>
         ) : null}
       </CardContent>

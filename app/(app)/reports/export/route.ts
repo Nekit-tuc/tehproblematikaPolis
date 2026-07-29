@@ -16,12 +16,12 @@ const sheetNames: Record<ReportExportType, string> = {
   director: "Director",
 };
 
-const fileNames: Record<ReportExportType, string> = {
-  weekly: "weekly-report.xlsx",
-  objects: "objects-report.xlsx",
-  workers: "workers-report.xlsx",
-  categories: "categories-report.xlsx",
-  director: "director-summary.xlsx",
+const fileNamePrefixes: Record<ReportExportType, string> = {
+  weekly: "reports-weekly",
+  objects: "reports-objects",
+  workers: "reports-workers",
+  categories: "reports-categories",
+  director: "reports-director",
 };
 
 const statusUa: Partial<Record<TicketStatus, string>> = {
@@ -62,7 +62,11 @@ function completionText(completed: number, total: number) {
 }
 
 function periodSubtitle(data: ReportsDashboardData) {
-  return `Період: ${data.periodRange.label} (${formatDate(data.periodRange.from)} - ${formatDate(data.periodRange.to)})`;
+  return `Період: ${data.periodRange.label}`;
+}
+
+function exportFileName(type: ReportExportType, data: ReportsDashboardData) {
+  return `${fileNamePrefixes[type]}-${data.periodRange.from}-${data.periodRange.to}.xlsx`;
 }
 
 function prepareWorksheet(data: ReportsDashboardData, type: ReportExportType, columns: ReportColumn[]) {
@@ -81,15 +85,16 @@ function buildWeeklyWorkbook(data: ReportsDashboardData) {
     { header: "Адреса", width: 32 },
     { header: "Категорія", width: 24 },
     { header: "Виконавець", width: 22 },
-    { header: "Статус", width: 22 },
+    { header: "Статус", width: 24 },
     { header: "Пріоритет", width: 16 },
     { header: "Опис", width: 52 },
   ];
   const { workbook, worksheet } = prepareWorksheet(data, "weekly", columns);
   addKeyValueSection(worksheet, "KPI", [
-    ["Усього", data.totalTickets, "Заявки за період"],
+    ["Усього", data.totalTickets, "Заявки, що належать до періоду"],
     ["Виконано", data.completedTickets, completionText(data.completedTickets, data.totalTickets)],
-    ["Не виконано", data.unresolvedTickets, "Активні або незавершені заявки"],
+    ["Не виконано", data.unresolvedTickets, "Активні або незавершені заявки періоду"],
+    ["На підтвердженні", data.waitingConfirmationTickets, "Очікують дії адміністратора"],
     ["Проблемні", data.problematicTickets, "Ризикові або прострочені заявки"],
   ]);
   addTable(
@@ -179,7 +184,7 @@ function buildDirectorWorkbook(data: ReportsDashboardData) {
   const { workbook, worksheet } = prepareWorksheet(data, "director", columns);
   addKeyValueSection(worksheet, "Підсумок", [
     ["Період", data.periodRange.label, "Обраний період звіту"],
-    ["Усього заявок", data.totalTickets, "Створено за період"],
+    ["Усього заявок", data.totalTickets, "Заявки, що належать до періоду"],
     ["Виконано", data.completedTickets, completionText(data.completedTickets, data.totalTickets)],
     ["Не виконано", data.unresolvedTickets, "Активні заявки, що потребують контролю"],
     ["Проблемні", data.problematicTickets, "Ризикові, пріоритетні або прострочені заявки"],
@@ -219,7 +224,7 @@ export async function GET(request: NextRequest) {
   return new NextResponse(buffer, {
     headers: {
       "Content-Type": XLSX_CONTENT_TYPE,
-      "Content-Disposition": `attachment; filename="${fileNames[type]}"`,
+      "Content-Disposition": `attachment; filename="${exportFileName(type, result.data)}"`,
       "Cache-Control": "no-store",
     },
   });

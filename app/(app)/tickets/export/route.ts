@@ -1,7 +1,7 @@
 import ExcelJS from "exceljs";
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth/server";
-import { getWorkWeekRange } from "@/lib/date/work-week";
+import { getPreviousWorkWeekRange, getWorkWeekLabel, getWorkWeekRange } from "@/lib/date/work-week";
 import { formatDateDDMMYYYY, formatDateTimeDDMMYYYYHHMM, getTicketReportRows, getTicketReportSummary, type TicketReportRow } from "@/lib/reports/ticket-report-format";
 import { getTicketsForPrint } from "@/lib/supabase/queries";
 
@@ -21,12 +21,18 @@ function isDateParam(value?: string | null) {
 function periodFromRequest(request: Request) {
   const url = new URL(request.url);
   const currentWorkWeek = getWorkWeekRange();
+  const previousWorkWeek = getPreviousWorkWeekRange();
+  const period = url.searchParams.get("period");
+  const activePeriod: "this_week" | "previous_week" | undefined = period === "this_week" || period === "previous_week" ? period : undefined;
+  const activeWorkWeek = activePeriod === "previous_week" ? previousWorkWeek : currentWorkWeek;
   const explicitFrom = url.searchParams.get("from");
   const explicitTo = url.searchParams.get("to");
-  const hasExplicitPeriod = isDateParam(explicitFrom) && isDateParam(explicitTo);
+  const hasExplicitPeriod = !activePeriod && isDateParam(explicitFrom) && isDateParam(explicitTo);
   return {
-    from: isDateParam(explicitFrom) ? explicitFrom! : currentWorkWeek.startDate,
-    to: isDateParam(explicitTo) ? explicitTo! : currentWorkWeek.endDate,
+    period: activePeriod,
+    from: activePeriod ? activeWorkWeek.startDate : isDateParam(explicitFrom) ? explicitFrom! : currentWorkWeek.startDate,
+    to: activePeriod ? activeWorkWeek.endDate : isDateParam(explicitTo) ? explicitTo! : currentWorkWeek.endDate,
+    label: activePeriod ? getWorkWeekLabel(activeWorkWeek.start, activeWorkWeek.end) : "",
     hasExplicitPeriod,
     status: url.searchParams.get("status") ?? undefined,
     category: url.searchParams.get("category") ?? undefined,
@@ -84,7 +90,7 @@ function applyPriorityStyle(cell: ExcelJS.Cell, row: TicketReportRow) {
   }
 }
 
-async function buildWorkbook(rows: TicketReportRow[], from: string, to: string) {
+async function buildWorkbook(rows: TicketReportRow[], from: string, to: string, periodLabel?: string) {
   const summary = getTicketReportSummary(rows);
   const workbook = new ExcelJS.Workbook();
   workbook.creator = "Service Desk AI";
@@ -120,18 +126,18 @@ async function buildWorkbook(rows: TicketReportRow[], from: string, to: string) 
 
   worksheet.getCell("A1").value = "POLISSYA SERVICE DESK AI";
   worksheet.getCell("A1").font = { bold: true, size: 12, color: { argb: "FFF97316" } };
-  worksheet.getCell("A2").value = "\u0417\u0432\u0456\u0442 \u043f\u043e \u0437\u0430\u044f\u0432\u043a\u0430\u0445";
+  worksheet.getCell("A2").value = "Звіт по заявках";
   worksheet.getCell("A2").font = { bold: true, size: 20, color: { argb: "FF111827" } };
-  worksheet.getCell("A3").value = `\u041f\u0435\u0440\u0456\u043e\u0434: ${formatDateDDMMYYYY(from)} - ${formatDateDDMMYYYY(to)}`;
-  worksheet.getCell("A4").value = `\u0421\u0444\u043e\u0440\u043c\u043e\u0432\u0430\u043d\u043e: ${formatDateTimeDDMMYYYYHHMM(new Date())}`;
+  worksheet.getCell("A3").value = `Період: ${periodLabel || `${formatDateDDMMYYYY(from)} - ${formatDateDDMMYYYY(to)}`}`;
+  worksheet.getCell("A4").value = `Сформовано: ${formatDateTimeDDMMYYYYHHMM(new Date())}`;
   for (const rowNumber of [3, 4]) worksheet.getRow(rowNumber).font = { size: 10, color: { argb: "FF6B7280" } };
 
   const kpi = [
-    ["\u0423\u0441\u044c\u043e\u0433\u043e \u0437\u0430\u044f\u0432\u043e\u043a", summary.total],
-    ["\u0412\u0438\u043a\u043e\u043d\u0430\u043d\u043e", summary.completed],
-    ["\u041d\u0435 \u0432\u0438\u043a\u043e\u043d\u0430\u043d\u043e", summary.unresolved],
-    ["\u041d\u0430 \u043f\u0456\u0434\u0442\u0432\u0435\u0440\u0434\u0436\u0435\u043d\u043d\u0456", summary.waitingConfirmation],
-    ["\u0412\u0438\u0441\u043e\u043a\u0438\u0439 \u043f\u0440\u0456\u043e\u0440\u0438\u0442\u0435\u0442", summary.highPriority],
+    ["Усього заявок", summary.total],
+    ["Виконано", summary.completed],
+    ["Не виконано", summary.unresolved],
+    ["На підтвердженні", summary.waitingConfirmation],
+    ["Високий пріоритет", summary.highPriority],
   ];
   const kpiCells = ["A6", "C6", "E6", "G6", "A7"];
   kpi.forEach(([label, value], index) => {
@@ -143,7 +149,7 @@ async function buildWorkbook(rows: TicketReportRow[], from: string, to: string) 
   });
 
   const headerRowNumber = 8;
-  const header = ["\u2116", "\u041d\u043e\u043c\u0435\u0440 \u0437\u0430\u044f\u0432\u043a\u0438", "\u0414\u0430\u0442\u0430", "\u0410\u0434\u0440\u0435\u0441\u0430", "\u041e\u043f\u0438\u0441 \u0437\u0430\u044f\u0432\u043a\u0438", "\u0412\u0438\u043a\u043e\u043d\u0430\u0432\u0435\u0446\u044c", "\u0421\u0442\u0430\u0442\u0443\u0441", "\u041f\u0440\u0456\u043e\u0440\u0438\u0442\u0435\u0442"];
+  const header = ["№", "Номер заявки", "Дата", "Адреса", "Опис заявки", "Виконавець", "Статус", "Пріоритет"];
   worksheet.getRow(headerRowNumber).values = header;
   worksheet.getRow(headerRowNumber).height = 26;
   worksheet.getRow(headerRowNumber).eachCell((cell) => {
@@ -155,7 +161,7 @@ async function buildWorkbook(rows: TicketReportRow[], from: string, to: string) 
 
   if (rows.length === 0) {
     worksheet.mergeCells("A9:H9");
-    worksheet.getCell("A9").value = "\u0417\u0430 \u0432\u0438\u0431\u0440\u0430\u043d\u0438\u0439 \u043f\u0435\u0440\u0456\u043e\u0434 \u0437\u0430\u044f\u0432\u043e\u043a \u043d\u0435 \u0437\u043d\u0430\u0439\u0434\u0435\u043d\u043e.";
+    worksheet.getCell("A9").value = "За вибраний період заявок не знайдено.";
     worksheet.getCell("A9").font = { size: 11, color: { argb: "FF6B7280" } };
     worksheet.getCell("A9").alignment = { vertical: "middle", horizontal: "left" };
   }
@@ -183,6 +189,7 @@ export async function GET(request: Request) {
   await requireAuth();
   const period = periodFromRequest(request);
   const ticketsResult = await getTicketsForPrint({
+    period: period.period,
     from: period.from,
     to: period.to,
     status: period.status,
@@ -196,7 +203,7 @@ export async function GET(request: Request) {
   if (ticketsResult.error) return NextResponse.json({ error: ticketsResult.error }, { status: 500 });
 
   const rows = getTicketReportRows(ticketsResult.data);
-  const workbook = await buildWorkbook(rows, period.from, period.to);
+  const workbook = await buildWorkbook(rows, period.from, period.to, period.label);
   const buffer = await workbook.xlsx.writeBuffer();
 
   return new NextResponse(Buffer.from(buffer as ArrayBuffer), {

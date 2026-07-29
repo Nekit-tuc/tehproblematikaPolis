@@ -24,7 +24,7 @@ export function MobileBottomNav({ profile, aiTicketsCount = 0 }: { profile: Prof
             <Plus className="h-6 w-6 stroke-[2.4]" />
           </span>
         </Link>
-        <MobileNavItem href="/work-planning" icon={CalendarDays} label={"\u041F\u043B\u0430\u043D\u0438"} />
+        <MobileNavItem href="/work-planning" icon={CalendarDays} label="Плани" />
         <MobileNavItem href={canSeeObjects ? "/objects" : "/dashboard"} icon={Building2} label="Об'єкти" />
       </div>
     </nav>

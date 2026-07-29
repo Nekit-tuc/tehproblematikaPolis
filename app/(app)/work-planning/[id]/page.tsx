@@ -1,6 +1,6 @@
 ﻿import type { ComponentType } from "react";
 import Link from "next/link";
-import { ArrowLeft, Building2, CalendarDays, CheckCircle, ChevronRight, ClipboardList, Clock, Download, ExternalLink, Info, ListChecks, RefreshCw, RotateCcw, Send, Users } from "lucide-react";
+import { ArrowLeft, Building2, CalendarDays, CheckCircle, ChevronRight, ClipboardList, Clock, Download, Info, ListChecks, RefreshCw, RotateCcw, Send, Users } from "lucide-react";
 import { ConfirmSubmitButton } from "@/components/tickets/confirm-submit-button";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -10,11 +10,17 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { Textarea } from "@/components/ui/textarea";
+import { canConfirmTicket, canEditTicket } from "@/lib/auth/permissions";
 import { requireRole } from "@/lib/auth/server";
+import { getWorkWeekLabel } from "@/lib/date/work-week";
 import { priorityLabels, statusLabels } from "@/lib/labels";
+import { getCategories } from "@/lib/supabase/queries";
 import { getDraftWorkPlansForMove, getWorkPlanById, getWorkPlanDispatches, getWorkPlanItems, type WorkPlan, type WorkPlanDispatch, type WorkPlanItem, type WorkPlanStatus } from "@/lib/supabase/work-plans";
+import { getActiveWorkers } from "@/lib/supabase/worker-queries";
 import { cn, formatDate } from "@/lib/utils";
+import type { Category, Profile, TicketWithRelations, WorkerWithCategories } from "@/types/domain";
 import { cancelWorkPlanAction, moveWorkPlanItemAction, removeWorkPlanItemAction, resendWorkPlanToAllAction, retryFailedWorkPlanDispatchAction, sendWorkPlanAction, updateWorkPlanAction } from "./actions";
+import { QuickTicketModalButton, type QuickTicketCategory, type QuickTicketData, type QuickTicketWorker } from "./quick-ticket-modal";
 
 type PageProps = {
   params: Promise<{ id: string }>;
@@ -162,20 +168,24 @@ function metricToneClass(tone: "gray" | "green" | "orange" | "red" | "blue") {
 }
 
 export default async function WorkPlanDetailPage({ params, searchParams }: PageProps) {
-  await requireRole(["admin", "management", "tech_manager"]);
+  const { profile } = await requireRole(["admin", "management", "tech_manager"]);
   const [{ id }, query] = await Promise.all([params, searchParams]);
-  const [planResult, itemsResult, dispatchesResult, draftPlansResult] = await Promise.all([
+  const [planResult, itemsResult, dispatchesResult, draftPlansResult, workersResult, categoriesResult] = await Promise.all([
     getWorkPlanById(id),
     getWorkPlanItems(id),
     getWorkPlanDispatches(id),
     getDraftWorkPlansForMove(id),
+    getActiveWorkers(),
+    getCategories(),
   ]);
 
   const plan = planResult.data;
   const items = itemsResult.data;
   const dispatches = dispatchesResult.data;
   const draftPlans = draftPlansResult.data;
-  const error = safeDecode(query.error) ?? planResult.error ?? itemsResult.error ?? dispatchesResult.error ?? draftPlansResult.error;
+  const quickWorkers = toQuickWorkers(workersResult.data);
+  const quickCategories = toQuickCategories(categoriesResult.data);
+  const error = safeDecode(query.error) ?? planResult.error ?? itemsResult.error ?? dispatchesResult.error ?? draftPlansResult.error ?? workersResult.error ?? categoriesResult.error;
   const success = successMessage(query.success);
 
   if (!plan) {
@@ -211,7 +221,7 @@ export default async function WorkPlanDetailPage({ params, searchParams }: PageP
                   <Clock className="h-2.5 w-2.5" />{planStatusLabels[plan.status]}
                 </span>
               </div>
-              <p className="mt-1 break-words text-[12px] leading-4 text-zinc-400 md:text-sm">{plan.period_start} - {plan.period_end}</p>
+              <p className="mt-1 break-words text-[12px] leading-4 text-zinc-400 md:text-sm">{getWorkWeekLabel(plan.period_start, plan.period_end)}</p>
             </div>
           </div>
         </div>
@@ -306,7 +316,7 @@ export default async function WorkPlanDetailPage({ params, searchParams }: PageP
                 <Badge className="h-6 shrink-0 rounded-[9px] px-2 text-[10px]" tone={group.key === "unassigned" ? "gray" : "orange"}>{group.items.length} заявок</Badge>
               </div>
               <div className="grid gap-2">
-                {group.items.map((item) => <PlanItemCard key={item.id} item={item} plan={plan} draftPlans={draftPlans} />)}
+                {group.items.map((item) => <PlanItemCard key={item.id} item={item} plan={plan} draftPlans={draftPlans} workers={quickWorkers} categories={quickCategories} profile={profile} />)}
               </div>
             </div>
           ))}
@@ -333,10 +343,10 @@ function DraftEditor({ plan }: { plan: WorkPlan }) {
             <Input name="title" defaultValue={plan.title} required />
           </Field>
           <Field label="Період з">
-            <Input name="period_start" type="date" defaultValue={plan.period_start} required />
+            <Input name="period_start" type="date" defaultValue={plan.period_start.slice(0, 10)} required />
           </Field>
           <Field label="Період по">
-            <Input name="period_end" type="date" defaultValue={plan.period_end} required />
+            <Input name="period_end" type="date" defaultValue={plan.period_end.slice(0, 10)} required />
           </Field>
           <div className="flex items-end">
             <SubmitButton className="min-h-8 w-full rounded-lg text-[10px] md:min-h-0 md:rounded-md md:text-sm" pendingText="Зберігається...">Зберегти</SubmitButton>
@@ -362,9 +372,46 @@ function formatRepeatDate(value?: string | null) {
   return new Intl.DateTimeFormat("uk-UA", { day: "2-digit", month: "2-digit" }).format(new Date(value));
 }
 
-function PlanItemCard({ item, plan, draftPlans }: { item: WorkPlanItem; plan: WorkPlan; draftPlans: WorkPlan[] }) {
+function toQuickWorkers(workers: WorkerWithCategories[]): QuickTicketWorker[] {
+  return workers.map((worker) => ({
+    id: worker.id,
+    name: worker.name,
+    categories: (worker.categories ?? []).map((category) => category.name).filter(Boolean),
+  }));
+}
+
+function toQuickCategories(categories: Category[]): QuickTicketCategory[] {
+  return categories.map((category) => ({
+    id: category.id,
+    name: category.name,
+    description: category.description ?? null,
+  }));
+}
+
+function toQuickTicketData(ticket: TicketWithRelations, workerLabel: string): QuickTicketData {
+  return {
+    id: ticket.id,
+    number: ticket.number,
+    title: ticket.title ?? "",
+    description: ticket.description ?? "",
+    status: ticket.status,
+    priority: ticket.priority,
+    createdAt: ticket.created_at,
+    objectName: ticket.object?.name ?? "Об'єкт не вказано",
+    objectAddress: ticket.object?.address ?? "",
+    categoryId: ticket.category_id,
+    categoryName: ticket.category?.name ?? "Без категорії",
+    assigneeWorkerId: ticket.assignee_worker_id ?? null,
+    assigneeWorkerName: ticket.worker?.name ?? workerLabel ?? null,
+    repeatCount: ticket.repeat_count ?? 0,
+    lastRepeatAt: ticket.last_repeat_at ?? null,
+  };
+}
+
+function PlanItemCard({ item, plan, draftPlans, workers, categories, profile }: { item: WorkPlanItem; plan: WorkPlan; draftPlans: WorkPlan[]; workers: QuickTicketWorker[]; categories: QuickTicketCategory[]; profile: Profile }) {
   const ticket = item.ticket;
   const workerLabel = planItemWorkerLabel(item, plan);
+  const quickTicket = ticket ? toQuickTicketData(ticket, workerLabel) : null;
   const completionNote = ticket?.status === "waiting_admin_confirmation"
     ? `Позначено виконавцем: ${ticket.worker_completed_at ? formatDate(ticket.worker_completed_at) : "-"}`
     : ticket?.status === "done"
@@ -391,13 +438,22 @@ function PlanItemCard({ item, plan, draftPlans }: { item: WorkPlanItem; plan: Wo
       <Badge className="mt-2 hidden w-fit text-[9px] md:mt-0 md:inline-flex md:text-xs" tone={priorityTone(ticket?.priority)}>{ticket?.priority ? priorityLabels[ticket.priority] : "-"}</Badge>
       <Badge className="mt-2 w-fit rounded-[8px] px-2 text-[9px] md:mt-0 md:text-xs" tone={ticket?.status === "waiting_admin_confirmation" ? "orange" : ticket?.status === "done" ? "green" : "gray"}>{ticket?.status ? statusLabels[ticket.status] : "-"}</Badge>
       {ticket && (ticket.repeat_count ?? 0) > 0 ? (
-        <Badge className="mt-2 w-fit rounded-[8px] px-2 text-[9px] md:mt-0 md:text-xs" tone="orange">{"\u041F\u043E\u0432\u0442\u043E\u0440\u043D\u0430 \u00B7 "}{ticket.repeat_count}{formatRepeatDate(ticket.last_repeat_at) ? " / " + formatRepeatDate(ticket.last_repeat_at) : ""}</Badge>
+        <Badge className="mt-2 w-fit rounded-[8px] px-2 text-[9px] md:mt-0 md:text-xs" tone="orange">Повторна · {ticket.repeat_count}{formatRepeatDate(ticket.last_repeat_at) ? " / " + formatRepeatDate(ticket.last_repeat_at) : ""}</Badge>
       ) : null}
       <div className="mt-2 grid gap-2 md:mt-0 md:flex md:justify-end">
         {ticket ? (
-          <Button asChild variant="outline" size="sm" className="h-8 w-full rounded-[10px] border-white/[0.08] bg-white/[0.035] text-[10px] md:h-auto md:w-auto md:rounded-md md:text-sm">
-            <Link href={`/tickets/${ticket.id}`}><ExternalLink className="h-3 w-3" />Відкрити заявку</Link>
-          </Button>
+          <QuickTicketModalButton
+            workPlanId={plan.id}
+            ticket={quickTicket!}
+            workers={workers}
+            categories={categories}
+            permissions={{
+              canChangeStatus: canEditTicket(profile, ticket),
+              canAssignWorker: canConfirmTicket(profile),
+              canChangeCategory: canConfirmTicket(profile),
+              canComment: canEditTicket(profile, ticket),
+            }}
+          />
         ) : null}
         {plan.status === "draft" && ticket ? (
           <form action={removeWorkPlanItemAction.bind(null, plan.id)}>

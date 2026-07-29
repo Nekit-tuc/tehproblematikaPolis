@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireRole } from "@/lib/auth/server";
+import { getWorkWeekRange } from "@/lib/date/work-week";
 import { addTicketsToWorkPlan, createWorkPlan, deleteWorkPlan, ensureWeeklyDraftPlansForAutoRouting, getActivePlannedTickets } from "@/lib/supabase/work-plans";
 
 function text(formData: FormData, key: string) {
@@ -36,6 +37,14 @@ function plannedTicketsError(numbers: string[]) {
   return `Деякі заявки вже заплановані в іншому активному плані. Оновіть список і виберіть інші заявки.${suffix}`;
 }
 
+function normalizeWorkPlanPeriod(periodStart: string, periodEnd: string) {
+  const range = getWorkWeekRange(new Date(`${periodStart}T15:00:00`));
+  if (periodEnd && periodEnd !== range.endDate) {
+    console.warn("[work-planning] period_end normalized to work week boundary", { periodStart, periodEnd, normalizedEnd: range.endDate });
+  }
+  return { periodStart: range.startIso, periodEnd: range.endIso };
+}
+
 export async function createWorkPlanAction(formData: FormData) {
   const { user } = await requireRole(["admin", "management", "tech_manager"]);
   const title = text(formData, "title");
@@ -62,10 +71,11 @@ export async function createWorkPlanAction(formData: FormData) {
     fail(plannedTicketsError(plannedTicketsResult.data.map((ticket) => ticket.ticketNumber).filter(Boolean) as string[]));
   }
 
+  const normalizedPeriod = normalizeWorkPlanPeriod(periodStart, periodEnd);
   const planResult = await createWorkPlan({
     title,
-    periodStart,
-    periodEnd,
+    periodStart: normalizedPeriod.periodStart,
+    periodEnd: normalizedPeriod.periodEnd,
     notes,
     createdBy: user.id,
   });

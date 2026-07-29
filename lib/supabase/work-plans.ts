@@ -1,5 +1,5 @@
 import { measureAsync } from "@/lib/performance";
-import { getNextWorkWeekRange } from "@/lib/date/work-week";
+import { addDays, getNextWorkWeekRange, getWorkWeekRange, type WorkWeekRange } from "@/lib/date/work-week";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { hasSupabaseEnv, missingSupabaseMessage } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
@@ -516,16 +516,6 @@ export async function createWorkPlan(input: CreateWorkPlanInput): Promise<QueryR
   return { data: data as WorkPlan | null, error: error?.message ?? null };
 }
 
-function dateOnly(value: Date) {
-  return value.toISOString().slice(0, 10);
-}
-
-function shiftDate(value: string, days: number) {
-  const date = new Date(`${value}T12:00:00`);
-  date.setDate(date.getDate() + days);
-  return dateOnly(date);
-}
-
 function ticketIsUnfinished(status?: string | null) {
   return Boolean(status && !closedTicketStatuses.includes(status as TicketStatus));
 }
@@ -566,15 +556,15 @@ function carryOverRowCategoryName(row: CarryOverItemRow) {
 
 async function carryOverUnfinishedTicketsToWeeklyDraftPlans(input: {
   supabase: ReturnType<typeof createAdminClient>;
-  range: { startDate: string; endDate: string };
+  range: WorkWeekRange;
   plans: WorkPlan[];
 }): Promise<QueryResult<{ carriedOver: number }>> {
   const { supabase, range, plans } = input;
   const targetDraftPlans = plans.filter((plan) => plan.status === "draft");
   if (targetDraftPlans.length === 0) return { data: { carriedOver: 0 }, error: null };
 
-  const previousStart = shiftDate(range.startDate, -7);
-  const previousEnd = range.startDate;
+  const previousStart = addDays(range.start, -7).toISOString();
+  const previousEnd = range.startIso;
   const { data: previousPlansData, error: previousPlansError } = await measureAsync("work-planning:carry_previous_plans", () =>
     supabase
       .from("work_plans")
@@ -701,8 +691,8 @@ export async function ensureWeeklyDraftPlansForAutoRouting(date = new Date()): P
     supabase
       .from("work_plans")
       .select("id, title, period_start, period_end, status, created_by, created_at, updated_at, sent_at, notes")
-      .eq("period_start", range.startDate)
-      .eq("period_end", range.endDate)
+      .eq("period_start", range.startIso)
+      .eq("period_end", range.endIso)
       .in("title", titles)
       .in("status", activeWorkPlanStatuses),
   );
@@ -719,8 +709,8 @@ export async function ensureWeeklyDraftPlansForAutoRouting(date = new Date()): P
         .from("work_plans")
         .insert(missing.map((config) => ({
           title: config.title,
-          period_start: range.startDate,
-          period_end: range.endDate,
+          period_start: range.startIso,
+          period_end: range.endIso,
           status: "draft",
           notes: autoPlanNote(config),
         })))
@@ -980,6 +970,7 @@ function duplicateRepeatTicketObject(ticket: NonNullable<ReturnType<typeof dupli
 export async function getWorkPlanningDuplicateRepeatsForWeek(week: { startDate: string; endDate: string }): Promise<QueryResult<WorkPlanningDuplicateRepeat[]>> {
   if (!hasSupabaseEnv()) return emptyWithError([]);
   const supabase = await createClient();
+  const range = getWorkWeekRange(new Date(`${week.startDate}T15:00:00`));
 
   const { data: planItemsData, error: planItemsError } = await measureAsync("work-planning:duplicate_week_items", () =>
     supabase
@@ -989,8 +980,8 @@ export async function getWorkPlanningDuplicateRepeatsForWeek(week: { startDate: 
         work_plan:work_plans!inner(id,title,period_start,period_end,status),
         ticket:tickets(id,number,title,object:objects(name,address))
       `)
-      .gte("work_plan.period_start", week.startDate)
-      .lt("work_plan.period_start", week.endDate)
+      .gte("work_plan.period_start", range.startIso)
+      .lt("work_plan.period_start", range.endIso)
       .in("work_plan.status", activeWorkPlanStatuses)
       .limit(5000),
   );
@@ -1095,8 +1086,9 @@ export async function getWorkPlanningWeeksOverview(weeks: Array<Pick<WorkPlannin
   if (weeks.length === 0) return { data: [], error: null };
 
   const supabase = await createClient();
-  const firstStart = weeks[0].startDate;
-  const lastEnd = weeks[weeks.length - 1].endDate;
+  const weekRanges = weeks.map((week) => ({ ...week, range: getWorkWeekRange(new Date(`${week.startDate}T15:00:00`)) }));
+  const firstStart = weekRanges[0].range.startIso;
+  const lastEnd = weekRanges[weekRanges.length - 1].range.endIso;
   const ticketIdsByWeek = new Map<string, Set<string>>();
 
   const { data: plansData, error: plansError } = await measureAsync("work-planning:weeks_overview:plans", () =>
@@ -1115,12 +1107,15 @@ export async function getWorkPlanningWeeksOverview(weeks: Array<Pick<WorkPlannin
   const weekStartByPlanId = new Map<string, string>();
 
   for (const plan of plans) {
-    const week = overview.find((item) => plan.period_start >= item.startDate && plan.period_start < item.endDate);
-    if (!week) continue;
-    weekStartByPlanId.set(plan.id, week.startDate);
-    week.plansCount += 1;
-    if (plan.status === "draft") week.draftCount += 1;
-    if (plan.status === "sent" || plan.status === "partially_done") week.sentCount += 1;
+    const planStart = new Date(plan.period_start);
+    const weekRange = weekRanges.find((item) => planStart >= item.range.start && planStart < item.range.end);
+    if (!weekRange) continue;
+    const overviewWeek = overview.find((item) => item.startDate === weekRange.startDate);
+    if (!overviewWeek) continue;
+    weekStartByPlanId.set(plan.id, overviewWeek.startDate);
+    overviewWeek.plansCount += 1;
+    if (plan.status === "draft") overviewWeek.draftCount += 1;
+    if (plan.status === "sent" || plan.status === "partially_done") overviewWeek.sentCount += 1;
   }
 
   if (planIds.length === 0) return { data: overview, error: null };

@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireRole } from "@/lib/auth/server";
+import { getWorkWeekRange } from "@/lib/date/work-week";
 import { cancelWorkPlan, moveWorkPlanItemToDraftPlan, removeWorkPlanItem, sendWorkPlanToWorkers, updateWorkPlan, type SendWorkPlanMode } from "@/lib/supabase/work-plans";
 
 function text(formData: FormData, key: string) {
@@ -22,6 +23,14 @@ function publicError(message?: string | null) {
   if (!message) return "Дію не виконано.";
   if (message.length > 180) return "Дію не виконано. Деталі записано в логах сервера.";
   return message;
+}
+
+function normalizeWorkPlanPeriod(periodStart: string, periodEnd: string) {
+  const range = getWorkWeekRange(new Date(`${periodStart}T15:00:00`));
+  if (periodEnd && periodEnd !== range.endDate) {
+    console.warn("[work-planning] period_end normalized to work week boundary", { periodStart, periodEnd, normalizedEnd: range.endDate });
+  }
+  return { periodStart: range.startIso, periodEnd: range.endIso };
 }
 
 async function sendPlanWithMode(workPlanId: string, mode: SendWorkPlanMode, successPrefix: string) {
@@ -48,7 +57,8 @@ export async function updateWorkPlanAction(workPlanId: string, formData: FormDat
   if (!periodStart || !periodEnd) fail(workPlanId, "Вкажіть період плану.");
   if (new Date(periodStart) > new Date(periodEnd)) fail(workPlanId, "Дата початку не може бути пізніше дати завершення.");
 
-  const result = await updateWorkPlan(workPlanId, { title, periodStart, periodEnd, notes });
+  const normalizedPeriod = normalizeWorkPlanPeriod(periodStart, periodEnd);
+  const result = await updateWorkPlan(workPlanId, { title, periodStart: normalizedPeriod.periodStart, periodEnd: normalizedPeriod.periodEnd, notes });
   if (result.error || !result.data) {
     console.error("[work-planning] update failed", { workPlanId, error: result.error });
     fail(workPlanId, publicError(result.error ?? "План не знайдено або він уже не є чернеткою."));
