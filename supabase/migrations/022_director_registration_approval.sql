@@ -43,6 +43,16 @@ begin
   end if;
 end $$;
 
+
+alter table public.objects
+  add column if not exists source text null,
+  add column if not exists created_by_profile_id uuid null references public.profiles(id) on delete set null,
+  add column if not exists needs_admin_review boolean not null default false,
+  add column if not exists admin_note text null;
+
+create index if not exists objects_source_idx on public.objects(source);
+create index if not exists objects_created_by_profile_id_idx on public.objects(created_by_profile_id);
+create index if not exists objects_needs_admin_review_idx on public.objects(needs_admin_review);
 create index if not exists director_objects_profile_approval_idx on public.director_objects(profile_id, approval_status);
 create index if not exists director_objects_object_approval_idx on public.director_objects(object_id, approval_status);
 create index if not exists director_objects_approval_status_idx on public.director_objects(approval_status);

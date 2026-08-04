@@ -71,7 +71,7 @@ function toDirectorObject(row: DirectorObjectRow): DirectorObject {
   };
 }
 
-const directorObjectSelect = "id, profile_id, object_id, phone, is_primary, approval_status, approved_at, rejected_at, note, object:objects(id, name, type, object_number, city, district, address, is_active, created_at)";
+const directorObjectSelect = "id, profile_id, object_id, phone, is_primary, approval_status, approved_at, rejected_at, note, object:objects(id, name, type, object_number, city, district, address, source, created_by_profile_id, needs_admin_review, admin_note, is_active, created_at)";
 
 export async function getDirectorObjects(profileId: string, approvalStatuses: ApprovalStatus[] | null = ["approved"]): Promise<QueryResult<DirectorObject[]>> {
   if (!hasSupabaseEnv()) return emptyWithError([]);
@@ -92,7 +92,7 @@ export async function getDirectorCategories(): Promise<QueryResult<Category[]>> 
 export async function getDirectorRegistrationObjects(): Promise<QueryResult<CompanyObject[]>> {
   if (!hasSupabaseEnv()) return emptyWithError([]);
   const supabase = createAdminClient();
-  const { data, error } = await measureAsync("director-register:objects", () => supabase.from("objects").select("id, name, type, object_number, city, district, address, is_active, created_at").eq("is_active", true).order("object_number", { ascending: true }).limit(300));
+  const { data, error } = await measureAsync("director-register:objects", () => supabase.from("objects").select("id, name, type, object_number, city, district, address, source, created_by_profile_id, needs_admin_review, admin_note, is_active, created_at").eq("is_active", true).order("object_number", { ascending: true }).limit(300));
   return { data: (data ?? []) as CompanyObject[], error: error?.message ?? null };
 }
 
@@ -121,7 +121,7 @@ function getTicketDisplayStatus(ticket: TicketWithRelations, isInPlan: boolean) 
   return "Підтверджена адміністратором";
 }
 
-const directorTicketSelect = "id, number, title, description, status, priority, object_id, category_id, created_by, assigned_to, assignee_worker_id, completed_at, worker_completed_at, admin_confirmed_at, source, created_by_profile_id, director_profile_id, director_phone, confirmed_by_profile_id, repeat_count, last_repeat_at, created_at, updated_at, object:objects(id, name, type, object_number, city, district, address, is_active, created_at), category:categories(id, name, description, is_active, created_at), worker:workers(id, name, phone, telegram_username, telegram_id, is_active, notes, created_at, updated_at)";
+const directorTicketSelect = "id, number, title, description, status, priority, object_id, category_id, created_by, assigned_to, assignee_worker_id, completed_at, worker_completed_at, admin_confirmed_at, source, created_by_profile_id, director_profile_id, director_phone, confirmed_by_profile_id, repeat_count, last_repeat_at, created_at, updated_at, object:objects(id, name, type, object_number, city, district, address, source, created_by_profile_id, needs_admin_review, admin_note, is_active, created_at), category:categories(id, name, description, is_active, created_at), worker:workers(id, name, phone, telegram_username, telegram_id, is_active, notes, created_at, updated_at)";
 
 async function getPlannedTicketIds(ticketIds: string[]) {
   if (ticketIds.length === 0) return new Set<string>();

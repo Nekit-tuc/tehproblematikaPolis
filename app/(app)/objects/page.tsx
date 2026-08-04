@@ -398,3 +398,13 @@ function Info({ label, value }: { label: string; value: string }) {
     </div>
   );
 }
+
+
+function ObjectReviewBadges({ object }: { object: CompanyObject }) {
+  return (
+    <>
+      {object.source === "director_registration" ? <Badge tone="orange">Створено директором</Badge> : null}
+      {object.needs_admin_review ? <Badge tone="red">Потребує заповнення</Badge> : null}
+    </>
+  );
+}

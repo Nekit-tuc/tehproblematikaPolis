@@ -46,7 +46,7 @@ export async function getObjects(): Promise<QueryResult<CompanyObject[]>> {
   const supabase = await createClient();
   let query = supabase
     .from("objects")
-    .select("id, name, type, object_number, city, district, address, aliases, manager_id, is_active, created_at")
+    .select("id, name, type, object_number, city, district, address, aliases, manager_id, source, created_by_profile_id, needs_admin_review, admin_note, is_active, created_at")
     .order("name");
   if (profile.role === "store_manager" && profile.object_id) query = query.eq("id", profile.object_id);
   const { data, error } = await measureAsync("objects:list", () => query);
@@ -100,7 +100,7 @@ export async function getObjectsPage(filters: ObjectListFilters = {}): Promise<Q
 
   let query = supabase
     .from("objects")
-    .select("id, name, type, object_number, city, district, address, aliases, manager_id, is_active, created_at", { count: "exact" })
+    .select("id, name, type, object_number, city, district, address, aliases, manager_id, source, created_by_profile_id, needs_admin_review, admin_note, is_active, created_at", { count: "exact" })
     .order("name");
   if (profile.role === "store_manager" && profile.object_id) query = query.eq("id", profile.object_id);
   query = applyObjectFilters(query, filters).range(from, to);

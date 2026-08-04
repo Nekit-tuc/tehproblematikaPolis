@@ -34,3 +34,12 @@ export default async function DirectorDetailPage({ params, searchParams }: { par
     </div>
   );
 }
+
+function ObjectBadges({ object }: { object?: { source?: string | null; needs_admin_review?: boolean } | null }) {
+  return (
+    <>
+      {object?.source === "director_registration" ? <Badge tone="orange">Новий об'єкт, створений директором</Badge> : null}
+      {object?.needs_admin_review ? <Badge tone="red">Потребує заповнення</Badge> : null}
+    </>
+  );
+}

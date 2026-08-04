@@ -39,6 +39,10 @@ export interface CompanyObject {
   address: string;
   aliases?: string[] | null;
   manager_id?: string | null;
+  source?: string | null;
+  created_by_profile_id?: string | null;
+  needs_admin_review?: boolean;
+  admin_note?: string | null;
   is_active: boolean;
   created_at: string;
 }

@@ -20,22 +20,84 @@ function fail(message: string): never {
   redirect(`/director/register?error=${encodeURIComponent(message)}`);
 }
 
+function normalizeAddress(address: string) {
+  return address.replace(/\s+/g, " ").trim().slice(0, 200);
+}
+
+function uniqueAddresses(addresses: string[]) {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const address of addresses.map(normalizeAddress).filter((item) => item.length >= 5)) {
+    const key = address.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(address);
+  }
+  return result;
+}
+
+function nextObjectNumber(existingNumbers: string[]) {
+  const numeric = existingNumbers
+    .map((value) => value.trim())
+    .filter((value) => /^\d+$/.test(value));
+  if (numeric.length === 0) return "001";
+  const max = numeric.reduce(
+    (current, value) => {
+      const number = Number.parseInt(value, 10);
+      return number > current.number ? { number, width: value.length } : current;
+    },
+    { number: 0, width: 3 },
+  );
+  return String(max.number + 1).padStart(Math.max(max.width, 3), "0");
+}
+
+async function createDirectorRegistrationObject(admin: ReturnType<typeof createAdminClient>, address: string, profileId: string) {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const { data: numbers, error: numbersError } = await measureAsync("director-register:object_numbers", () =>
+      admin.from("objects").select("object_number").order("object_number", { ascending: false }).limit(500),
+    );
+    if (numbersError) return { objectId: null, error: numbersError.message };
+    const candidate = nextObjectNumber(((numbers ?? []) as Array<{ object_number: string | null }>).map((item) => item.object_number ?? ""));
+    const objectNumber = attempt === 0 ? candidate : nextObjectNumber([...((numbers ?? []) as Array<{ object_number: string | null }>).map((item) => item.object_number ?? ""), candidate]);
+    const { data, error } = await measureAsync("director-register:create_object", () =>
+      admin
+        .from("objects")
+        .insert({
+          name: address,
+          type: "store",
+          object_number: objectNumber,
+          city: "Житомир",
+          district: null,
+          address,
+          manager_id: null,
+          is_active: true,
+          source: "director_registration",
+          created_by_profile_id: profileId,
+          needs_admin_review: true,
+          admin_note: "Створено директором під час реєстрації. Потрібно заповнити дані об'єкта.",
+        })
+        .select("id")
+        .single(),
+    );
+    if (!error && data) return { objectId: (data as { id: string }).id, error: null };
+    if (!error?.message?.toLowerCase().includes("duplicate")) return { objectId: null, error: error?.message ?? "Не вдалося створити об'єкт." };
+  }
+  return { objectId: null, error: "Не вдалося підібрати унікальний номер об'єкта." };
+}
+
 export async function registerDirectorAction(formData: FormData) {
   if (!hasSupabaseEnv()) fail("Supabase не налаштований.");
 
   const fullName = value(formData, "fullName");
   const phone = value(formData, "phone");
   const password = value(formData, "password");
-  const objectIds = values(formData, "objectIds");
-  const requestedAddresses = value(formData, "requestedAddresses")
-    .split(/\r?\n/)
-    .map((item) => item.trim())
-    .filter((item) => item.length >= 5);
+  const objectIds = [...new Set(values(formData, "objectIds"))];
+  const newAddresses = uniqueAddresses(value(formData, "requestedAddresses").split(/\r?\n/));
 
   if (fullName.length < 2) fail("Вкажіть ім'я директора.");
   if (!isValidDirectorPhone(phone)) fail("Вкажіть коректний робочий номер телефону.");
   if (password.length < 6) fail("Пароль має містити щонайменше 6 символів.");
-  if (objectIds.length === 0 && requestedAddresses.length === 0) fail("Оберіть магазин або додайте адресу нового магазину.");
+  if (objectIds.length === 0 && newAddresses.length === 0) fail("Оберіть магазин або додайте адресу нового магазину.");
 
   const normalizedPhone = normalizeDirectorPhone(phone);
   const email = directorEmailFromPhone(phone);
@@ -66,20 +128,22 @@ export async function registerDirectorAction(formData: FormData) {
     fail(profileResult.error.message);
   }
 
+  const linkedObjectIds: string[] = [];
   if (objectIds.length > 0) {
     const { data: objects, error: objectsError } = await admin.from("objects").select("id").in("id", objectIds).eq("is_active", true);
     if (objectsError) fail(objectsError.message);
-    const safeObjectIds = (objects ?? []).map((item) => item.id);
-    if (safeObjectIds.length > 0) {
-      const links = safeObjectIds.map((objectId, index) => ({ profile_id: userId, object_id: objectId, phone: normalizedPhone, is_primary: index === 0, approval_status: "pending" }));
-      const { error } = await measureAsync("director-register:director_objects", () => admin.from("director_objects").upsert(links, { onConflict: "profile_id,object_id" }));
-      if (error) fail(error.message);
-    }
+    linkedObjectIds.push(...(objects ?? []).map((item) => item.id));
   }
 
-  if (requestedAddresses.length > 0) {
-    const rows = requestedAddresses.map((requested_address) => ({ profile_id: userId, requested_address, status: "pending" }));
-    const { error } = await measureAsync("director-register:object_requests", () => admin.from("director_object_requests").insert(rows));
+  for (const address of newAddresses) {
+    const created = await createDirectorRegistrationObject(admin, address, userId);
+    if (created.error || !created.objectId) fail(created.error ?? "Не вдалося створити новий об'єкт.");
+    linkedObjectIds.push(created.objectId);
+  }
+
+  if (linkedObjectIds.length > 0) {
+    const links = linkedObjectIds.map((objectId, index) => ({ profile_id: userId, object_id: objectId, phone: normalizedPhone, is_primary: index === 0, approval_status: "pending" }));
+    const { error } = await measureAsync("director-register:director_objects", () => admin.from("director_objects").upsert(links, { onConflict: "profile_id,object_id" }));
     if (error) fail(error.message);
   }
 

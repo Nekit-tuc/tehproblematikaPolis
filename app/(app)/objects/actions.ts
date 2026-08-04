@@ -20,6 +20,8 @@ type ObjectPayloadResult =
         aliases: string[];
         manager_id: string | null;
         is_active: boolean;
+        needs_admin_review: boolean;
+        admin_note: string | null;
       };
     };
 
@@ -52,6 +54,8 @@ function readObjectPayload(formData: FormData): ObjectPayloadResult {
   const address = text(formData, "address");
   const managerId = text(formData, "manager_id");
   const isActive = bool(formData, "is_active");
+  const needsAdminReview = bool(formData, "needs_admin_review");
+  const adminNote = text(formData, "admin_note");
 
   if (!name || !type || !objectNumber || !city || !address) {
     return { ok: false, error: "Заповніть назву, тип, номер, місто/район і адресу." };
@@ -69,15 +73,17 @@ function readObjectPayload(formData: FormData): ObjectPayloadResult {
       aliases: aliases(formData),
       manager_id: managerId || null,
       is_active: isActive,
+      needs_admin_review: needsAdminReview,
+      admin_note: adminNote || null,
     },
   };
 }
 
 function objectErrorMessage(message: string) {
   if (message.includes("objects_object_number_unique_idx") || message.toLowerCase().includes("duplicate key value")) {
-    return "Обʼєкт з таким номером уже існує. Введіть інший номер.";
+    return "Об'єкт з таким номером уже існує. Введіть інший номер.";
   }
-  return "Не вдалося зберегти обʼєкт. Перевірте дані та спробуйте ще раз.";
+  return "Не вдалося зберегти об'єкт. Перевірте дані та спробуйте ще раз.";
 }
 
 export async function createObjectAction(formData: FormData) {
