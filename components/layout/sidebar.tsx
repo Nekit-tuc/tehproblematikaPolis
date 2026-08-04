@@ -3,14 +3,28 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type React from "react";
-import { BarChart3, Bot, BriefcaseBusiness, Building2, CalendarDays, ClipboardList, FileSpreadsheet, LayoutDashboard, Settings, Users } from "lucide-react";
+import {
+  BarChart3,
+  Bot,
+  BriefcaseBusiness,
+  Building2,
+  CalendarDays,
+  ClipboardList,
+  FileCheck2,
+  FileSpreadsheet,
+  LayoutDashboard,
+  Settings,
+  Users,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Profile, UserRole } from "@/types/domain";
 
 const nav = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, roles: ["admin", "management", "tech_manager", "worker", "store_manager"] },
   { href: "/tickets", label: "Заявки", icon: ClipboardList, roles: ["admin", "management", "tech_manager", "worker", "store_manager"] },
+  { href: "/tickets/acts", label: "Акти робіт", icon: FileCheck2, roles: ["admin", "management", "tech_manager"] },
   { href: "/director/tickets", label: "Заявки директора", icon: ClipboardList, roles: ["store_director"] },
+  { href: "/director/acts", label: "Акти", icon: FileCheck2, roles: ["store_director"] },
   { href: "/ai-tickets", label: "AI-заявки", icon: Bot, roles: ["admin", "management", "tech_manager"] },
   { href: "/objects", label: "Об'єкти", icon: Building2, roles: ["admin", "management", "tech_manager"] },
   { href: "/workers", label: "Виконавці", icon: BriefcaseBusiness, roles: ["admin", "management", "tech_manager"] },
