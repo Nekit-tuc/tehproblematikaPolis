@@ -18,7 +18,7 @@ export function getShortCategoryName(name?: string | null) {
   if (!name) return "Без категорії";
 
   const value = name.toLowerCase();
-  if (value.includes("буд") && (value.includes("звар") || value.includes("ремонт"))) return "Буд-роботи / ремонт";
+  if (value.includes("буд") && (value.includes("звар") || value.includes("ремонт"))) return "Буд-роботи";
   if (value.includes("вік") && value.includes("двер")) return "Вікна/двері";
   if (value.length > 28) return `${name.slice(0, 26).trim()}...`;
   return name;
@@ -54,38 +54,38 @@ export function DirectorTicketCard({ ticket, compact = false }: { ticket: Direct
   return (
     <Link
       href={`/director/tickets/${ticket.id}`}
-      className="block rounded-[20px] border border-white/[0.08] bg-white/[0.045] p-3 transition active:scale-[0.99]"
+      className="block rounded-[18px] border border-white/[0.08] bg-white/[0.045] p-2.5 transition active:scale-[0.99]"
     >
       <div className="flex gap-2.5">
-        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-gradient-to-br from-orange-500/18 to-zinc-800 text-orange-300">
-          <Icon className="h-5 w-5" />
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-gradient-to-br from-orange-500/18 to-zinc-800 text-orange-300">
+          <Icon className="h-[18px] w-[18px]" />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0 flex-1">
-              <p className="truncate text-[15px] font-black leading-5 text-zinc-50">{ticket.number}</p>
+              <p className="truncate text-[14px] font-black leading-5 text-zinc-50">{ticket.number}</p>
               <p className="mt-0.5 flex min-w-0 items-center gap-1 text-[12px] leading-4 text-zinc-400">
-                <MapPin className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+                <MapPin className="h-3 w-3 shrink-0 text-zinc-500" />
                 <span className="truncate">{location}</span>
               </p>
             </div>
             <ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-zinc-500" />
           </div>
 
-          <p className="mt-1.5 line-clamp-2 text-[13px] leading-5 text-zinc-200">{ticket.description || ticket.title}</p>
+          <p className="mt-1 line-clamp-2 text-[13px] leading-[18px] text-zinc-200">{ticket.description || ticket.title}</p>
 
-          <div className="mt-2 flex min-w-0 items-center gap-1.5">
-            <span className="max-w-[142px] truncate rounded-lg bg-white/[0.07] px-2 py-0.5 text-[11px] font-medium leading-4 text-zinc-300">
+          <div className="mt-1.5 flex min-w-0 items-center gap-1.5">
+            <span className="max-w-[128px] truncate rounded-lg bg-white/[0.07] px-2 py-0.5 text-[11px] font-medium leading-4 text-zinc-300">
               {getShortCategoryName(ticket.category?.name)}
             </span>
             <DirectorStatusBadge
               label={getShortStatusLabel(ticket.displayStatus)}
               tone={statusTone(ticket)}
-              className="max-w-[150px] shrink"
+              className="max-w-[138px] shrink"
             />
           </div>
 
-          <div className="mt-2 flex items-end justify-between gap-2 text-[11px] leading-4 text-zinc-500">
+          <div className="mt-1.5 flex items-end justify-between gap-2 text-[11px] leading-4 text-zinc-500">
             <div className="min-w-0 flex-1">
               {ticket.worker ? <div className="truncate">Виконавець: {ticket.worker.name}</div> : null}
               <div className="truncate">

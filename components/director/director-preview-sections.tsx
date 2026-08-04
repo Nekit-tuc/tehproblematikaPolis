@@ -10,7 +10,7 @@ import { formatDate } from "@/lib/utils";
 
 export function DirectorTicketsPreview({ tickets }: { tickets: DirectorTicketReportRow[] }) {
   return (
-    <DirectorGlassCard className="p-3">
+    <DirectorGlassCard className="p-2.5">
       <DirectorSectionTitle
         icon={<FileCheck2 className="h-4 w-4" />}
         title="Мої заявки"
@@ -20,7 +20,7 @@ export function DirectorTicketsPreview({ tickets }: { tickets: DirectorTicketRep
           </Link>
         }
       />
-      <div className="mt-2.5 flex gap-1.5 overflow-x-auto pb-1 [scrollbar-width:none]">
+      <div className="mt-2 flex gap-1.5 overflow-x-auto pb-1 [scrollbar-width:none]">
         <PreviewChip href="/director/tickets" active>
           Усі
         </PreviewChip>
@@ -28,7 +28,7 @@ export function DirectorTicketsPreview({ tickets }: { tickets: DirectorTicketRep
         <PreviewChip href="/director/tickets?tab=planned">У плані</PreviewChip>
         <PreviewChip href="/director/tickets?status=done">Виконані</PreviewChip>
       </div>
-      <div className="mt-2.5 space-y-2">
+      <div className="mt-2 space-y-1.5">
         {tickets.length ? tickets.map((ticket) => <DirectorTicketCard key={ticket.id} ticket={ticket} compact />) : <EmptyLine text="Заявок поки немає." />}
       </div>
     </DirectorGlassCard>
@@ -37,7 +37,7 @@ export function DirectorTicketsPreview({ tickets }: { tickets: DirectorTicketRep
 
 export function DirectorActsPreview({ acts }: { acts: WorkCompletionActWithRelations[] }) {
   return (
-    <DirectorGlassCard className="p-3">
+    <DirectorGlassCard className="p-2.5">
       <DirectorSectionTitle
         icon={<FileCheck2 className="h-4 w-4" />}
         title="Акти робіт"
@@ -47,10 +47,10 @@ export function DirectorActsPreview({ acts }: { acts: WorkCompletionActWithRelat
           </Link>
         }
       />
-      <div className="mt-2.5 space-y-2">
+      <div className="mt-2 space-y-1.5">
         {acts.length ? (
           acts.map((act) => (
-            <div key={act.id} className="grid grid-cols-[1fr_auto] items-center gap-2 rounded-2xl bg-black/18 px-3 py-2 text-[13px]">
+            <div key={act.id} className="grid grid-cols-[1fr_auto] items-center gap-2 rounded-xl bg-black/18 px-2.5 py-2 text-[13px]">
               <div className="min-w-0">
                 <div className="truncate font-semibold leading-5 text-zinc-100">{act.act_number}</div>
                 <div className="mt-0.5 flex min-w-0 items-center gap-1 text-[11px] leading-4 text-zinc-500">
@@ -82,8 +82,8 @@ function PreviewChip({ href, active = false, children }: { href: string; active?
       href={href}
       className={
         active
-          ? "shrink-0 whitespace-nowrap rounded-xl border border-orange-400/40 bg-orange-500/10 px-3 py-1.5 text-[12px] font-bold leading-4 text-orange-300"
-          : "shrink-0 whitespace-nowrap rounded-xl border border-white/10 bg-white/[0.05] px-3 py-1.5 text-[12px] leading-4 text-zinc-300"
+          ? "shrink-0 whitespace-nowrap rounded-xl border border-orange-400/40 bg-orange-500/10 px-3 py-1 text-[12px] font-bold leading-4 text-orange-300"
+          : "shrink-0 whitespace-nowrap rounded-xl border border-white/10 bg-white/[0.05] px-3 py-1 text-[12px] leading-4 text-zinc-300"
       }
     >
       {children}
@@ -92,5 +92,5 @@ function PreviewChip({ href, active = false, children }: { href: string; active?
 }
 
 function EmptyLine({ text }: { text: string }) {
-  return <div className="rounded-2xl border border-white/[0.08] bg-white/[0.035] p-3 text-[13px] leading-5 text-zinc-500">{text}</div>;
+  return <div className="rounded-xl border border-white/[0.08] bg-white/[0.035] p-2.5 text-[13px] leading-5 text-zinc-500">{text}</div>;
 }

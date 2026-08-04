@@ -15,7 +15,7 @@ export function DirectorStatusBadge({ label, tone = "gray", className }: { label
   return (
     <span
       className={cn(
-        "inline-flex max-w-full items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-bold leading-none",
+        "inline-flex max-w-full items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-bold leading-4",
         "whitespace-nowrap",
         tones[tone],
         className,
