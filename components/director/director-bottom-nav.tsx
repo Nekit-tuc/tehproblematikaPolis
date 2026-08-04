@@ -19,12 +19,12 @@ export function DirectorBottomNav({ activeCount = 0 }: { activeCount?: number })
 
   return (
     <nav className="fixed inset-x-0 bottom-0 z-50 px-3 pb-[max(env(safe-area-inset-bottom),0.75rem)] md:hidden">
-      <div className="mx-auto grid h-[68px] max-w-[480px] grid-cols-5 items-center rounded-t-[28px] border border-white/10 bg-zinc-950/88 px-2 shadow-[0_-18px_48px_rgba(0,0,0,0.72)] backdrop-blur-2xl">
+      <div className="mx-auto grid h-16 max-w-[480px] grid-cols-5 items-center rounded-t-[26px] border border-white/10 bg-zinc-950/90 px-2 shadow-[0_-16px_44px_rgba(0,0,0,0.72)] backdrop-blur-2xl">
         <NavItem href={items[0].href} label={items[0].label} icon={items[0].icon} active={active(items[0].href)} />
         <NavItem href={items[1].href} label={items[1].label} icon={items[1].icon} active={active(items[1].href)} count={activeCount} />
-        <Link href="/director/tickets/new" className="-mt-8 flex flex-col items-center justify-center rounded-full text-[9px] font-medium text-orange-100" aria-label="Створити заявку">
-          <span className="flex h-16 w-16 items-center justify-center rounded-full border border-amber-200/40 bg-gradient-to-br from-amber-300 to-orange-500 text-black shadow-[0_14px_36px_rgba(249,115,22,0.42)]">
-            <Plus className="h-8 w-8 stroke-[2.5]" />
+        <Link href="/director/tickets/new" className="-mt-7 flex flex-col items-center justify-center rounded-full text-[9px] font-medium text-orange-100" aria-label="Створити заявку">
+          <span className="flex h-14 w-14 items-center justify-center rounded-full border border-amber-200/40 bg-gradient-to-br from-amber-300 to-orange-500 text-black shadow-[0_12px_30px_rgba(249,115,22,0.4)]">
+            <Plus className="h-7 w-7 stroke-[2.5]" />
           </span>
         </Link>
         <NavItem href={items[2].href} label={items[2].label} icon={items[2].icon} active={active(items[2].href)} />
@@ -51,7 +51,7 @@ function NavItem({
     <Link
       href={href}
       className={cn(
-        "relative flex min-h-[54px] min-w-0 flex-col items-center justify-center gap-1 rounded-2xl px-0.5 text-[10px] font-semibold text-zinc-500 transition active:bg-white/5",
+        "relative flex min-h-[52px] min-w-0 flex-col items-center justify-center gap-0.5 rounded-2xl px-0.5 text-[10px] font-semibold text-zinc-500 transition active:bg-white/5",
         active && "text-orange-400",
       )}
     >
