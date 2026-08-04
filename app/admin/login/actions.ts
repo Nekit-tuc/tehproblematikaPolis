@@ -33,7 +33,7 @@ export async function adminLoginAction(formData: FormData) {
   if (profile.role === "store_director") {
     if (profile.approval_status === "pending") redirect("/director/pending");
     if (profile.approval_status === "rejected") redirect("/director/rejected");
-    redirect("/director/tickets");
+    redirect("/director");
   }
 
   redirect("/dashboard");

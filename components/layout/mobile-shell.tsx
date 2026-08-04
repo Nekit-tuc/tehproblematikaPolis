@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { DirectorBottomNav } from "@/components/director/director-bottom-nav";
 import { MobileBottomNav } from "@/components/layout/mobile-bottom-nav";
 import { MobileDrawer } from "@/components/layout/mobile-drawer";
 import { MobileTopbar } from "@/components/layout/mobile-topbar";
@@ -28,10 +29,10 @@ export function MobileShell({
 
   return (
     <div className="contents md:hidden">
-      <MobileTopbar onMenuClick={() => setDrawerOpen(true)} notificationCount={notificationCount} />
-      <MobileDrawer profile={profile} open={drawerOpen} onClose={() => setDrawerOpen(false)} aiTicketsCount={aiTicketsCount} />
+      {profile.role === "store_director" ? null : <MobileTopbar onMenuClick={() => setDrawerOpen(true)} notificationCount={notificationCount} />}
+      {profile.role === "store_director" ? null : <MobileDrawer profile={profile} open={drawerOpen} onClose={() => setDrawerOpen(false)} aiTicketsCount={aiTicketsCount} />}
       <div aria-hidden={drawerOpen} className={drawerOpen ? "pointer-events-none" : ""}>
-        <MobileBottomNav profile={profile} aiTicketsCount={aiTicketsCount} />
+        {profile.role === "store_director" ? <DirectorBottomNav /> : <MobileBottomNav profile={profile} aiTicketsCount={aiTicketsCount} />}
       </div>
     </div>
   );

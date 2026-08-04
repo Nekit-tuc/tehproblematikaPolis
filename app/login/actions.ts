@@ -2,8 +2,8 @@
 
 import { redirect } from "next/navigation";
 import { directorEmailFromPhone, isValidDirectorPhone } from "@/lib/auth/director";
-import { createClient } from "@/lib/supabase/server";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
+import { createClient } from "@/lib/supabase/server";
 
 function readString(formData: FormData, key: string) {
   const value = formData.get(key);
@@ -38,7 +38,7 @@ export async function loginAction(formData: FormData) {
 
   if (profile.approval_status === "pending") redirect("/director/pending");
   if (profile.approval_status === "rejected") redirect("/director/rejected");
-  redirect("/director/tickets");
+  redirect("/director");
 }
 
 export async function logoutAction() {

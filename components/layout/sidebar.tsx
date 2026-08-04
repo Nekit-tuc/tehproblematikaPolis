@@ -25,6 +25,7 @@ const nav = [
   { href: "/tickets/acts", label: "Акти робіт", icon: FileCheck2, roles: ["admin", "management", "tech_manager"] },
   { href: "/director/tickets", label: "Заявки директора", icon: ClipboardList, roles: ["store_director"] },
   { href: "/director/acts", label: "Акти", icon: FileCheck2, roles: ["store_director"] },
+  { href: "/director/profile", label: "Профіль", icon: Users, roles: ["store_director"] },
   { href: "/ai-tickets", label: "AI-заявки", icon: Bot, roles: ["admin", "management", "tech_manager"] },
   { href: "/objects", label: "Об'єкти", icon: Building2, roles: ["admin", "management", "tech_manager"] },
   { href: "/workers", label: "Виконавці", icon: BriefcaseBusiness, roles: ["admin", "management", "tech_manager"] },
