@@ -1,4 +1,5 @@
-export type UserRole = "admin" | "management" | "tech_manager" | "worker" | "store_manager";
+export type UserRole = "admin" | "management" | "tech_manager" | "worker" | "store_manager" | "store_director";
+export type ApprovalStatus = "pending" | "approved" | "rejected";
 export type ObjectType = "store" | "warehouse" | "production" | "office" | "other";
 export type TicketStatus =
   | "pending_review"
@@ -23,6 +24,7 @@ export interface Profile {
   telegram_id?: string | null;
   telegram_username?: string | null;
   phone?: string | null;
+  approval_status?: ApprovalStatus;
   is_active: boolean;
   created_at: string;
 }
@@ -103,6 +105,10 @@ export interface Ticket {
   admin_rating?: number | null;
   admin_feedback?: string | null;
   source?: string | null;
+  created_by_profile_id?: string | null;
+  director_profile_id?: string | null;
+  director_phone?: string | null;
+  confirmed_by_profile_id?: string | null;
   telegram_chat_id?: string | null;
   telegram_message_id?: string | null;
   telegram_source_group_id?: string | null;

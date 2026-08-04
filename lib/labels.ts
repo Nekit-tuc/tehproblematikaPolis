@@ -6,6 +6,7 @@ export const roleLabels: Record<UserRole, string> = {
   tech_manager: "Технічний менеджер",
   worker: "Виконавець",
   store_manager: "Керуючий об'єктом",
+  store_director: "Директор магазину",
 };
 
 export const statusLabels: Record<TicketStatus, string> = {

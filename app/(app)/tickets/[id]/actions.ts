@@ -10,6 +10,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getTicket } from "@/lib/supabase/queries";
 import { assignTicketToWorker, confirmWorkerCompletion, unassignTicketWorker } from "@/lib/supabase/workers";
 import { createClient } from "@/lib/supabase/server";
+import { addDirectorTicketToWeeklyDraftPlan } from "@/lib/supabase/director-queries";
 import { sendTicketToWorker, sendWorkerCompletionConfirmedNotification } from "@/lib/telegram/worker-notifications";
 import type { PhotoType, TicketStatus } from "@/types/domain";
 
@@ -179,15 +180,34 @@ export async function confirmTicketAction(ticketId: string) {
   if (ticket.status !== "pending_review") redirectWith(ticketId, "statusError", "Підтвердити можна тільки заявку, що очікує підтвердження.");
 
   const supabase = await createClient();
-  const { error } = await supabase.from("tickets").update({ status: "new", completed_at: null, updated_at: new Date().toISOString() }).eq("id", ticketId);
+  const isDirectorTicket = ticket.source === "director_portal";
+  const nextStatus: TicketStatus = isDirectorTicket && ticket.assignee_worker_id ? "assigned" : "new";
+  const updatePayload: Record<string, string | null> = {
+    status: nextStatus,
+    completed_at: null,
+    updated_at: new Date().toISOString(),
+  };
+  if (isDirectorTicket) {
+    updatePayload.admin_confirmed_at = new Date().toISOString();
+    updatePayload.confirmed_by_profile_id = user.id;
+  }
+
+  const { error } = await supabase.from("tickets").update(updatePayload).eq("id", ticketId);
   if (error) redirectWith(ticketId, "statusError", error.message);
 
   await supabase.from("ticket_history").insert({
     ticket_id: ticketId,
     actor_id: user.id,
     action: "Заявку підтверджено",
-    metadata: { from: ticket.status, to: "new" },
+    metadata: { from: ticket.status, to: nextStatus, source: isDirectorTicket ? "director_portal" : ticket.source ?? null },
   });
+
+  if (isDirectorTicket) {
+    const planResult = await addDirectorTicketToWeeklyDraftPlan(ticketId, user.id);
+    if (planResult.error) console.warn("[director] add to plan failed", { ticketId, error: planResult.error });
+    revalidatePath("/director/tickets");
+    revalidatePath("/work-planning");
+  }
 
   revalidatePath(`/tickets/${ticketId}`);
   revalidatePath("/tickets");

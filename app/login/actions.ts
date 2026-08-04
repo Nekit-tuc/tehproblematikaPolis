@@ -20,10 +20,16 @@ export async function loginAction(formData: FormData) {
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
   if (error || !data.user) redirect("/login?error=credentials");
 
-  const { data: profile } = await supabase.from("profiles").select("id, role, is_active").eq("id", data.user.id).maybeSingle();
+  const { data: profile } = await supabase.from("profiles").select("id, role, is_active, approval_status").eq("id", data.user.id).maybeSingle();
   if (!profile || !profile.is_active) {
     await supabase.auth.signOut();
     redirect("/login?error=profile");
+  }
+
+  if (profile.role === "store_director") {
+    if (profile.approval_status === "pending") redirect("/director/pending");
+    if (profile.approval_status === "rejected") redirect("/director/rejected");
+    redirect("/director/tickets");
   }
 
   redirect("/dashboard");

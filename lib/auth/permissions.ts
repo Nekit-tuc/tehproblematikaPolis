@@ -1,9 +1,11 @@
 import type { PhotoType, Profile, TicketWithRelations, UserRole } from "@/types/domain";
 
-export const roles: UserRole[] = ["admin", "management", "tech_manager", "worker", "store_manager"];
+export const roles: UserRole[] = ["admin", "management", "tech_manager", "worker", "store_manager", "store_director"];
 
 export function canAccessRoute(role: UserRole, pathname: string) {
   if (role === "admin") return true;
+  if (pathname.startsWith("/director")) return role === "store_director";
+  if (role === "store_director") return false;
   if (pathname.startsWith("/settings")) return false;
   if (pathname.startsWith("/users")) return role === "management";
   if (pathname.startsWith("/reports")) return role === "management" || role === "tech_manager";

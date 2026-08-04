@@ -27,6 +27,7 @@ import { TD, TH, THead, TBody, TR, Table } from "@/components/ui/table";
 import { canHardDeleteTicket } from "@/lib/auth/permissions";
 import { requireAuth } from "@/lib/auth/server";
 import { getCategories, getTicketsCount, getTicketsPage } from "@/lib/supabase/queries";
+import { getTicketFilterWorkers } from "@/lib/supabase/worker-queries";
 import { formatDate } from "@/lib/utils";
 import type { TicketPriority, TicketStatus, TicketWithRelations } from "@/types/domain";
 import { hardDeleteTicketAction } from "./[id]/actions";
@@ -147,6 +148,7 @@ function sourceLabel(source?: string | null) {
   if (source === "telegram_group") return "Telegram";
   if (source === "telegram_private_test") return "Telegram test";
   if (source === "viber") return "Viber";
+  if (source === "director_portal") return "Від директора";
   return "Manual";
 }
 
@@ -171,6 +173,8 @@ export default async function TicketsPage({
     period?: string;
     from?: string;
     to?: string;
+    worker?: string;
+    source?: string;
   }>;
 }) {
   const { profile } = await requireAuth();
@@ -189,11 +193,14 @@ export default async function TicketsPage({
   const activePeriod = query.period === "this_week" || query.period === "previous_week" ? query.period : undefined;
   const activeFrom = isDateParam(query.from) ? query.from ?? "" : "";
   const activeTo = isDateParam(query.to) ? query.to ?? "" : "";
+  const activeWorker = query.worker && query.worker !== "all" ? query.worker : "all";
   const currentPage = Math.max(Number(query.page ?? 1) || 1, 1);
+  const activeSource = query.source === "director_portal" ? "director_portal" : "all";
 
-  const [ticketsPageResult, categoriesResult, aiTicketsCountResult] = await Promise.all([
-    getTicketsPage({ status: activeStatus, category: activeCategory, priority: activePriority, sort: activeSort, q: searchQuery, period: activePeriod, from: activeFrom, to: activeTo, page: currentPage, limit: PAGE_SIZE }),
+  const [ticketsPageResult, categoriesResult, workersResult, aiTicketsCountResult] = await Promise.all([
+    getTicketsPage({ status: activeStatus, category: activeCategory, priority: activePriority, worker: activeWorker, source: activeSource, sort: activeSort, q: searchQuery, period: activePeriod, from: activeFrom, to: activeTo, page: currentPage, limit: PAGE_SIZE }),
     getCategories(),
+    getTicketFilterWorkers(),
     getTicketsCount({ status: "pending_review", source: ["telegram_group", "telegram_private_test"] }),
   ]);
 
@@ -204,14 +211,16 @@ export default async function TicketsPage({
   const shownFrom = totalTickets === 0 ? 0 : (safePage - 1) * PAGE_SIZE + 1;
   const shownTo = Math.min(safePage * PAGE_SIZE, totalTickets);
   const aiTicketsCount = aiTicketsCountResult.data;
-  const error = ticketsPageResult.error ?? categoriesResult.error ?? aiTicketsCountResult.error;
+  const error = ticketsPageResult.error ?? categoriesResult.error ?? workersResult.error ?? aiTicketsCountResult.error;
 
   const ticketHref = (updates: Record<string, string | undefined>) => {
     const params = new URLSearchParams();
     if (activeStatus !== "all") params.set("status", activeStatus);
     if (activeCategory !== "all") params.set("category", activeCategory);
     if (activePriority !== "all") params.set("priority", activePriority);
+    if (activeWorker && activeWorker !== "all") params.set("worker", activeWorker);
     if (activeSort !== "newest") params.set("sort", activeSort);
+    if (activeSource !== "all") params.set("source", activeSource);
     if (searchQuery) params.set("q", searchQuery);
     if (activePeriod) params.set("period", activePeriod);
     if (activeFrom) params.set("from", activeFrom);
@@ -266,7 +275,9 @@ export default async function TicketsPage({
           {activeStatus !== "all" ? <input type="hidden" name="status" value={activeStatus} /> : null}
           {activeCategory !== "all" ? <input type="hidden" name="category" value={activeCategory} /> : null}
           {activePriority !== "all" ? <input type="hidden" name="priority" value={activePriority} /> : null}
+          {activeWorker !== "all" ? <input type="hidden" name="worker" value={activeWorker} /> : null}
           {activeSort !== "newest" ? <input type="hidden" name="sort" value={activeSort} /> : null}
+          {activeSource !== "all" ? <input type="hidden" name="source" value={activeSource} /> : null}
           {activeFrom ? <input type="hidden" name="from" value={activeFrom} /> : null}
           {activeTo ? <input type="hidden" name="to" value={activeTo} /> : null}
         </form>
@@ -284,12 +295,21 @@ export default async function TicketsPage({
               <FilterButton href={ticketHref({ category: "all" })} active={activeCategory === "all"}>Всі</FilterButton>
               {categoriesResult.data.map((category) => <FilterButton key={category.id} href={ticketHref({ category: category.id })} active={activeCategory === category.id}>{category.name}</FilterButton>)}
             </FilterGroup>
+            <FilterGroup title="Виконавець">
+              <FilterButton href={ticketHref({ worker: "all" })} active={activeWorker === "all"}>Всі виконавці</FilterButton>
+              <FilterButton href={ticketHref({ worker: "unassigned" })} active={activeWorker === "unassigned"}>Без виконавця</FilterButton>
+              {workersResult.data.map((worker) => <FilterButton key={worker.id} href={ticketHref({ worker: worker.id })} active={activeWorker === worker.id}>{worker.name}</FilterButton>)}
+            </FilterGroup>
             <FilterGroup title="Категорія">{priorityFilters.map((filter) => <FilterButton key={filter.value} href={ticketHref({ priority: filter.value })} active={activePriority === filter.value}>{filter.label}</FilterButton>)}</FilterGroup>
             <FilterGroup title="Сортування">
+            <FilterGroup title="Джерело">
+              <FilterButton href={ticketHref({ source: "all" })} active={activeSource === "all"}>Всі</FilterButton>
+              <FilterButton href={ticketHref({ source: "director_portal" })} active={activeSource === "director_portal"}>Від директорів</FilterButton>
+            </FilterGroup>
               <FilterButton href={ticketHref({ sort: "newest" })} active={activeSort === "newest"}>Нові спочатку</FilterButton>
               <FilterButton href={ticketHref({ sort: "priority_desc" })} active={activeSort === "priority_desc"}>Вищий пріоритет</FilterButton>
             </FilterGroup>
-            <PeriodFilterForm activeFrom={activeFrom} activeTo={activeTo} searchQuery={searchQuery} activeStatus={activeStatus} activeCategory={activeCategory} activePriority={activePriority} activeSort={activeSort} />
+            <PeriodFilterForm activeFrom={activeFrom} activeTo={activeTo} searchQuery={searchQuery} activeStatus={activeStatus} activeCategory={activeCategory} activePriority={activePriority} activeWorker={activeWorker} activeSort={activeSort} />
             <div className="flex max-w-full gap-1.5 overflow-x-auto pb-0.5">
               <FilterButton href={periodLinks.thisWeek} active={activePeriod === "this_week"}>Цей тиждень</FilterButton>
               <FilterButton href={periodLinks.previousWeek} active={activePeriod === "previous_week"}>Минулий тиждень</FilterButton>
@@ -321,9 +341,30 @@ export default async function TicketsPage({
           <CardHeader><CardTitle>Список заявок</CardTitle></CardHeader>
           <CardContent className="space-y-4">
             <div className="flex flex-wrap gap-2">{statusFilters.map((filter) => <Button key={filter.value} asChild variant={activeStatus === filter.value ? "default" : "outline"} size="sm"><Link href={ticketHref({ status: filter.value })}>{filter.label}</Link></Button>)}</div>
+            <div className="space-y-3 rounded-2xl border border-white/[0.08] bg-black/20 p-3">
+              <div>
+                <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">Категорія</div>
+                <div className="flex flex-wrap gap-2">
+                  <Button asChild variant={activeCategory === "all" ? "default" : "outline"} size="sm"><Link href={ticketHref({ category: "all" })}>Всі категорії</Link></Button>
+                  {categoriesResult.data.map((category) => <Button key={category.id} asChild variant={activeCategory === category.id ? "default" : "outline"} size="sm"><Link href={ticketHref({ category: category.id })}>{category.name}</Link></Button>)}
+                </div>
+              </div>
+              <div>
+                <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">Виконавець</div>
+                <div className="flex flex-wrap gap-2">
+                  <Button asChild variant={activeWorker === "all" ? "default" : "outline"} size="sm"><Link href={ticketHref({ worker: "all" })}>Всі виконавці</Link></Button>
+                  <Button asChild variant={activeWorker === "unassigned" ? "default" : "outline"} size="sm"><Link href={ticketHref({ worker: "unassigned" })}>Без виконавця</Link></Button>
+                  {workersResult.data.map((worker) => <Button key={worker.id} asChild variant={activeWorker === worker.id ? "default" : "outline"} size="sm"><Link href={ticketHref({ worker: worker.id })}>{worker.name}</Link></Button>)}
+                </div>
+              </div>
+            </div>
             <div className="rounded-2xl border border-white/[0.08] bg-black/20 p-3">
               <div className="flex flex-wrap items-end gap-2">
-                <PeriodFilterForm activeFrom={activeFrom} activeTo={activeTo} searchQuery={searchQuery} activeStatus={activeStatus} activeCategory={activeCategory} activePriority={activePriority} activeSort={activeSort} />
+                <PeriodFilterForm activeFrom={activeFrom} activeTo={activeTo} searchQuery={searchQuery} activeStatus={activeStatus} activeCategory={activeCategory} activePriority={activePriority} activeWorker={activeWorker} activeSort={activeSort} />
+                <div className="flex flex-wrap gap-2">
+                  <Button asChild variant={activeSource === "all" ? "default" : "outline"} size="sm"><Link href={ticketHref({ source: "all" })}>Всі джерела</Link></Button>
+                  <Button asChild variant={activeSource === "director_portal" ? "default" : "outline"} size="sm"><Link href={ticketHref({ source: "director_portal" })}>Від директорів</Link></Button>
+                </div>
                 <Button asChild variant={activePeriod === "this_week" ? "default" : "outline"} size="sm"><Link href={periodLinks.thisWeek}>Цей тиждень</Link></Button>
                 <Button asChild variant={activePeriod === "previous_week" ? "default" : "outline"} size="sm"><Link href={periodLinks.previousWeek}>Минулий тиждень</Link></Button>
                 <Button asChild variant="outline" size="sm"><Link href={periodLinks.thisMonth}>Цей місяць</Link></Button>
@@ -354,13 +395,14 @@ function TicketsMessages({ error, queryError, deleted }: { error?: string | null
   </>;
 }
 
-function PeriodFilterForm({ activeFrom, activeTo, searchQuery, activeStatus, activeCategory, activePriority, activeSort }: { activeFrom: string; activeTo: string; searchQuery: string; activeStatus: "all" | TicketStatus; activeCategory: string; activePriority: "all" | TicketPriority; activeSort: string }) {
+function PeriodFilterForm({ activeFrom, activeTo, searchQuery, activeStatus, activeCategory, activePriority, activeWorker, activeSort }: { activeFrom: string; activeTo: string; searchQuery: string; activeStatus: "all" | TicketStatus; activeCategory: string; activePriority: "all" | TicketPriority; activeWorker: string; activeSort: string }) {
   return (
     <form action="/tickets" className="flex w-full flex-wrap items-end gap-2 md:w-auto">
       {searchQuery ? <input type="hidden" name="q" value={searchQuery} /> : null}
       {activeStatus !== "all" ? <input type="hidden" name="status" value={activeStatus} /> : null}
       {activeCategory !== "all" ? <input type="hidden" name="category" value={activeCategory} /> : null}
       {activePriority !== "all" ? <input type="hidden" name="priority" value={activePriority} /> : null}
+      {activeWorker !== "all" ? <input type="hidden" name="worker" value={activeWorker} /> : null}
       {activeSort !== "newest" ? <input type="hidden" name="sort" value={activeSort} /> : null}
       <label className="min-w-[130px] flex-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-500 md:flex-none">
         Від

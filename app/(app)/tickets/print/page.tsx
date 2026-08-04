@@ -17,7 +17,7 @@ function buildBackHref(params: Record<string, string>) {
   return query ? `/tickets?${query}` : "/tickets";
 }
 
-export default async function TicketsPrintPage({ searchParams }: { searchParams: Promise<{ period?: string; from?: string; to?: string; status?: string; category?: string; priority?: string; q?: string; sort?: string }> }) {
+export default async function TicketsPrintPage({ searchParams }: { searchParams: Promise<{ period?: string; from?: string; to?: string; status?: string; category?: string; priority?: string; worker?: string; q?: string; sort?: string }> }) {
   await requireAuth();
   const params = await searchParams;
   const currentWorkWeek = getWorkWeekRange();
@@ -34,6 +34,7 @@ export default async function TicketsPrintPage({ searchParams }: { searchParams:
     status: params.status,
     category: params.category,
     priority: params.priority,
+    worker: params.worker,
     q: params.q?.trim(),
     sort: params.sort,
     limit: 2000,
@@ -41,7 +42,7 @@ export default async function TicketsPrintPage({ searchParams }: { searchParams:
   const ticketsResult = await getTicketsForPrint(filters);
   const rows = getTicketReportRows(ticketsResult.data);
   const summary = getTicketReportSummary(rows);
-  const backHref = buildBackHref({ period: activePeriod ?? "", from: activePeriod ? "" : from, to: activePeriod ? "" : to, status: params.status ?? "", category: params.category ?? "", priority: params.priority ?? "", q: params.q ?? "", sort: params.sort ?? "" });
+  const backHref = buildBackHref({ period: activePeriod ?? "", from: activePeriod ? "" : from, to: activePeriod ? "" : to, status: params.status ?? "", category: params.category ?? "", priority: params.priority ?? "", worker: params.worker ?? "", q: params.q ?? "", sort: params.sort ?? "" });
 
   return (
     <main className="min-h-screen bg-neutral-100 px-3 py-4 text-neutral-950 print:bg-white print:p-0">

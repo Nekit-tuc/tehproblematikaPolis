@@ -1,0 +1,36 @@
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import { Alert } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { SubmitButton } from "@/components/ui/submit-button";
+import { requireRole } from "@/lib/auth/server";
+import { getAdminDirectorAccount, getDirectorRegistrationObjects } from "@/lib/supabase/director-queries";
+import { addDirectorObjectLinkAction, approveDirectorAccountAction, approveDirectorObjectLinkAction, approveObjectRequestAction, rejectDirectorAccountAction, rejectObjectRequestAction, removeDirectorObjectLinkAction, setPrimaryDirectorObjectAction, updateDirectorProfileAction } from "../actions";
+
+function statusLabel(status?: string) {
+  if (status === "approved") return "Підтверджено";
+  if (status === "rejected") return "Відхилено";
+  return "Очікує";
+}
+
+export default async function DirectorDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ error?: string; success?: string }> }) {
+  await requireRole(["admin", "management", "tech_manager"]);
+  const [{ id }, sp] = await Promise.all([params, searchParams]);
+  const [directorResult, objectsResult] = await Promise.all([getAdminDirectorAccount(id), getDirectorRegistrationObjects()]);
+  if (!directorResult.data) notFound();
+  const director = directorResult.data;
+  const objects = objectsResult.data;
+  return (
+    <div className="page-shell space-y-4">
+      <div className="flex items-start justify-between gap-3"><div><h1 className="text-2xl font-semibold">{director.full_name}</h1><p className="subtle">Керування акаунтом директора і прив'язками до магазинів.</p></div><Button asChild variant="outline"><Link href="/objects/directors">Назад</Link></Button></div>
+      {sp.error ? <Alert title="Помилка">{decodeURIComponent(sp.error)}</Alert> : null}
+      {sp.success ? <Alert title="Зміни збережено">Операцію виконано.</Alert> : null}
+      <Card className="border-white/10 bg-white/[0.04]"><CardHeader><CardTitle className="text-base text-zinc-100">Профіль</CardTitle></CardHeader><CardContent><form action={updateDirectorProfileAction.bind(null, director.id)} className="grid gap-3 md:grid-cols-4"><label className="grid gap-1 text-xs text-zinc-400 md:col-span-2">Ім'я<Input name="fullName" defaultValue={director.full_name} required /></label><label className="grid gap-1 text-xs text-zinc-400">Телефон<Input name="phone" defaultValue={director.phone ?? ""} /></label><label className="grid gap-1 text-xs text-zinc-400">Статус<select name="approvalStatus" defaultValue={director.approval_status ?? "approved"} className="h-10 rounded-md border border-input bg-stone-950/30 px-3 text-sm"><option value="pending">Очікує</option><option value="approved">Підтверджено</option><option value="rejected">Відхилено</option></select></label><SubmitButton type="submit" pendingText="Зберігаємо..." className="md:col-span-4">Зберегти профіль</SubmitButton></form><div className="mt-3 flex flex-wrap gap-2"><form action={approveDirectorAccountAction.bind(null, director.id)}><SubmitButton type="submit" pendingText="Підтверджуємо..." className="bg-orange-500 text-black hover:bg-orange-400">Підтвердити акаунт</SubmitButton></form><form action={rejectDirectorAccountAction.bind(null, director.id)} className="flex gap-2"><Input name="note" placeholder="Причина відхилення" /><SubmitButton type="submit" variant="outline" pendingText="Відхиляємо...">Відхилити</SubmitButton></form></div></CardContent></Card>
+      <Card className="border-white/10 bg-white/[0.04]"><CardHeader><CardTitle className="text-base text-zinc-100">Прив'язані магазини</CardTitle></CardHeader><CardContent className="space-y-3">{director.directorObjects.map((link) => <div key={link.id} className="rounded-2xl border border-white/10 bg-black/20 p-3"><div className="flex flex-wrap items-start justify-between gap-3"><div><div className="font-semibold text-zinc-100">{link.object?.name ?? "Магазин"}</div><div className="text-xs text-zinc-400">{link.object?.address ?? "Адресу не вказано"}</div><div className="mt-2 flex gap-2"><Badge tone={link.approvalStatus === "approved" ? "green" : link.approvalStatus === "rejected" ? "red" : "orange"}>{statusLabel(link.approvalStatus)}</Badge>{link.isPrimary ? <Badge tone="orange">Основний</Badge> : null}</div></div><div className="flex flex-wrap gap-2"><form action={approveDirectorObjectLinkAction.bind(null, director.id, link.id)}><SubmitButton size="sm" type="submit">Підтвердити</SubmitButton></form><form action={setPrimaryDirectorObjectAction.bind(null, director.id, link.id)}><SubmitButton size="sm" variant="outline" type="submit">Основний</SubmitButton></form><form action={removeDirectorObjectLinkAction.bind(null, director.id, link.id)}><SubmitButton size="sm" variant="outline" type="submit">Прибрати</SubmitButton></form></div></div></div>)}<form action={addDirectorObjectLinkAction.bind(null, director.id)} className="grid gap-2 rounded-2xl border border-white/10 bg-black/20 p-3 md:grid-cols-[1fr_180px_auto]"><select name="objectId" required className="h-10 rounded-md border border-input bg-stone-950/30 px-3 text-sm"><option value="">Додати магазин</option>{objects.map((object) => <option key={object.id} value={object.id}>{object.object_number ? `№ ${object.object_number} · ` : ""}{object.name} · {object.address}</option>)}</select><Input name="phone" placeholder="Телефон для магазину" /><SubmitButton type="submit">Додати</SubmitButton></form></CardContent></Card>
+      <Card className="border-white/10 bg-white/[0.04]"><CardHeader><CardTitle className="text-base text-zinc-100">Запити на нові адреси</CardTitle></CardHeader><CardContent className="space-y-3">{director.objectRequests.map((request) => <div key={request.id} className="rounded-2xl border border-white/10 bg-black/20 p-3"><div className="flex flex-wrap justify-between gap-3"><div><div className="font-semibold text-zinc-100">{request.requested_address}</div><Badge tone={request.status === "approved" ? "green" : request.status === "rejected" ? "red" : "orange"} className="mt-2">{statusLabel(request.status)}</Badge>{request.admin_note ? <p className="mt-2 text-xs text-zinc-400">{request.admin_note}</p> : null}</div><div className="grid gap-2 md:min-w-80"><form action={approveObjectRequestAction.bind(null, director.id, request.id)} className="flex gap-2"><select name="objectId" required className="h-10 min-w-0 flex-1 rounded-md border border-input bg-stone-950/30 px-3 text-sm"><option value="">Прив'язати до об'єкта</option>{objects.map((object) => <option key={object.id} value={object.id}>{object.name} · {object.address}</option>)}</select><SubmitButton type="submit" size="sm">Підтвердити</SubmitButton></form><form action={rejectObjectRequestAction.bind(null, director.id, request.id)} className="flex gap-2"><Input name="note" placeholder="Коментар" /><SubmitButton type="submit" size="sm" variant="outline">Відхилити</SubmitButton></form></div></div></div>)}{director.objectRequests.length === 0 ? <p className="text-sm text-zinc-400">Запитів немає.</p> : null}</CardContent></Card>
+    </div>
+  );
+}

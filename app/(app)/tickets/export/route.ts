@@ -37,6 +37,7 @@ function periodFromRequest(request: Request) {
     status: url.searchParams.get("status") ?? undefined,
     category: url.searchParams.get("category") ?? undefined,
     priority: url.searchParams.get("priority") ?? undefined,
+    worker: url.searchParams.get("worker") ?? undefined,
     q: url.searchParams.get("q") ?? undefined,
     sort: url.searchParams.get("sort") ?? undefined,
   };
@@ -195,6 +196,7 @@ export async function GET(request: Request) {
     status: period.status,
     category: period.category,
     priority: period.priority,
+    worker: period.worker,
     q: period.q?.trim(),
     sort: period.sort,
     limit: 2000,

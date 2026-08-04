@@ -13,6 +13,7 @@ const protectedPrefixes = [
   "/reports",
   "/ai-test",
   "/ai-tickets",
+  "/director",
   "/weekly-control",
   "/settings",
 ];
@@ -25,6 +26,8 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith("/api/") ||
     pathname.startsWith("/icons/") ||
     pathname === "/audit-preview" ||
+    pathname === "/director/register" ||
+    pathname === "/director/login" ||
     pathname === "/favicon.ico" ||
     pathname === "/manifest.json" ||
     pathname === "/sw.js" ||

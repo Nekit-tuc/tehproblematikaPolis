@@ -10,6 +10,7 @@ import type { Profile, UserRole } from "@/types/domain";
 const nav = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, roles: ["admin", "management", "tech_manager", "worker", "store_manager"] },
   { href: "/tickets", label: "Заявки", icon: ClipboardList, roles: ["admin", "management", "tech_manager", "worker", "store_manager"] },
+  { href: "/director/tickets", label: "Заявки директора", icon: ClipboardList, roles: ["store_director"] },
   { href: "/ai-tickets", label: "AI-заявки", icon: Bot, roles: ["admin", "management", "tech_manager"] },
   { href: "/objects", label: "Об'єкти", icon: Building2, roles: ["admin", "management", "tech_manager"] },
   { href: "/workers", label: "Виконавці", icon: BriefcaseBusiness, roles: ["admin", "management", "tech_manager"] },
@@ -23,11 +24,11 @@ const nav = [
 
 export function Sidebar({ profile, aiTicketsCount = 0 }: { profile: Profile; aiTicketsCount?: number }) {
   const pathname = usePathname();
-  const visibleNav = nav.filter((item) => item.roles.includes(profile.role));
+  const visibleNav = nav.filter((item) => (item.roles as UserRole[]).includes(profile.role));
 
   return (
     <aside className="hidden min-h-screen w-72 border-r border-border bg-stone-950/80 px-4 py-5 lg:block">
-      <Link href="/dashboard" className="mb-8 flex items-center gap-3 px-2">
+      <Link href={profile.role === "store_director" ? "/director/tickets" : "/dashboard"} className="mb-8 flex items-center gap-3 px-2">
         <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-primary text-lg font-black text-primary-foreground">P</div>
         <div>
           <div className="font-semibold text-stone-100">Polissya</div>

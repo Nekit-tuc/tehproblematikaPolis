@@ -222,8 +222,10 @@ export type TicketListFilters = {
   period?: "this_week" | "previous_week";
   from?: string;
   to?: string;
+  worker?: string;
   page?: number;
   limit?: number;
+  source?: string;
 };
 
 export type TicketPageResult = {
@@ -283,6 +285,9 @@ function applyTicketFilters(query: any, filters: TicketListFilters) {
   if (filters.status && filters.status !== "all") query = query.eq("status", filters.status);
   if (filters.category && filters.category !== "all") query = query.eq("category_id", filters.category);
   if (filters.priority && filters.priority !== "all") query = query.eq("priority", filters.priority);
+  if (filters.worker === "unassigned") query = query.is("assignee_worker_id", null);
+  else if (filters.worker && filters.worker !== "all") query = query.eq("assignee_worker_id", filters.worker);
+  if (filters.source && filters.source !== "all") query = query.eq("source", filters.source);
   if (filters.period === "this_week" || filters.period === "previous_week") {
     const range = filters.period === "previous_week" ? getPreviousWorkWeekRange() : getWorkWeekRange();
     query = query.gte("created_at", range.startIso).lt("created_at", range.endIso);

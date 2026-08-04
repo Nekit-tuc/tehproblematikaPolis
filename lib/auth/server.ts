@@ -34,3 +34,11 @@ export async function requireRole(allowedRoles: UserRole[]) {
   if (!allowedRoles.includes(auth.profile.role)) redirect("/dashboard?error=forbidden");
   return auth;
 }
+
+export async function requireApprovedDirector() {
+  const auth = await requireRole(["store_director"]);
+  const status = auth.profile.approval_status ?? "approved";
+  if (status === "pending") redirect("/director/pending");
+  if (status === "rejected") redirect("/director/rejected");
+  return auth;
+}

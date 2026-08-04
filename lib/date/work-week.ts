@@ -10,7 +10,7 @@ export type WorkWeekRange = {
 };
 
 const WORK_WEEK_START_DAY = 4;
-const WORK_WEEK_START_HOUR = 15;
+const WORK_WEEK_START_HOUR = 17;
 const WORK_WEEK_START_MINUTE = 0;
 
 export function formatDateYYYYMMDD(date: Date) {

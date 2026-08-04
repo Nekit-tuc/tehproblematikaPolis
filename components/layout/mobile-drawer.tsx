@@ -12,6 +12,7 @@ import type { Profile, UserRole } from "@/types/domain";
 const nav = [
   { href: "/dashboard", label: "Dashboard", icon: Home, roles: ["admin", "management", "tech_manager", "worker", "store_manager"] },
   { href: "/tickets", label: "Заявки", icon: ClipboardList, roles: ["admin", "management", "tech_manager", "worker", "store_manager"] },
+  { href: "/director/tickets", label: "Заявки директора", icon: ClipboardList, roles: ["store_director"] },
   { href: "/objects", label: "Об'єкти", icon: Building2, roles: ["admin", "management", "tech_manager"] },
   { href: "/workers", label: "Виконавці", icon: BriefcaseBusiness, roles: ["admin", "management", "tech_manager"] },
   { href: "/work-planning", label: "Планування", icon: CalendarDays, roles: ["admin", "management", "tech_manager"] },
@@ -34,7 +35,7 @@ export function MobileDrawer({
   aiTicketsCount?: number;
 }) {
   const pathname = usePathname();
-  const visibleNav = nav.filter((item) => item.roles.includes(profile.role));
+  const visibleNav = nav.filter((item) => (item.roles as UserRole[]).includes(profile.role));
 
   return (
     <div className={`fixed inset-0 z-[90] max-w-full overflow-x-hidden md:hidden ${open ? "" : "pointer-events-none"}`} aria-hidden={!open}>
