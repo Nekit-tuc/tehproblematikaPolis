@@ -1,7 +1,7 @@
-import { measureAsync } from "@/lib/performance";
-import { getDirectorActs } from "@/lib/supabase/work-completion-acts";
-import { getDirectorTicketReportMeta, getDirectorTicketsReport, type DirectorTicketReportRow } from "@/lib/supabase/director-ticket-reports";
 import type { DirectorAnalyticsCategory } from "@/components/director/director-preview-sections";
+import { measureAsync } from "@/lib/performance";
+import { getDirectorTicketReportMeta, getDirectorTicketsReport, type DirectorTicketReportRow } from "@/lib/supabase/director-ticket-reports";
+import { getDirectorActs } from "@/lib/supabase/work-completion-acts";
 import type { CompanyObject, Profile, WorkCompletionActWithRelations } from "@/types/domain";
 import type { QueryResult } from "./queries";
 
@@ -9,14 +9,7 @@ export type DirectorDashboardOverview = {
   profile: Profile;
   objects: CompanyObject[];
   activeCount: number;
-  kpis: {
-    newTickets: number;
-    planned: number;
-    done: number;
-    acts: number;
-  };
   ticketsPreview: DirectorTicketReportRow[];
-  planPreview: DirectorTicketReportRow[];
   actsPreview: WorkCompletionActWithRelations[];
   analytics: {
     total: number;
@@ -60,8 +53,8 @@ export async function getDirectorDashboardOverview(profile: Profile): Promise<Qu
 
   const [metaResult, ticketsResult, actsResult, analyticsTicketsResult] = await Promise.all([
     measureAsync("director-dashboard:profile", () => getDirectorTicketReportMeta(profile.id)),
-    measureAsync("director-dashboard:tickets-preview", () => getDirectorTicketsReport(profile.id, { limit: 2000 })),
-    measureAsync("director-dashboard:acts-preview", () => getDirectorActs(profile.id, { period: "current_month", limit: 2000 })),
+    measureAsync("director-dashboard:tickets-preview", () => getDirectorTicketsReport(profile.id, { limit: 5 })),
+    measureAsync("director-dashboard:acts-preview", () => getDirectorActs(profile.id, { period: "current_month", limit: 3 })),
     measureAsync("director-dashboard:analytics", () => getDirectorTicketsReport(profile.id, { createdFrom: dateYYYYMMDD(thirtyDaysAgo), limit: 2000 })),
   ]);
 
@@ -69,24 +62,14 @@ export async function getDirectorDashboardOverview(profile: Profile): Promise<Qu
   if (error) return { data: null, error };
 
   const tickets = ticketsResult.data;
-  const acts = actsResult.data;
-  const planned = tickets.filter((ticket) => ticket.isInPlan);
-  const activeCount = tickets.filter((ticket) => !["done", "rejected", "cancelled"].includes(ticket.status)).length;
 
   return {
     data: {
       profile,
       objects: metaResult.data.objects,
-      activeCount,
-      kpis: {
-        newTickets: tickets.filter((ticket) => ticket.status === "pending_review").length,
-        planned: planned.length,
-        done: tickets.filter((ticket) => ticket.status === "done").length,
-        acts: acts.length,
-      },
-      ticketsPreview: tickets.slice(0, 3),
-      planPreview: planned.slice(0, 5),
-      actsPreview: acts.slice(0, 3),
+      activeCount: 0,
+      ticketsPreview: tickets.slice(0, 5),
+      actsPreview: actsResult.data.slice(0, 3),
       analytics: buildAnalytics(analyticsTicketsResult.data),
     },
     error: null,

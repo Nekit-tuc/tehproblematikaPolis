@@ -1,11 +1,9 @@
 import { Alert } from "@/components/ui/alert";
 import { DirectorHeader } from "@/components/director/director-header";
 import { DirectorHeroCard } from "@/components/director/director-hero-card";
-import { DirectorKpiGrid } from "@/components/director/director-kpi-grid";
 import {
   DirectorActsPreview,
   DirectorAnalyticsPreview,
-  DirectorPlanPreview,
   DirectorTicketsPreview,
 } from "@/components/director/director-preview-sections";
 import { DirectorPageShell } from "@/components/director/director-shell";
@@ -24,9 +22,7 @@ export default async function DirectorHomePage() {
       {overview ? (
         <>
           <DirectorHeroCard profile={profile} objects={overview.objects} />
-          <DirectorKpiGrid kpis={overview.kpis} />
           <DirectorTicketsPreview tickets={overview.ticketsPreview} />
-          <DirectorPlanPreview tickets={overview.planPreview} />
           <DirectorActsPreview acts={overview.actsPreview} />
           <DirectorAnalyticsPreview total={overview.analytics.total} categories={overview.analytics.categories} />
         </>

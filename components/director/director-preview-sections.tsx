@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { BarChart3, CalendarCheck2, Download, FileCheck2, MapPin } from "lucide-react";
+import { BarChart3, Download, FileCheck2, MapPin } from "lucide-react";
 import { DirectorGlassCard } from "@/components/director/director-shell";
 import { DirectorSectionTitle } from "@/components/director/director-kpi-grid";
 import { DirectorTicketCard } from "@/components/director/director-ticket-card";
@@ -20,50 +20,16 @@ export function DirectorTicketsPreview({ tickets }: { tickets: DirectorTicketRep
       <DirectorSectionTitle
         icon={<FileCheck2 className="h-4 w-4" />}
         title="Мої заявки"
-        action={<Link href="/director/tickets" className="text-xs font-semibold text-zinc-300">Всі</Link>}
+        action={<Link href="/director/tickets" className="text-xs font-semibold text-zinc-300">Переглянути всі</Link>}
       />
       <div className="mt-3 flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none]">
         <Link href="/director/tickets" className="rounded-xl border border-orange-400/40 bg-orange-500/10 px-3 py-1.5 text-xs font-bold text-orange-300">Усі</Link>
         <Link href="/director/tickets?status=pending_review" className="rounded-xl border border-white/10 bg-white/[0.05] px-3 py-1.5 text-xs text-zinc-300">Нові</Link>
-        <Link href="/director/tickets" className="rounded-xl border border-white/10 bg-white/[0.05] px-3 py-1.5 text-xs text-zinc-300">У плані</Link>
+        <Link href="/director/tickets?tab=planned" className="rounded-xl border border-white/10 bg-white/[0.05] px-3 py-1.5 text-xs text-zinc-300">У плані</Link>
         <Link href="/director/tickets?status=done" className="rounded-xl border border-white/10 bg-white/[0.05] px-3 py-1.5 text-xs text-zinc-300">Виконані</Link>
       </div>
       <div className="mt-3 space-y-2.5">
         {tickets.length ? tickets.map((ticket) => <DirectorTicketCard key={ticket.id} ticket={ticket} compact />) : <EmptyLine text="Заявок поки немає." />}
-      </div>
-    </DirectorGlassCard>
-  );
-}
-
-export function DirectorPlanPreview({ tickets }: { tickets: DirectorTicketReportRow[] }) {
-  const planned = tickets.filter((ticket) => ticket.isInPlan);
-  const done = planned.filter((ticket) => ticket.status === "done").length;
-  const progress = planned.length ? Math.round((done / planned.length) * 100) : 0;
-
-  return (
-    <DirectorGlassCard className="p-4">
-      <DirectorSectionTitle icon={<CalendarCheck2 className="h-4 w-4" />} title="План тижня" />
-      <div className="mt-2 flex items-center justify-between gap-3 text-xs text-zinc-400">
-        <span>План виконання: <span className="font-bold text-orange-300">цей тиждень</span></span>
-        <span className="text-zinc-200">{done} / {planned.length} виконано</span>
-      </div>
-      <div className="mt-3 h-2 rounded-full bg-white/[0.08]">
-        <div className="h-full rounded-full bg-gradient-to-r from-amber-300 to-orange-500" style={{ width: `${progress}%` }} />
-      </div>
-      <div className="mt-3 space-y-2">
-        {planned.slice(0, 5).map((ticket) => (
-          <Link key={ticket.id} href={`/director/tickets/${ticket.id}`} className="grid grid-cols-[1fr_auto] gap-2 rounded-2xl bg-black/18 px-3 py-2 text-sm">
-            <span className="min-w-0">
-              <span className="block truncate text-zinc-200">{ticket.description || ticket.title}</span>
-              <span className="mt-1 flex min-w-0 items-center gap-1 text-xs text-zinc-500">
-                <MapPin className="h-3 w-3 shrink-0" />
-                <span className="truncate">{ticket.object?.address ?? ticket.object?.name}</span>
-              </span>
-            </span>
-            <span className="self-center rounded-xl bg-orange-500/10 px-2 py-1 text-xs font-semibold text-orange-300">{ticket.status === "done" ? "Виконано" : ticket.status === "in_progress" ? "У роботі" : "Заплановано"}</span>
-          </Link>
-        ))}
-        {planned.length === 0 ? <EmptyLine text="На цей тиждень планових заявок немає." /> : null}
       </div>
     </DirectorGlassCard>
   );
