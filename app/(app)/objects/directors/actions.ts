@@ -37,9 +37,9 @@ export async function rejectDirectorAccountAction(profileId: string, formData: F
   const note = value(formData, "note");
   const supabase = createAdminClient();
   const now = new Date().toISOString();
-  const { error } = await supabase.from("profiles").update({ approval_status: "rejected" }).eq("id", profileId).eq("role", "store_director");
+  const { error } = await supabase.from("profiles").update({ approval_status: "rejected", rejected_at: now, rejection_reason: note || null }).eq("id", profileId).eq("role", "store_director");
   if (error) redirect(`/objects/directors/${profileId}?error=${encodeURIComponent(error.message)}`);
-  const links = await supabase.from("director_objects").update({ approval_status: "rejected", rejected_at: now, note: note || null }).eq("profile_id", profileId).eq("approval_status", "pending");
+  const links = await supabase.from("director_objects").update({ approval_status: "rejected", rejected_at: now, rejection_reason: note || null, note: note || null }).eq("profile_id", profileId).eq("approval_status", "pending");
   if (links.error) redirect(`/objects/directors/${profileId}?error=${encodeURIComponent(links.error.message)}`);
   refresh(profileId);
   redirect(`/objects/directors/${profileId}?success=rejected`);
@@ -117,7 +117,7 @@ export async function rejectObjectRequestAction(profileId: string, requestId: st
   await requireDirectorAdmin();
   const note = value(formData, "note");
   const supabase = createAdminClient();
-  const { error } = await supabase.from("director_object_requests").update({ status: "rejected", rejected_at: new Date().toISOString(), admin_note: note || null }).eq("id", requestId).eq("profile_id", profileId);
+  const { error } = await supabase.from("director_object_requests").update({ status: "rejected", rejected_at: new Date().toISOString(), rejection_reason: note || null, admin_note: note || null }).eq("id", requestId).eq("profile_id", profileId);
   if (error) redirect(`/objects/directors/${profileId}?error=${encodeURIComponent(error.message)}`);
   refresh(profileId);
   redirect(`/objects/directors/${profileId}?success=request-rejected`);

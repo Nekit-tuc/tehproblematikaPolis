@@ -45,7 +45,7 @@ export default async function DirectorRegisterPage({ searchParams }: { searchPar
             </form>
           </CardContent>
         </Card>
-        <p className="text-center text-sm text-zinc-500">Вже маєте акаунт? <Link href="/director/login" className="text-orange-300">Увійти</Link></p>
+        <p className="text-center text-sm text-zinc-500">Вже маєте акаунт? <Link href="/login" className="text-orange-300">Увійти</Link></p>
       </div>
     </main>
   );

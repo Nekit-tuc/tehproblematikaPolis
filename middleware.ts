@@ -26,6 +26,7 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith("/api/") ||
     pathname.startsWith("/icons/") ||
     pathname === "/audit-preview" ||
+    pathname === "/admin/login" ||
     pathname === "/director/register" ||
     pathname === "/director/login" ||
     pathname === "/favicon.ico" ||
@@ -36,7 +37,6 @@ export async function middleware(request: NextRequest) {
   if (isPublicAsset) return response;
 
   const isProtected = protectedPrefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
-  const isLogin = pathname === "/login";
   const hasEnv = Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
 
   if (!hasEnv) {
@@ -63,8 +63,6 @@ export async function middleware(request: NextRequest) {
 
   const { data } = await supabase.auth.getUser();
   if (!data.user && isProtected) return NextResponse.redirect(new URL("/login", request.url));
-  if (data.user && isLogin) return NextResponse.redirect(new URL("/dashboard", request.url));
-
   return response;
 }
 

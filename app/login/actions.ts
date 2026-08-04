@@ -1,6 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { directorEmailFromPhone, isValidDirectorPhone } from "@/lib/auth/director";
 import { createClient } from "@/lib/supabase/server";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
 
@@ -9,30 +10,35 @@ function readString(formData: FormData, key: string) {
   return typeof value === "string" ? value.trim() : "";
 }
 
-export async function loginAction(formData: FormData) {
-  if (!hasSupabaseEnv()) redirect("/login?error=supabase-env");
+function directorError(message: string): never {
+  redirect(`/login?error=${encodeURIComponent(message)}`);
+}
 
-  const email = readString(formData, "email");
+export async function loginAction(formData: FormData) {
+  if (!hasSupabaseEnv()) directorError("Supabase не налаштований.");
+
+  const phone = readString(formData, "phone");
   const password = readString(formData, "password");
-  if (!email || !password) redirect("/login?error=validation");
+  if (!isValidDirectorPhone(phone) || !password) directorError("Вкажіть телефон і пароль.");
 
   const supabase = await createClient();
-  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-  if (error || !data.user) redirect("/login?error=credentials");
+  const { data, error } = await supabase.auth.signInWithPassword({ email: directorEmailFromPhone(phone), password });
+  if (error || !data.user) directorError("Невірний телефон або пароль.");
 
   const { data: profile } = await supabase.from("profiles").select("id, role, is_active, approval_status").eq("id", data.user.id).maybeSingle();
   if (!profile || !profile.is_active) {
     await supabase.auth.signOut();
-    redirect("/login?error=profile");
+    directorError("Акаунт не активний або профіль не знайдено.");
   }
 
-  if (profile.role === "store_director") {
-    if (profile.approval_status === "pending") redirect("/director/pending");
-    if (profile.approval_status === "rejected") redirect("/director/rejected");
-    redirect("/director/tickets");
+  if (profile.role !== "store_director") {
+    await supabase.auth.signOut();
+    redirect("/admin/login?error=admin-login-required");
   }
 
-  redirect("/dashboard");
+  if (profile.approval_status === "pending") redirect("/director/pending");
+  if (profile.approval_status === "rejected") redirect("/director/rejected");
+  redirect("/director/tickets");
 }
 
 export async function logoutAction() {
