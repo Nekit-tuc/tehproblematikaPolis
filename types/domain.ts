@@ -181,6 +181,42 @@ export interface TicketHistory {
   actor?: Profile | null;
 }
 
+export interface WorkCompletionAct {
+  id: string;
+  ticket_id: string;
+  object_id: string;
+  director_profile_id: string;
+  worker_id?: string | null;
+  act_number: string;
+  work_description: string;
+  director_comment?: string | null;
+  completed_at: string;
+  confirmed_at: string;
+  created_at: string;
+  updated_at: string;
+  created_by_profile_id?: string | null;
+}
+
+export interface WorkCompletionActPhoto {
+  id: string;
+  act_id: string;
+  ticket_id: string;
+  storage_path: string;
+  file_name?: string | null;
+  content_type?: string | null;
+  size_bytes?: number | null;
+  created_at: string;
+  uploaded_by_profile_id?: string | null;
+}
+
+export interface WorkCompletionActWithRelations extends WorkCompletionAct {
+  ticket?: TicketWithRelations | null;
+  object?: CompanyObject | null;
+  director?: Profile | null;
+  worker?: Worker | null;
+  photos?: WorkCompletionActPhoto[];
+}
+
 export interface TelegramSession {
   id: string;
   telegram_id: string;

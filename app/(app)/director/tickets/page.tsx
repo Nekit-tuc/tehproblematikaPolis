@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ClipboardList, MapPin, Plus, Store, Tag } from "lucide-react";
+import { ClipboardList, Download, FileCheck2, MapPin, Plus, Store, Tag } from "lucide-react";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -94,7 +94,24 @@ export default async function DirectorTicketsPage({ searchParams }: { searchPara
                     <span className="truncate">Додана в план: {ticket.planLink.planTitle}</span>
                   </span>
                 ) : null}
+                {ticket.workCompletionAct ? (
+                  <span className="flex min-w-0 items-center gap-2 text-emerald-200">
+                    <FileCheck2 className="h-3.5 w-3.5 shrink-0" />
+                    <span className="truncate">Акт створено: {ticket.workCompletionAct.act_number}</span>
+                  </span>
+                ) : ticket.status === "waiting_admin_confirmation" ? (
+                  <span className="flex min-w-0 items-center gap-2 text-amber-200">
+                    <FileCheck2 className="h-3.5 w-3.5 shrink-0" />
+                    <span className="truncate">Очікує вашого підтвердження виконання</span>
+                  </span>
+                ) : null}
                 <span className="text-zinc-500">Створено: {formatDate(ticket.created_at)}</span>
+                {ticket.workCompletionAct ? (
+                  <span className="inline-flex w-fit items-center gap-1 rounded-xl border border-emerald-400/20 bg-emerald-500/10 px-2 py-1 text-[11px] font-semibold text-emerald-100">
+                    <Download className="h-3 w-3" />
+                    Акт Excel доступний у заявці
+                  </span>
+                ) : null}
               </div>
             </Link>
           ))}

@@ -6,6 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { canConfirmTicket } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
+import { getWorkCompletionActForTicket } from "@/lib/supabase/work-completion-acts";
 import { formatDate } from "@/lib/utils";
 import type { Profile, TicketWithRelations } from "@/types/domain";
 import { confirmDirectorTicketAction, rejectDirectorTicketAction } from "@/app/(app)/tickets/[id]/director-actions";
@@ -33,7 +34,8 @@ function confirmationLabel(ticket: TicketWithRelations) {
 
 export async function DirectorTicketPanel({ ticket, profile }: DirectorTicketPanelProps) {
   if (ticket.source !== "director_portal") return null;
-  const director = await getDirectorName(ticket.director_profile_id);
+  const [director, actResult] = await Promise.all([getDirectorName(ticket.director_profile_id), getWorkCompletionActForTicket(ticket.id)]);
+  const act = actResult.data;
   const canModerate = canConfirmTicket(profile) && ticket.status === "pending_review";
   const directorPhone = ticket.director_phone || director?.phone || "Не вказано";
 
@@ -97,6 +99,28 @@ export async function DirectorTicketPanel({ ticket, profile }: DirectorTicketPan
                 </SubmitButton>
               </form>
             </div>
+          </div>
+        ) : null}
+
+        {!act && ticket.status === "waiting_admin_confirmation" ? (
+          <div className="rounded-[16px] border border-amber-400/25 bg-amber-500/10 p-3 text-[12px] leading-5 text-amber-100">
+            Очікує підтвердження виконання директором. Після підтвердження буде створено акт виконаних робіт.
+          </div>
+        ) : null}
+
+        {act ? (
+          <div className="rounded-[16px] border border-emerald-400/20 bg-emerald-500/10 p-3">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="text-[13px] font-semibold text-emerald-100">Акт виконаних робіт</div>
+                <div className="mt-1 text-[12px] text-zinc-400">{act.act_number} · {formatDate(act.confirmed_at)}</div>
+              </div>
+              <Button asChild variant="outline" className="h-9 rounded-[14px] px-3 text-[12px]">
+                <Link href={`/tickets/${ticket.id}/act/export`}>Завантажити акт Excel</Link>
+              </Button>
+            </div>
+            {act.director_comment ? <p className="mt-2 text-[12px] leading-5 text-zinc-300">{act.director_comment}</p> : null}
+            {act.photos && act.photos.length > 0 ? <div className="mt-2 text-[11px] text-zinc-500">Фото до акту: {act.photos.length}</div> : null}
           </div>
         ) : null}
       </CardContent>

@@ -3,8 +3,9 @@ import { measureAsync } from "@/lib/performance";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { hasSupabaseEnv, missingSupabaseMessage } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
+import { getWorkCompletionActsForTickets } from "@/lib/supabase/work-completion-acts";
 import { ensureWeeklyDraftPlansForAutoRouting, type WorkPlan } from "@/lib/supabase/work-plans";
-import type { ApprovalStatus, Category, CompanyObject, Profile, TicketWithRelations } from "@/types/domain";
+import type { ApprovalStatus, Category, CompanyObject, Profile, TicketWithRelations, WorkCompletionAct } from "@/types/domain";
 import type { QueryResult } from "./queries";
 
 type DirectorObjectRow = {
@@ -60,6 +61,7 @@ export type DirectorTicket = TicketWithRelations & {
   displayStatus: string;
   displayStatusInfo: DirectorDisplayStatus;
   planLink: DirectorPlanLink | null;
+  workCompletionAct: WorkCompletionAct | null;
 };
 
 export type AdminDirectorAccount = Profile & {
@@ -289,7 +291,7 @@ async function getPlannedTicketLinks(ticketIds: string[]) {
   return links;
 }
 
-function withDirectorStatus(ticket: TicketWithRelations, planLink: DirectorPlanLink | null): DirectorTicket {
+function withDirectorStatus(ticket: TicketWithRelations, planLink: DirectorPlanLink | null, workCompletionAct: WorkCompletionAct | null): DirectorTicket {
   const displayStatusInfo = getDirectorTicketDisplayStatus(ticket, Boolean(planLink));
   return {
     ...ticket,
@@ -297,6 +299,7 @@ function withDirectorStatus(ticket: TicketWithRelations, planLink: DirectorPlanL
     displayStatus: displayStatusInfo.label,
     displayStatusInfo,
     planLink,
+    workCompletionAct,
   };
 }
 
@@ -317,8 +320,10 @@ export async function getDirectorTickets(profileId: string, limit = 30): Promise
   );
   if (error) return { data: [], error: error.message };
   const tickets = (data ?? []) as unknown as TicketWithRelations[];
-  const plannedLinks = await getPlannedTicketLinks(tickets.map((ticket) => ticket.id));
-  return { data: tickets.map((ticket) => withDirectorStatus(ticket, plannedLinks.get(ticket.id) ?? null)), error: null };
+  const ticketIds = tickets.map((ticket) => ticket.id);
+  const [plannedLinks, actsResult] = await Promise.all([getPlannedTicketLinks(ticketIds), getWorkCompletionActsForTickets(ticketIds)]);
+  if (actsResult.error) return { data: [], error: actsResult.error };
+  return { data: tickets.map((ticket) => withDirectorStatus(ticket, plannedLinks.get(ticket.id) ?? null, actsResult.data.get(ticket.id) ?? null)), error: null };
 }
 
 export async function getDirectorTicket(profileId: string, ticketId: string): Promise<QueryResult<DirectorTicket | null>> {
@@ -339,8 +344,9 @@ export async function getDirectorTicket(profileId: string, ticketId: string): Pr
   if (error) return { data: null, error: error.message };
   if (!data) return { data: null, error: null };
   const ticket = data as unknown as TicketWithRelations;
-  const plannedLinks = await getPlannedTicketLinks([ticket.id]);
-  return { data: withDirectorStatus(ticket, plannedLinks.get(ticket.id) ?? null), error: null };
+  const [plannedLinks, actsResult] = await Promise.all([getPlannedTicketLinks([ticket.id]), getWorkCompletionActsForTickets([ticket.id])]);
+  if (actsResult.error) return { data: null, error: actsResult.error };
+  return { data: withDirectorStatus(ticket, plannedLinks.get(ticket.id) ?? null, actsResult.data.get(ticket.id) ?? null), error: null };
 }
 
 export async function addDirectorTicketToWeeklyDraftPlan(
