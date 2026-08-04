@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { SubmitButton } from "@/components/ui/submit-button";
 import { Textarea } from "@/components/ui/textarea";
 import { ConfirmSubmitButton } from "@/components/tickets/confirm-submit-button";
+import { DirectorTicketPanel } from "@/components/tickets/director-ticket-panel";
 import { PhotoSubmitButton } from "@/components/tickets/photo-submit-button";
 import { canAddTicketPhoto, canConfirmTicket, canEditTicket, canHardDeleteTicket, canUnassignWorkerFromTicket } from "@/lib/auth/permissions";
 import { requireAuth } from "@/lib/auth/server";
@@ -41,7 +42,7 @@ export default async function TicketDetailsPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ photoError?: string; photoSuccess?: string; commentError?: string; commentSuccess?: string; statusError?: string; statusSuccess?: string }>;
+  searchParams: Promise<{ photoError?: string; photoSuccess?: string; commentError?: string; commentSuccess?: string; statusError?: string; statusSuccess?: string; statusWarning?: string }>;
 }) {
   const { profile } = await requireAuth();
   const { id } = await params;
@@ -75,12 +76,14 @@ export default async function TicketDetailsPage({
       {query.commentSuccess ? <Alert title={"Коментар додано"}>{"Повідомлення збережено в заявці."}</Alert> : null}
       {query.statusError ? <Alert title={"Статус не змінено"}>{decodeURIComponent(query.statusError)}</Alert> : null}
       {query.statusSuccess ? <Alert title={"Статус оновлено"}>{"Новий статус заявки збережено."}</Alert> : null}
+      {query.statusWarning ? <Alert title="Потрібна увага">{decodeURIComponent(query.statusWarning)}</Alert> : null}
 
       {!ticket ? (
         <Card className="rounded-[20px] border-white/10 bg-white/[0.04]"><CardContent className="pt-5 text-sm text-muted-foreground">{"Заявку не знайдено."}</CardContent></Card>
       ) : (
         <>
           <TicketHeroCard ticket={ticket} />
+          <DirectorTicketPanel ticket={ticket} profile={profile} />
           <div className="grid min-w-0 gap-3 lg:grid-cols-[minmax(0,1fr)_360px] lg:gap-5">
             <div className="order-2 min-w-0 space-y-3 md:space-y-5 lg:order-1">
               <TicketDescriptionCard ticket={ticket} assignedWorker={assignedWorker} />
@@ -246,7 +249,7 @@ function TicketHeroCard({ ticket }: { ticket: TicketWithRelations }) {
 }
 
 function TicketQuickActions({ ticket, profile, categories }: { ticket: TicketWithRelations; profile: Profile; categories: Category[] }) {
-  const canConfirm = canConfirmTicket(profile) && ticket.status === "pending_review";
+  const canConfirm = canConfirmTicket(profile) && ticket.status === "pending_review" && ticket.source !== "director_portal";
   const editable = canEditTicket(profile, ticket);
   const canChangeCategory = canConfirmTicket(profile) && categories.length > 0;
   if (!canConfirm && !editable && !canChangeCategory) return null;
