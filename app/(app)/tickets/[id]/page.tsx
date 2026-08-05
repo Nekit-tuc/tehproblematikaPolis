@@ -1,4 +1,4 @@
-import { BriefcaseBusiness, CalendarDays, Camera, CheckCircle2, Clock, MapPin, MessageSquare, Send, Tag, Trash2, UserX } from "lucide-react";
+import { Bot, BriefcaseBusiness, CalendarDays, Camera, CheckCircle2, ChevronRight, Clock, MapPin, MessageSquare, Send, Store, Tag, Trash2, UserX } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
@@ -10,13 +10,16 @@ import { SubmitButton } from "@/components/ui/submit-button";
 import { Textarea } from "@/components/ui/textarea";
 import { ConfirmSubmitButton } from "@/components/tickets/confirm-submit-button";
 import { DirectorTicketPanel } from "@/components/tickets/director-ticket-panel";
+import { MobilePhotoViewer } from "@/components/tickets/mobile-photo-viewer";
 import { PhotoSubmitButton } from "@/components/tickets/photo-submit-button";
+import { TicketHistoryAccordion } from "@/components/tickets/ticket-history-accordion";
 import { canAddTicketPhoto, canConfirmTicket, canEditTicket, canHardDeleteTicket, canUnassignWorkerFromTicket } from "@/lib/auth/permissions";
 import { requireAuth } from "@/lib/auth/server";
 import { photoTypeLabels } from "@/lib/photos";
 import { getCategories, getRelatedTicketsBySourceGroup, getTicket, getTicketComments, getTicketHistory, getTicketPhotos } from "@/lib/supabase/queries";
 import { getTicketRepeats, type TicketRepeat } from "@/lib/supabase/ticket-repeats";
 import { getActiveWorkers, getWorkerById, getWorkersByCategory } from "@/lib/supabase/worker-queries";
+import { createClient } from "@/lib/supabase/server";
 import { priorityLabels, statusLabels } from "@/lib/labels";
 import { formatDate } from "@/lib/utils";
 import type { Category, PhotoType, Profile, TicketCommentWithAuthor, TicketHistory, TicketPhotoWithUrl, TicketStatus, TicketWithRelations, Worker, WorkerWithCategories } from "@/types/domain";
@@ -36,6 +39,7 @@ import {
 } from "./actions";
 
 const photoGroups: PhotoType[] = ["before", "progress", "after"];
+const mobileStatusOptions: TicketStatus[] = ["new", "assigned", "in_progress", "waiting", "waiting_admin_confirmation", "done", "cancelled", "rejected"];
 
 export default async function TicketDetailsPage({
   params,
@@ -82,6 +86,12 @@ export default async function TicketDetailsPage({
         <Card className="rounded-[20px] border-white/10 bg-white/[0.04]"><CardContent className="pt-5 text-sm text-muted-foreground">{"Заявку не знайдено."}</CardContent></Card>
       ) : (
         <>
+          <div className="md:hidden">
+            <Suspense fallback={<DetailBlockFallback title="Заявка" />}>
+              <MobileTicketDetails ticket={ticket} profile={profile} assignedWorker={assignedWorker} categories={categories} />
+            </Suspense>
+          </div>
+          <div className="hidden space-y-5 md:block">
           <TicketHeroCard ticket={ticket} />
           <DirectorTicketPanel ticket={ticket} profile={profile} />
           <div className="grid min-w-0 gap-3 lg:grid-cols-[minmax(0,1fr)_360px] lg:gap-5">
@@ -115,6 +125,7 @@ export default async function TicketDetailsPage({
               {canHardDeleteTicket(profile) ? <TicketDangerZone ticketId={ticket.id} /> : null}
             </div>
           </div>
+          </div>
         </>
       )}
     </div>
@@ -145,6 +156,227 @@ function DetailBlockError({ title, error }: { title: string; error: string }) {
       </CardContent>
     </SoftCard>
   );
+}
+
+async function MobileTicketDetails({
+  ticket,
+  profile,
+  assignedWorker,
+  categories,
+}: {
+  ticket: TicketWithRelations;
+  profile: Profile;
+  assignedWorker: Worker | WorkerWithCategories | null;
+  categories: Category[];
+}) {
+  const [photosResult, historyResult, workersResult] = await Promise.all([
+    getTicketPhotos(ticket.id),
+    getTicketHistory(ticket.id),
+    canConfirmTicket(profile) ? getActiveWorkers() : Promise.resolve({ data: [] as WorkerWithCategories[], error: null as string | null }),
+  ]);
+
+  if (photosResult.error) console.error("[ticket-detail-mobile] load failed", { scope: "photos", error: photosResult.error });
+  if (historyResult.error) console.error("[ticket-detail-mobile] load failed", { scope: "history", error: historyResult.error });
+  if (workersResult.error) console.error("[ticket-detail-mobile] load failed", { scope: "workers", error: workersResult.error });
+
+  return (
+    <div className="space-y-3">
+      <MobileTicketMainCard ticket={ticket} profile={profile} assignedWorker={assignedWorker} />
+      <MobileTicketSourceCard ticket={ticket} />
+      <MobileTicketActionPanel ticket={ticket} profile={profile} workers={workersResult.data} categories={categories} />
+      <MobileTicketPhotosCard photos={photosResult.data} />
+      <TicketHistoryAccordion history={historyResult.data} />
+      {canHardDeleteTicket(profile) ? <MobileDeleteTicketButton ticketId={ticket.id} /> : null}
+    </div>
+  );
+}
+
+function MobileTicketMainCard({ ticket, profile, assignedWorker }: { ticket: TicketWithRelations; profile: Profile; assignedWorker: Worker | WorkerWithCategories | null }) {
+  const canReview = canConfirmTicket(profile) && ticket.status === "pending_review";
+  return (
+    <SoftCard className="overflow-hidden">
+      <CardContent className="space-y-3 p-4">
+        <div className="flex min-w-0 items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-orange-300">{ticket.number}</div>
+            <h1 className="mt-1 line-clamp-3 break-words text-[18px] font-bold leading-6 text-zinc-50">{ticket.title || ticket.description}</h1>
+          </div>
+          <Badge tone="orange" className="shrink-0 rounded-full px-2 py-1 text-[10px]">{statusLabels[ticket.status]}</Badge>
+        </div>
+
+        <div className="space-y-1.5 text-[12px] leading-5 text-zinc-400">
+          <div className="flex min-w-0 items-center gap-1.5">
+            <MapPin className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+            <span className="min-w-0 truncate">{ticket.object?.name ?? "Об'єкт"} · {ticketAddress(ticket)}</span>
+          </div>
+          <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
+            <span className="min-w-0 truncate">{shortCategoryName(ticket.category?.name)}</span>
+            <span className="text-zinc-600">·</span>
+            <span>{priorityLabels[ticket.priority]}</span>
+          </div>
+          <div className="flex min-w-0 items-center gap-1.5">
+            <BriefcaseBusiness className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+            <span className="min-w-0 truncate">{workerDisplayName(assignedWorker, ticket.assignee_worker_id)}</span>
+          </div>
+          <div className="flex min-w-0 items-center gap-1.5">
+            <Clock className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+            <span className="min-w-0 truncate">Створено {formatDate(ticket.created_at)}</span>
+          </div>
+        </div>
+
+        {canReview ? (
+          <div className="grid grid-cols-2 gap-2 pt-1">
+            <form action={confirmTicketAction.bind(null, ticket.id)}>
+              <SubmitButton type="submit" pendingText="Підтверджуємо..." className="h-11 w-full rounded-xl bg-orange-500 px-2 text-[13px] font-semibold text-black hover:bg-orange-400">Підтвердити</SubmitButton>
+            </form>
+            <form action={rejectTicketAction.bind(null, ticket.id)}>
+              <SubmitButton type="submit" pendingText="Відхиляємо..." variant="outline" className="h-11 w-full rounded-xl border-red-500/30 px-2 text-[13px] font-semibold text-red-300 hover:bg-red-500/10">Відхилити</SubmitButton>
+            </form>
+          </div>
+        ) : null}
+      </CardContent>
+    </SoftCard>
+  );
+}
+
+function MobileTicketSourceCard({ ticket }: { ticket: TicketWithRelations }) {
+  if (!shouldShowMobileSource(ticket)) return null;
+
+  const isDirector = ticket.source === "director_portal";
+  const title = isDirector ? "Заявка від директора" : "Заявка AI / Telegram";
+  const subtitle = isDirector
+    ? [ticket.creator?.full_name, ticket.director_phone ?? ticket.creator?.phone].filter(Boolean).join(" · ") || "Дані директора уточнюються"
+    : ticket.telegram_user_name || "Створено з групи Telegram";
+  const objectSearch = ticket.object?.object_number || ticket.object?.address || ticket.object?.name || "";
+  const href = objectSearch ? `/objects?q=${encodeURIComponent(objectSearch)}` : "/objects";
+
+  return (
+    <SoftCard>
+      <CardContent className="p-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-orange-500/15 text-orange-300">
+            {isDirector ? <Store className="h-5 w-5" /> : <Bot className="h-5 w-5" />}
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="text-[13px] font-semibold text-zinc-100">{title}</div>
+            <div className="mt-0.5 truncate text-[11px] text-zinc-400">{subtitle}</div>
+            <div className="mt-0.5 truncate text-[11px] text-zinc-500">{ticket.object?.name ?? "Об'єкт"} · {ticketAddress(ticket)}</div>
+          </div>
+          <Link href={href} aria-label="Відкрити об'єкт" className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-white/10 text-zinc-300">
+            <ChevronRight className="h-4 w-4" />
+          </Link>
+        </div>
+      </CardContent>
+    </SoftCard>
+  );
+}
+
+function MobileTicketActionPanel({ ticket, profile, workers, categories }: { ticket: TicketWithRelations; profile: Profile; workers: WorkerWithCategories[]; categories: Category[] }) {
+  const editable = canEditTicket(profile, ticket);
+  const canManage = canConfirmTicket(profile);
+  if (!editable && !canManage) return null;
+
+  return (
+    <SoftCard>
+      <CardContent className="space-y-3 p-4">
+        <SectionTitle icon={CheckCircle2} title="Що зробити?" />
+
+        {editable ? (
+          <form action={updateTicketStatusAction.bind(null, ticket.id)} className="space-y-1.5">
+            <label className="text-[11px] font-semibold text-zinc-400">Статус</label>
+            <div className="grid grid-cols-[1fr_auto] gap-2">
+              <MobileSelect name="status" defaultValue={ticket.status}>
+                {mobileStatusOptions.map((status) => <option key={status} value={status}>{statusLabels[status]}</option>)}
+              </MobileSelect>
+              <SubmitButton type="submit" pendingText="..." className="h-10 rounded-xl px-3 text-[12px]">Зберегти</SubmitButton>
+            </div>
+          </form>
+        ) : null}
+
+        {canManage ? (
+          <form action={assignWorkerAction.bind(null, ticket.id)} className="space-y-1.5">
+            <label className="text-[11px] font-semibold text-zinc-400">Виконавець</label>
+            <div className="grid grid-cols-[1fr_auto] gap-2">
+              <MobileSelect name="workerId" defaultValue={ticket.assignee_worker_id ?? ""} required>
+                <option value="" disabled>Не призначено</option>
+                {workers.map((worker) => <option key={worker.id} value={worker.id}>{worker.name}</option>)}
+              </MobileSelect>
+              <SubmitButton type="submit" pendingText="..." className="h-10 rounded-xl px-3 text-[12px]">{ticket.assignee_worker_id ? "Змінити" : "Призначити"}</SubmitButton>
+            </div>
+          </form>
+        ) : null}
+
+        {canManage && categories.length > 0 ? (
+          <form action={updateTicketCategoryAction.bind(null, ticket.id)} className="space-y-1.5">
+            <label className="text-[11px] font-semibold text-zinc-400">Категорія</label>
+            <div className="grid grid-cols-[1fr_auto] gap-2">
+              <MobileSelect name="categoryId" defaultValue={ticket.category_id} required>
+                {categories.map((category) => <option key={category.id} value={category.id}>{shortCategoryName(category.name)}</option>)}
+              </MobileSelect>
+              <SubmitButton type="submit" pendingText="..." className="h-10 rounded-xl px-3 text-[12px]">Зберегти</SubmitButton>
+            </div>
+          </form>
+        ) : null}
+      </CardContent>
+    </SoftCard>
+  );
+}
+
+function MobileSelect({ children, className = "", ...props }: React.SelectHTMLAttributes<HTMLSelectElement>) {
+  return (
+    <select
+      {...props}
+      className={"h-10 min-w-0 rounded-xl border border-white/10 bg-black/30 px-3 text-[12px] text-zinc-100 outline-none focus:ring-2 focus:ring-orange-500/40 " + className}
+    >
+      {children}
+    </select>
+  );
+}
+
+function MobileTicketPhotosCard({ photos }: { photos: TicketPhotoWithUrl[] }) {
+  const beforePhotos = photos.filter((photo) => photo.type === "before");
+  const afterPhotos = photos.filter((photo) => photo.type === "after");
+  if (beforePhotos.length === 0 && afterPhotos.length === 0) return null;
+
+  return (
+    <SoftCard>
+      <CardContent className="space-y-3 p-4">
+        <SectionTitle icon={Camera} title="Фото" />
+        {beforePhotos.length > 0 ? <MobilePhotoViewer photos={beforePhotos} label="До" /> : null}
+        {afterPhotos.length > 0 ? <MobilePhotoViewer photos={afterPhotos} label="Після" /> : null}
+      </CardContent>
+    </SoftCard>
+  );
+}
+
+function MobileDeleteTicketButton({ ticketId }: { ticketId: string }) {
+  return (
+    <form action={hardDeleteTicketAction.bind(null, ticketId)} className="pt-1">
+      <ConfirmSubmitButton
+        type="submit"
+        variant="outline"
+        pendingText="Видаляємо..."
+        className="h-12 w-full rounded-xl border-red-500/30 bg-red-950/10 text-[13px] font-semibold text-red-300 hover:bg-red-500/10"
+        message="Ви точно хочете повністю видалити заявку? Цю дію не можна скасувати."
+      >
+        <Trash2 className="h-4 w-4" />
+        Видалити заявку
+      </ConfirmSubmitButton>
+    </form>
+  );
+}
+
+function shouldShowMobileSource(ticket: TicketWithRelations) {
+  if (ticket.status !== "pending_review") return false;
+  const source = (ticket.source ?? "").toLowerCase();
+  return source === "director_portal" || source.includes("telegram") || source.includes("ai") || Boolean(ticket.telegram_chat_id || ticket.telegram_source_group_id);
+}
+
+function shortCategoryName(name?: string | null) {
+  if (!name) return "Без категорії";
+  const lower = name.toLowerCase();
+  if (lower.includes("буд") && (lower.includes("звар") || lower.includes("ремонт"))) return "Буд-роботи / ремонт";
+  return name.length > 30 ? `${name.slice(0, 27).trim()}...` : name;
 }
 
 async function WorkerAssignmentSection({ ticket, profile, assignedWorker }: { ticket: TicketWithRelations; profile: Profile; assignedWorker: Worker | WorkerWithCategories | null }) {
