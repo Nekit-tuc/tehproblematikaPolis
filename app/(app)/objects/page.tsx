@@ -1,4 +1,6 @@
 ﻿import type React from "react";
+import Link from "next/link";
+import { ChevronRight, UserCog } from "lucide-react";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -84,6 +86,7 @@ export default async function ObjectsPage({ searchParams }: { searchParams: Prom
   const filteredObjects = objectsResult.data.objects;
   const managers = managersResult.data;
   const canManage = profile.role === "admin";
+  const canOpenDirectorManagement = ["admin", "management", "tech_manager"].includes(profile.role);
   const nextObjectNumber = getNextObjectNumber(objectsMetaResult.data.objects as CompanyObject[]);
   const districts = getDistricts(objectsMetaResult.data.objects as CompanyObject[]);
   const mobileView = params.view === "table" ? "table" : "cards";
@@ -107,10 +110,36 @@ export default async function ObjectsPage({ searchParams }: { searchParams: Prom
 
   return (
     <div className="page-shell space-y-2.5 md:space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Об'єкти компанії</h1>
-        <p className="subtle">Довідник магазинів, складів, виробництва, офісів та інших локацій.</p>
+      <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold">Об'єкти компанії</h1>
+          <p className="subtle">Довідник магазинів, складів, виробництва, офісів та інших локацій.</p>
+        </div>
+        {canOpenDirectorManagement ? (
+          <Link
+            href="/objects/directors"
+            className="hidden shrink-0 items-center gap-2 rounded-2xl border border-orange-400/25 bg-orange-500/10 px-4 py-2 text-sm font-semibold text-orange-200 transition hover:border-orange-300/40 hover:bg-orange-500/15 md:inline-flex"
+          >
+            <UserCog className="h-4 w-4" />
+            Керування директорами
+          </Link>
+        ) : null}
       </div>
+
+      {canOpenDirectorManagement ? (
+        <Link href="/objects/directors" className="mobile-card flex items-center justify-between gap-3 p-3 md:hidden">
+          <span className="flex min-w-0 items-center gap-3">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-orange-500/12 text-orange-300 ring-1 ring-orange-300/20">
+              <UserCog className="h-5 w-5" />
+            </span>
+            <span className="min-w-0">
+              <span className="block truncate text-sm font-semibold text-stone-100">Керування директорами</span>
+              <span className="mt-0.5 line-clamp-2 text-[11px] leading-4 text-stone-500">Підтвердження акаунтів і прив'язка до магазинів</span>
+            </span>
+          </span>
+          <ChevronRight className="h-4 w-4 shrink-0 text-stone-500" />
+        </Link>
+      ) : null}
       {error ? <Alert title="Помилка довідника об'єктів">{error}</Alert> : null}
       {params.success === "created" ? <Alert title="Об'єкт створено">Новий об'єкт додано до довідника.</Alert> : null}
       {params.success === "updated" ? <Alert title="Об'єкт оновлено">Зміни збережено.</Alert> : null}
