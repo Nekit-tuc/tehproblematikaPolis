@@ -10,8 +10,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getTicket } from "@/lib/supabase/queries";
 import { assignTicketToWorker, confirmWorkerCompletion, unassignTicketWorker } from "@/lib/supabase/workers";
 import { createClient } from "@/lib/supabase/server";
-import { addConfirmedTicketToWeeklyDraftPlan } from "@/lib/supabase/work-plans";
 import { sendTicketToWorker, sendWorkerCompletionConfirmedNotification } from "@/lib/telegram/worker-notifications";
+import { confirmTicketWithPlanningDecision } from "@/lib/tickets/confirm-ticket-with-planning";
 import type { PhotoType, TicketStatus } from "@/types/domain";
 
 function readString(formData: FormData, key: string) {
@@ -182,58 +182,22 @@ export async function updateTicketCategoryAction(ticketId: string, formData: For
 }
 
 export async function confirmTicketAction(ticketId: string) {
-  const { user, profile } = await requireAuth();
-  const ticketResult = await getTicket(ticketId);
-  const ticket = ticketResult.data;
-  if (!ticket) redirectWith(ticketId, "statusError", ticketResult.error ?? "Заявку не знайдено");
-  if (!canConfirmTicket(profile)) redirectWith(ticketId, "statusError", "Недостатньо прав для підтвердження заявки.");
-  if (ticket.status !== "pending_review") redirectWith(ticketId, "statusError", "Підтвердити можна тільки заявку, що очікує підтвердження.");
-
-  const supabase = await createClient();
-  const isDirectorTicket = ticket.source === "director_portal";
-  const nextStatus: TicketStatus = ticket.assignee_worker_id ? "assigned" : "new";
-  const updatePayload: Record<string, string | null> = {
-    status: nextStatus,
-    completed_at: null,
-    updated_at: new Date().toISOString(),
-  };
-  if (isDirectorTicket) {
-    updatePayload.admin_confirmed_at = new Date().toISOString();
-    updatePayload.confirmed_by_profile_id = user.id;
-  }
-
-  const { error } = await supabase.from("tickets").update(updatePayload).eq("id", ticketId);
-  if (error) redirectWith(ticketId, "statusError", error.message);
-
-  await supabase.from("ticket_history").insert({
-    ticket_id: ticketId,
-    actor_id: user.id,
-    action: "Заявку підтверджено",
-    metadata: { from: ticket.status, to: nextStatus, source: isDirectorTicket ? "director_portal" : ticket.source ?? null },
-  });
-
-  const planResult = await addConfirmedTicketToWeeklyDraftPlan(ticketId, user.id);
-  const planWarning = planResult.error ? confirmedPlanWarning("insert_error") : confirmedPlanWarning(planResult.data.reason);
-  if (planWarning) {
-    const adminClient = createAdminClient();
-    await adminClient.from("ticket_history").insert({
-      ticket_id: ticketId,
-      actor_id: user.id,
-      action: "Заявку підтверджено, але не додано в план виконання",
-      metadata: {
-        reason: planResult.error ?? planResult.data.reason,
-        source: ticket.source ?? null,
-      },
+    const { user } = await requireAuth();
+    const result = await confirmTicketWithPlanningDecision(ticketId, {
+      actorProfileId: user.id,
+      planningMode: "next_week",
+      sourceContext: "ticket_detail",
     });
-  }
-  if (isDirectorTicket) revalidatePath("/director/tickets");
-  revalidatePath("/work-planning");
+    if (!result.ok) redirectWith(ticketId, "statusError", result.error ?? confirmedPlanWarning(result.planning.reason));
 
-  revalidatePath(`/tickets/${ticketId}`);
-  revalidatePath("/tickets");
-  revalidatePath("/dashboard");
-  if (planWarning) redirect(`/tickets/${ticketId}?statusSuccess=confirmed&statusWarning=${encodeURIComponent(planWarning)}`);
-  redirect(`/tickets/${ticketId}?statusSuccess=confirmed`);
+    if (result.source === "director_portal") revalidatePath("/director/tickets");
+    revalidatePath("/ai-tickets");
+    revalidatePath("/work-planning");
+    revalidatePath(`/tickets/${ticketId}`);
+    revalidatePath("/tickets");
+    revalidatePath("/dashboard");
+    if (result.planning.warning) redirect(`/tickets/${ticketId}?statusSuccess=confirmed&statusWarning=${encodeURIComponent(result.planning.warning)}`);
+    redirect(`/tickets/${ticketId}?statusSuccess=confirmed`);
 }
 
 export async function rejectTicketAction(ticketId: string) {

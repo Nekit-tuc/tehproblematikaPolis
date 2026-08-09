@@ -5,9 +5,9 @@ import { redirect } from "next/navigation";
 import { canConfirmTicket } from "@/lib/auth/permissions";
 import { requireAuth } from "@/lib/auth/server";
 import { measureAsync } from "@/lib/performance";
-import { addConfirmedTicketToWeeklyDraftPlan } from "@/lib/supabase/work-plans";
 import { getTicket } from "@/lib/supabase/queries";
 import { createClient } from "@/lib/supabase/server";
+import { confirmTicketWithPlanningDecision } from "@/lib/tickets/confirm-ticket-with-planning";
 import type { TicketStatus } from "@/types/domain";
 
 function readString(formData: FormData | undefined, key: string) {
@@ -30,52 +30,25 @@ function planWarningMessage(reason: string) {
 }
 
 export async function confirmDirectorTicketAction(ticketId: string) {
-  const { user, profile } = await requireAuth();
-  if (!canConfirmTicket(profile)) redirectWith(ticketId, "statusError", "Недостатньо прав для підтвердження заявки директора.");
+    const { user } = await requireAuth();
+    const result = await confirmTicketWithPlanningDecision(ticketId, {
+      actorProfileId: user.id,
+      planningMode: "next_week",
+      sourceContext: "director_ticket_detail",
+      expectedSource: "director_portal",
+      requireObject: true,
+      requireCategory: true,
+    });
+    if (!result.ok) redirectWith(ticketId, "statusError", result.error ?? planWarningMessage(result.planning.reason));
 
-  const ticketResult = await getTicket(ticketId);
-  const ticket = ticketResult.data;
-  if (!ticket) redirectWith(ticketId, "statusError", ticketResult.error ?? "Заявку не знайдено.");
-  if (ticket.source !== "director_portal") redirectWith(ticketId, "statusError", "Це не заявка від директора.");
-  if (ticket.status !== "pending_review") redirectWith(ticketId, "statusError", "Підтвердити можна тільки заявку, що очікує перевірки.");
-  if (!ticket.object_id) redirectWith(ticketId, "statusError", "Перед підтвердженням виберіть об'єкт.");
-  if (!ticket.category_id) redirectWith(ticketId, "statusError", "Перед підтвердженням виберіть категорію.");
+    revalidatePath(`/tickets/${ticketId}`);
+    revalidatePath("/tickets");
+    revalidatePath("/dashboard");
+    revalidatePath("/work-planning");
+    revalidatePath("/director/tickets");
 
-  const supabase = await createClient();
-  const now = new Date().toISOString();
-  const nextStatus: TicketStatus = ticket.assignee_worker_id ? "assigned" : "new";
-  const { error: updateError } = await measureAsync("director-ticket:confirm", () =>
-    supabase
-      .from("tickets")
-      .update({
-        status: nextStatus,
-        admin_confirmed_at: now,
-        confirmed_by_profile_id: user.id,
-        completed_at: null,
-        updated_at: now,
-      })
-      .eq("id", ticketId),
-  );
-  if (updateError) redirectWith(ticketId, "statusError", updateError.message);
-
-  await supabase.from("ticket_history").insert({
-    ticket_id: ticketId,
-    actor_id: user.id,
-    action: "Адміністратор підтвердив заявку директора",
-    metadata: { from: ticket.status, to: nextStatus, source: "director_portal" },
-  });
-
-  const planResult = await addConfirmedTicketToWeeklyDraftPlan(ticketId, user.id);
-  const warning = planResult.error || !planResult.data.added ? planWarningMessage(planResult.data.reason) : "";
-
-  revalidatePath(`/tickets/${ticketId}`);
-  revalidatePath("/tickets");
-  revalidatePath("/dashboard");
-  revalidatePath("/work-planning");
-  revalidatePath("/director/tickets");
-
-  if (warning) redirect(`/tickets/${ticketId}?statusSuccess=confirmed&statusWarning=${encodeURIComponent(warning)}`);
-  redirect(`/tickets/${ticketId}?statusSuccess=confirmed`);
+    if (result.planning.warning) redirect(`/tickets/${ticketId}?statusSuccess=confirmed&statusWarning=${encodeURIComponent(result.planning.warning)}`);
+    redirect(`/tickets/${ticketId}?statusSuccess=confirmed`);
 }
 
 export async function rejectDirectorTicketAction(ticketId: string, formData?: FormData) {

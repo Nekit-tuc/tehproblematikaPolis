@@ -517,7 +517,7 @@ export async function createWorkPlan(input: CreateWorkPlanInput): Promise<QueryR
 }
 
 function ticketIsUnfinished(status?: string | null) {
-  return Boolean(status && !closedTicketStatuses.includes(status as TicketStatus));
+  return Boolean(status && status !== "pending_review" && !closedTicketStatuses.includes(status as TicketStatus));
 }
 
 type CarryOverItemRow = {
@@ -773,14 +773,15 @@ export async function autoAddTelegramTicketToWeeklyDraftPlan(input: {
   const { data: ticketData, error: ticketError } = await measureAsync("work-planning:auto_ticket_lookup", () =>
     supabase
       .from("tickets")
-      .select("id, source, category_id, assignee_worker_id, category:categories(name)")
+      .select("id, source, status, category_id, assignee_worker_id, category:categories(name)")
       .eq("id", input.ticketId)
       .maybeSingle(),
   );
   if (ticketError) return { data: null, error: ticketError.message };
-  const ticket = ticketData as { id: string; source?: string | null; category_id?: string | null; assignee_worker_id?: string | null; category?: { name?: string | null } | { name?: string | null }[] | null } | null;
+  const ticket = ticketData as { id: string; source?: string | null; status?: string | null; category_id?: string | null; assignee_worker_id?: string | null; category?: { name?: string | null } | { name?: string | null }[] | null } | null;
   if (!ticket) return { data: null, error: "Ticket not found" };
   if (ticket.source !== "telegram_group" && ticket.source !== "telegram_private_test") return { data: { added: false, reason: "not_telegram_ticket" }, error: null };
+  if (ticket.status === "pending_review") return { data: { added: false, reason: "pending_review_not_confirmed" }, error: null };
 
   const category = Array.isArray(ticket.category) ? ticket.category[0] : ticket.category;
   const categoryName = input.categoryName ?? category?.name ?? null;
@@ -844,12 +845,13 @@ export async function autoAddTelegramTicketToWeeklyDraftPlan(input: {
   return { data: { added: true, planId: plan.id, planTitle: plan.title, workerId, itemId: (inserted as { id?: string } | null)?.id ?? null }, error: null };
 }
 
-type ConfirmedTicketPlanReason =
+export type ConfirmedTicketPlanReason =
   | "added"
   | "already_planned"
   | "supabase_missing"
   | "ticket_not_found"
   | "closed_ticket"
+  | "pending_review_not_confirmed"
   | "missing_category"
   | "category_not_mapped"
   | "ensure_failed"
@@ -898,6 +900,9 @@ export async function addConfirmedTicketToWeeklyDraftPlan(
   if (!ticket) return { data: { added: false, reason: "ticket_not_found" }, error: null };
   if (ticket.status === "done" || ticket.status === "rejected" || ticket.status === "cancelled") {
     return { data: { added: false, reason: "closed_ticket" }, error: null };
+  }
+  if (ticket.status === "pending_review") {
+    return { data: { added: false, reason: "pending_review_not_confirmed" }, error: null };
   }
 
   const category = Array.isArray(ticket.category) ? ticket.category[0] : ticket.category;
