@@ -36,6 +36,9 @@ export default async function NewTicketPage({ searchParams }: { searchParams: Pr
       <div>
         <h1 className="text-2xl font-semibold">Нова заявка</h1>
         <p className="subtle">Створення технічного звернення з прив'язкою до об'єкта.</p>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Основний канал створення заявок - кабінет директора. Ручне створення використовується для винятків.
+        </p>
       </div>
       {loadError ? <Alert title="Не вдалося завантажити довідники">{loadError}</Alert> : null}
       {submitError ? <Alert title="Заявку не створено">{submitError}</Alert> : null}

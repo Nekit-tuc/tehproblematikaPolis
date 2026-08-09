@@ -310,6 +310,22 @@ function autoPlanConfigForCategory(categoryName: string | null | undefined) {
   ) ?? null;
 }
 
+export function getAutoWorkPlanRoutePreview(input: {
+  categoryName?: string | null;
+  worker?: Pick<Worker, "name" | "telegram_username"> | null;
+}) {
+  const workerConfig = input.worker ? planForWorker(input.worker) : null;
+  const categoryConfig = autoPlanConfigForCategory(input.categoryName);
+  const config = workerConfig ?? categoryConfig;
+  return {
+    found: Boolean(config),
+    planTitle: config?.title ?? null,
+    workerName: config?.workerName ?? null,
+    categoryName: config?.categoryName ?? null,
+    source: workerConfig ? "manual_worker" : categoryConfig ? "category" : null,
+  };
+}
+
 function autoPlanConfigForTitle(title: string | null | undefined) {
   const normalizedTitle = normalizePlanningText(title);
   if (!normalizedTitle) return null;

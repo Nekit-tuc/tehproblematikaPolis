@@ -182,22 +182,23 @@ export async function updateTicketCategoryAction(ticketId: string, formData: For
 }
 
 export async function confirmTicketAction(ticketId: string) {
-    const { user } = await requireAuth();
-    const result = await confirmTicketWithPlanningDecision(ticketId, {
-      actorProfileId: user.id,
-      planningMode: "next_week",
-      sourceContext: "ticket_detail",
-    });
-    if (!result.ok) redirectWith(ticketId, "statusError", result.error ?? confirmedPlanWarning(result.planning.reason));
+  const { user } = await requireAuth();
+  const result = await confirmTicketWithPlanningDecision(ticketId, {
+    actorProfileId: user.id,
+    planningMode: "next_week",
+    sourceContext: "ticket_detail",
+  });
+  if (!result.ok) redirectWith(ticketId, "statusError", result.error ?? confirmedPlanWarning(result.planning.reason));
 
-    if (result.source === "director_portal") revalidatePath("/director/tickets");
-    revalidatePath("/ai-tickets");
-    revalidatePath("/work-planning");
-    revalidatePath(`/tickets/${ticketId}`);
-    revalidatePath("/tickets");
-    revalidatePath("/dashboard");
-    if (result.planning.warning) redirect(`/tickets/${ticketId}?statusSuccess=confirmed&statusWarning=${encodeURIComponent(result.planning.warning)}`);
-    redirect(`/tickets/${ticketId}?statusSuccess=confirmed`);
+  if (result.source === "director_portal") revalidatePath("/director/tickets");
+  revalidatePath("/ai-tickets");
+  revalidatePath("/work-planning");
+  revalidatePath(`/tickets/${ticketId}`);
+  revalidatePath("/tickets");
+  revalidatePath("/dashboard");
+  if (result.planning.warning) redirect(`/tickets/${ticketId}?statusSuccess=confirmed&statusWarning=${encodeURIComponent(result.planning.warning)}`);
+  if (result.planning.reason === "already_planned") redirect(`/tickets/${ticketId}?statusSuccess=confirmed_already_planned`);
+  redirect(`/tickets/${ticketId}?statusSuccess=confirmed_planned`);
 }
 
 export async function rejectTicketAction(ticketId: string) {

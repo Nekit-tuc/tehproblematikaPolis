@@ -13,6 +13,7 @@ import { DirectorTicketPanel } from "@/components/tickets/director-ticket-panel"
 import { MobilePhotoViewer } from "@/components/tickets/mobile-photo-viewer";
 import { PhotoSubmitButton } from "@/components/tickets/photo-submit-button";
 import { TicketHistoryAccordion } from "@/components/tickets/ticket-history-accordion";
+import { confirmDirectorTicketAction, rejectDirectorTicketAction } from "@/app/(app)/tickets/[id]/director-actions";
 import { canAddTicketPhoto, canConfirmTicket, canEditTicket, canHardDeleteTicket, canUnassignWorkerFromTicket } from "@/lib/auth/permissions";
 import { requireAuth } from "@/lib/auth/server";
 import { photoTypeLabels } from "@/lib/photos";
@@ -40,6 +41,21 @@ import {
 
 const photoGroups: PhotoType[] = ["before", "progress", "after"];
 const mobileStatusOptions: TicketStatus[] = ["new", "assigned", "in_progress", "waiting", "waiting_admin_confirmation", "done", "cancelled", "rejected"];
+
+function statusSuccessMessage(value?: string) {
+  if (value === "confirmed_planned") return "Заявку підтверджено і додано в план.";
+  if (value === "confirmed_already_planned") return "Заявку підтверджено. Вона вже є в плані.";
+  if (value === "confirmed_no_plan") return "Заявку підтверджено без додавання в план.";
+  if (value === "confirmed") return "Заявку підтверджено.";
+  if (value === "rejected") return "Заявку відхилено.";
+  if (value === "category") return "Категорію заявки збережено.";
+  if (value === "assigned") return "Виконавця призначено.";
+  if (value === "unassigned") return "Виконавця знято із заявки.";
+  if (value === "sent") return "Заявку надіслано виконавцю.";
+  if (value === "worker_confirmed") return "Виконання заявки підтверджено.";
+  if (value === "worker_returned") return "Заявку повернуто в роботу.";
+  return "Новий статус заявки збережено.";
+}
 
 export default async function TicketDetailsPage({
   params,
@@ -79,7 +95,7 @@ export default async function TicketDetailsPage({
       {query.commentError ? <Alert title={"Коментар не додано"}>{decodeURIComponent(query.commentError)}</Alert> : null}
       {query.commentSuccess ? <Alert title={"Коментар додано"}>{"Повідомлення збережено в заявці."}</Alert> : null}
       {query.statusError ? <Alert title={"Статус не змінено"}>{decodeURIComponent(query.statusError)}</Alert> : null}
-      {query.statusSuccess ? <Alert title={"Статус оновлено"}>{"Новий статус заявки збережено."}</Alert> : null}
+      {query.statusSuccess ? <Alert title={"Статус оновлено"}>{statusSuccessMessage(query.statusSuccess)}</Alert> : null}
       {query.statusWarning ? <Alert title="Потрібна увага">{decodeURIComponent(query.statusWarning)}</Alert> : null}
 
       {!ticket ? (
@@ -224,7 +240,29 @@ function MobileTicketMainCard({ ticket, profile, assignedWorker }: { ticket: Tic
           </div>
         </div>
 
-        {canReview ? (
+        {canReview && ticket.source === "director_portal" ? (
+          <div className="space-y-2 pt-1">
+            <form action={confirmDirectorTicketAction.bind(null, ticket.id)}>
+              <SubmitButton type="submit" pendingText="Підтверджуємо..." className="h-12 w-full rounded-xl bg-orange-500 px-3 text-[13px] font-semibold text-black hover:bg-orange-400">
+                Підтвердити і додати в план
+              </SubmitButton>
+            </form>
+            <div className="grid grid-cols-2 gap-2">
+              <form action={confirmDirectorTicketAction.bind(null, ticket.id)}>
+                <input type="hidden" name="planningMode" value="no_plan" />
+                <SubmitButton type="submit" pendingText="Підтверджуємо..." variant="outline" className="h-10 w-full rounded-xl border-white/10 px-2 text-[11px] font-semibold text-zinc-200 hover:bg-white/5">
+                  Без плану
+                </SubmitButton>
+              </form>
+              <form action={rejectDirectorTicketAction.bind(null, ticket.id)}>
+                <input type="hidden" name="reason" value="" />
+                <SubmitButton type="submit" pendingText="Відхиляємо..." variant="outline" className="h-10 w-full rounded-xl border-red-500/30 px-2 text-[11px] font-semibold text-red-300 hover:bg-red-500/10">
+                  Відхилити
+                </SubmitButton>
+              </form>
+            </div>
+          </div>
+        ) : canReview ? (
           <div className="grid grid-cols-2 gap-2 pt-1">
             <form action={confirmTicketAction.bind(null, ticket.id)}>
               <SubmitButton type="submit" pendingText="Підтверджуємо..." className="h-11 w-full rounded-xl bg-orange-500 px-2 text-[13px] font-semibold text-black hover:bg-orange-400">Підтвердити</SubmitButton>

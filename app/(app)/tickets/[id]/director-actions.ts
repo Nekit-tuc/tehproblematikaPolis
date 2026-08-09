@@ -29,26 +29,30 @@ function planWarningMessage(reason: string) {
   return "Заявку підтверджено, але не додано в план. Перевірте категорію або виконавця.";
 }
 
-export async function confirmDirectorTicketAction(ticketId: string) {
-    const { user } = await requireAuth();
-    const result = await confirmTicketWithPlanningDecision(ticketId, {
-      actorProfileId: user.id,
-      planningMode: "next_week",
-      sourceContext: "director_ticket_detail",
-      expectedSource: "director_portal",
-      requireObject: true,
-      requireCategory: true,
-    });
-    if (!result.ok) redirectWith(ticketId, "statusError", result.error ?? planWarningMessage(result.planning.reason));
+export async function confirmDirectorTicketAction(ticketId: string, formData?: FormData) {
+  const { user } = await requireAuth();
+  const requestedPlanningMode = readString(formData, "planningMode");
+  const planningMode = requestedPlanningMode === "no_plan" ? "no_plan" : "next_week";
+  const result = await confirmTicketWithPlanningDecision(ticketId, {
+    actorProfileId: user.id,
+    planningMode,
+    sourceContext: planningMode === "no_plan" ? "director_ticket_detail_no_plan" : "director_ticket_detail",
+    expectedSource: "director_portal",
+    requireObject: true,
+    requireCategory: true,
+  });
+  if (!result.ok) redirectWith(ticketId, "statusError", result.error ?? planWarningMessage(result.planning.reason));
 
-    revalidatePath(`/tickets/${ticketId}`);
-    revalidatePath("/tickets");
-    revalidatePath("/dashboard");
-    revalidatePath("/work-planning");
-    revalidatePath("/director/tickets");
+  revalidatePath(`/tickets/${ticketId}`);
+  revalidatePath("/tickets");
+  revalidatePath("/dashboard");
+  revalidatePath("/work-planning");
+  revalidatePath("/director/tickets");
 
-    if (result.planning.warning) redirect(`/tickets/${ticketId}?statusSuccess=confirmed&statusWarning=${encodeURIComponent(result.planning.warning)}`);
-    redirect(`/tickets/${ticketId}?statusSuccess=confirmed`);
+  if (result.planning.warning) redirect(`/tickets/${ticketId}?statusSuccess=confirmed&statusWarning=${encodeURIComponent(result.planning.warning)}`);
+  if (planningMode === "no_plan") redirect(`/tickets/${ticketId}?statusSuccess=confirmed_no_plan`);
+  if (result.planning.reason === "already_planned") redirect(`/tickets/${ticketId}?statusSuccess=confirmed_already_planned`);
+  redirect(`/tickets/${ticketId}?statusSuccess=confirmed_planned`);
 }
 
 export async function rejectDirectorTicketAction(ticketId: string, formData?: FormData) {

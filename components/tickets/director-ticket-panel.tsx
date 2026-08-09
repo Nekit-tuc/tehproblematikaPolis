@@ -6,6 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { canConfirmTicket } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
+import { getAutoWorkPlanRoutePreview } from "@/lib/supabase/work-plans";
 import { getWorkCompletionActForTicket } from "@/lib/supabase/work-completion-acts";
 import { formatDate } from "@/lib/utils";
 import type { Profile, TicketWithRelations } from "@/types/domain";
@@ -38,6 +39,7 @@ export async function DirectorTicketPanel({ ticket, profile }: DirectorTicketPan
   const act = actResult.data;
   const canModerate = canConfirmTicket(profile) && ticket.status === "pending_review";
   const directorPhone = ticket.director_phone || director?.phone || "Не вказано";
+  const routePreview = getAutoWorkPlanRoutePreview({ categoryName: ticket.category?.name, worker: ticket.worker });
 
   return (
     <Card className="rounded-[22px] border-orange-400/20 bg-orange-500/[0.06] shadow-[0_12px_32px_rgba(0,0,0,0.28)]">
@@ -80,20 +82,48 @@ export async function DirectorTicketPanel({ ticket, profile }: DirectorTicketPan
         </div>
 
         {canModerate ? (
-          <div className="grid gap-2 rounded-[16px] border border-white/[0.08] bg-black/20 p-3">
-            <p className="text-[12px] text-zinc-400">
-              Перед підтвердженням можна змінити категорію, виконавця, пріоритет або опис у стандартних блоках заявки.
-            </p>
-            <div className="grid grid-cols-2 gap-2">
-              <form action={confirmDirectorTicketAction.bind(null, ticket.id)}>
-                <SubmitButton type="submit" pendingText="Підтверджуємо..." className="h-10 w-full rounded-[14px] bg-emerald-600 px-2 text-[11px] hover:bg-emerald-500 md:text-sm">
-                  <CheckCircle2 className="h-3.5 w-3.5" />
-                  Підтвердити заявку
+          <div className="grid gap-3 rounded-[16px] border border-white/[0.08] bg-black/20 p-3">
+            <div className="space-y-1">
+              <div className="text-[13px] font-semibold text-zinc-100">Підтвердження заявки</div>
+              <p className="text-[12px] leading-5 text-zinc-400">
+                Після підтвердження система автоматично додасть заявку в план за категорією. Перед підтвердженням перевірте категорію і за потреби змініть її у блоці дій заявки.
+              </p>
+            </div>
+
+            <div className="grid gap-2 text-[11px] md:grid-cols-2 md:text-xs">
+              <Info label="Категорія" value={ticket.category?.name ?? "Не вибрано"} />
+              <Info label="Ручний виконавець" value={ticket.worker?.name ?? "Не призначено"} />
+            </div>
+
+            {routePreview.found ? (
+              <div className="rounded-[14px] border border-emerald-400/20 bg-emerald-500/10 p-3 text-[12px] leading-5 text-emerald-100">
+                Після підтвердження заявка буде додана в план: <span className="font-semibold">{routePreview.workerName} — {routePreview.planTitle}</span>.
+                {routePreview.source === "manual_worker" ? <span className="mt-1 block text-emerald-100/75">Використовується ручне призначення виконавця.</span> : null}
+              </div>
+            ) : (
+              <div className="rounded-[14px] border border-amber-400/25 bg-amber-500/10 p-3 text-[12px] leading-5 text-amber-100">
+                Для цієї категорії не знайдено план або виконавця. Заявку можна підтвердити, але вона не буде автоматично додана в план.
+              </div>
+            )}
+
+            <form action={confirmDirectorTicketAction.bind(null, ticket.id)}>
+              <SubmitButton type="submit" pendingText="Підтверджуємо..." className="h-11 w-full rounded-[14px] bg-orange-500 px-3 text-[12px] font-semibold text-black hover:bg-orange-400 md:text-sm">
+                <CheckCircle2 className="h-4 w-4" />
+                Підтвердити і додати в план
+              </SubmitButton>
+            </form>
+
+            <div className="grid gap-2 md:grid-cols-2">
+              <form action={confirmDirectorTicketAction.bind(null, ticket.id)} className="grid gap-1.5">
+                <input type="hidden" name="planningMode" value="no_plan" />
+                <SubmitButton type="submit" pendingText="Підтверджуємо..." variant="outline" className="h-10 w-full rounded-[14px] border-white/10 px-2 text-[11px] text-zinc-200 hover:bg-white/5 md:text-xs">
+                  Підтвердити без плану
                 </SubmitButton>
+                <p className="text-[10px] leading-4 text-zinc-500">Використовуйте тільки для нестандартних випадків.</p>
               </form>
-              <form action={rejectDirectorTicketAction.bind(null, ticket.id)} className="grid gap-2">
+              <form action={rejectDirectorTicketAction.bind(null, ticket.id)} className="grid gap-1.5">
                 <input type="hidden" name="reason" value="" />
-                <SubmitButton type="submit" pendingText="Відхиляємо..." variant="destructive" className="h-10 w-full rounded-[14px] px-2 text-[11px] md:text-sm">
+                <SubmitButton type="submit" pendingText="Відхиляємо..." variant="outline" className="h-10 w-full rounded-[14px] border-red-500/30 px-2 text-[11px] text-red-300 hover:bg-red-500/10 md:text-xs">
                   <XCircle className="h-3.5 w-3.5" />
                   Відхилити
                 </SubmitButton>
