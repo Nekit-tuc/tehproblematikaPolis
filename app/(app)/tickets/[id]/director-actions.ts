@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { canConfirmTicket } from "@/lib/auth/permissions";
 import { requireAuth } from "@/lib/auth/server";
 import { measureAsync } from "@/lib/performance";
-import { addDirectorTicketToWeeklyDraftPlan } from "@/lib/supabase/director-queries";
+import { addConfirmedTicketToWeeklyDraftPlan } from "@/lib/supabase/work-plans";
 import { getTicket } from "@/lib/supabase/queries";
 import { createClient } from "@/lib/supabase/server";
 import type { TicketStatus } from "@/types/domain";
@@ -65,7 +65,7 @@ export async function confirmDirectorTicketAction(ticketId: string) {
     metadata: { from: ticket.status, to: nextStatus, source: "director_portal" },
   });
 
-  const planResult = await addDirectorTicketToWeeklyDraftPlan(ticketId, user.id);
+  const planResult = await addConfirmedTicketToWeeklyDraftPlan(ticketId, user.id);
   const warning = planResult.error || !planResult.data.added ? planWarningMessage(planResult.data.reason) : "";
 
   revalidatePath(`/tickets/${ticketId}`);

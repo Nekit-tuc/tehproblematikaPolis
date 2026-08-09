@@ -26,7 +26,7 @@ function publicError(message?: string | null) {
 }
 
 function normalizeWorkPlanPeriod(periodStart: string, periodEnd: string) {
-  const range = getWorkWeekRange(new Date(`${periodStart}T15:00:00`));
+  const range = getWorkWeekRange(new Date(`${periodStart}T17:00:00`));
   if (periodEnd && periodEnd !== range.endDate) {
     console.warn("[work-planning] period_end normalized to work week boundary", { periodStart, periodEnd, normalizedEnd: range.endDate });
   }

@@ -844,6 +844,155 @@ export async function autoAddTelegramTicketToWeeklyDraftPlan(input: {
   return { data: { added: true, planId: plan.id, planTitle: plan.title, workerId, itemId: (inserted as { id?: string } | null)?.id ?? null }, error: null };
 }
 
+type ConfirmedTicketPlanReason =
+  | "added"
+  | "already_planned"
+  | "supabase_missing"
+  | "ticket_not_found"
+  | "closed_ticket"
+  | "missing_category"
+  | "category_not_mapped"
+  | "ensure_failed"
+  | "plan_not_found"
+  | "existing_error"
+  | "insert_error";
+
+export type ConfirmedTicketPlanResult = {
+  added: boolean;
+  reason: ConfirmedTicketPlanReason;
+  planId?: string;
+  planTitle?: string;
+  itemId?: string | null;
+  workerId?: string | null;
+};
+
+function planForWorker(worker: Pick<Worker, "name" | "telegram_username"> | null | undefined) {
+  if (!worker) return null;
+  return autoWorkPlanConfigs.find((config) => workerMatches(worker, config)) ?? null;
+}
+
+export async function addConfirmedTicketToWeeklyDraftPlan(
+  ticketId: string,
+  actorId?: string | null,
+): Promise<QueryResult<ConfirmedTicketPlanResult>> {
+  if (!hasSupabaseEnv()) return { data: { added: false, reason: "supabase_missing" }, error: missingSupabaseMessage };
+  const supabase = createAdminClient();
+
+  const { data: ticketData, error: ticketError } = await measureAsync("work-plan:add-confirmed-ticket:lookup", () =>
+    supabase
+      .from("tickets")
+      .select("id, source, status, category_id, assignee_worker_id, category:categories(name), worker:workers(name, telegram_username)")
+      .eq("id", ticketId)
+      .maybeSingle(),
+  );
+  if (ticketError) return { data: { added: false, reason: "ticket_not_found" }, error: ticketError.message };
+  const ticket = ticketData as {
+    id: string;
+    source?: string | null;
+    status?: string | null;
+    category_id?: string | null;
+    assignee_worker_id?: string | null;
+    category?: { name?: string | null } | { name?: string | null }[] | null;
+    worker?: Pick<Worker, "name" | "telegram_username"> | Pick<Worker, "name" | "telegram_username">[] | null;
+  } | null;
+  if (!ticket) return { data: { added: false, reason: "ticket_not_found" }, error: null };
+  if (ticket.status === "done" || ticket.status === "rejected" || ticket.status === "cancelled") {
+    return { data: { added: false, reason: "closed_ticket" }, error: null };
+  }
+
+  const category = Array.isArray(ticket.category) ? ticket.category[0] : ticket.category;
+  const categoryName = category?.name ?? null;
+  if (!ticket.category_id || !categoryName) return { data: { added: false, reason: "missing_category" }, error: null };
+
+  const worker = Array.isArray(ticket.worker) ? ticket.worker[0] : ticket.worker;
+  const categoryConfig = autoPlanConfigForCategory(categoryName);
+  const workerConfig = ticket.assignee_worker_id ? planForWorker(worker) : null;
+  const config = workerConfig ?? categoryConfig;
+  if (!config) return { data: { added: false, reason: "category_not_mapped" }, error: null };
+
+  const plansResult = await ensureWeeklyDraftPlansForAutoRouting();
+  if (plansResult.error) return { data: { added: false, reason: "ensure_failed" }, error: plansResult.error };
+  const weekPlanIds = plansResult.data.plans.map((plan) => plan.id);
+  if (weekPlanIds.length === 0) return { data: { added: false, reason: "plan_not_found" }, error: null };
+
+  const existingResult = await measureAsync("work-plan:add-confirmed-ticket:existing", () =>
+    supabase
+      .from("work_plan_items")
+      .select("id, work_plan:work_plans!inner(id,title)")
+      .eq("ticket_id", ticketId)
+      .in("work_plan_id", weekPlanIds)
+      .limit(1)
+      .maybeSingle(),
+  );
+  if (existingResult.error) return { data: { added: false, reason: "existing_error" }, error: existingResult.error.message };
+  if (existingResult.data) {
+    const row = existingResult.data as { id?: string | null; work_plan?: { id?: string | null; title?: string | null } | { id?: string | null; title?: string | null }[] | null };
+    const existingPlan = Array.isArray(row.work_plan) ? row.work_plan[0] : row.work_plan;
+    return {
+      data: {
+        added: false,
+        reason: "already_planned",
+        planId: existingPlan?.id ?? undefined,
+        planTitle: existingPlan?.title ?? undefined,
+        itemId: row.id ?? null,
+      },
+      error: null,
+    };
+  }
+
+  const plan = plansResult.data.plans.find((item) => item.title === config.title && item.status === "draft");
+  if (!plan) return { data: { added: false, reason: "plan_not_found" }, error: null };
+
+  const workerId = ticket.assignee_worker_id ?? await findAutoPlanWorkerId(supabase, config);
+  const countResult = await measureAsync("work-plan:add-confirmed-ticket:count", () =>
+    supabase.from("work_plan_items").select("id", { count: "exact", head: true }).eq("work_plan_id", plan.id),
+  );
+  const sortOrder = countResult.count ?? 0;
+
+  const { data: inserted, error: insertError } = await measureAsync("work-plan:add-confirmed-ticket:insert", () =>
+    supabase
+      .from("work_plan_items")
+      .insert({
+        work_plan_id: plan.id,
+        ticket_id: ticketId,
+        worker_id: workerId,
+        category: categoryName,
+        sort_order: sortOrder,
+      })
+      .select("id")
+      .single(),
+  );
+  if (insertError) {
+    if (insertError.code === "23505") return { data: { added: false, reason: "already_planned", planId: plan.id, planTitle: plan.title }, error: null };
+    return { data: { added: false, reason: "insert_error" }, error: insertError.message };
+  }
+
+  await supabase.from("ticket_history").insert({
+    ticket_id: ticketId,
+    actor_id: actorId ?? null,
+    action: "Заявку додано в план виконання",
+    metadata: {
+      work_plan_id: plan.id,
+      work_plan_title: plan.title,
+      category: categoryName,
+      worker_id: workerId,
+      source: "confirmed_ticket_planning",
+    },
+  });
+
+  return {
+    data: {
+      added: true,
+      reason: "added",
+      planId: plan.id,
+      planTitle: plan.title,
+      workerId,
+      itemId: (inserted as { id?: string } | null)?.id ?? null,
+    },
+    error: null,
+  };
+}
+
 export async function addTicketsToWorkPlan(workPlanId: string, ticketIds: string[]) {
   if (!hasSupabaseEnv()) return { data: null, error: missingSupabaseMessage };
   const uniqueTicketIds = Array.from(new Set(ticketIds.filter(Boolean)));
@@ -970,7 +1119,7 @@ function duplicateRepeatTicketObject(ticket: NonNullable<ReturnType<typeof dupli
 export async function getWorkPlanningDuplicateRepeatsForWeek(week: { startDate: string; endDate: string }): Promise<QueryResult<WorkPlanningDuplicateRepeat[]>> {
   if (!hasSupabaseEnv()) return emptyWithError([]);
   const supabase = await createClient();
-  const range = getWorkWeekRange(new Date(`${week.startDate}T15:00:00`));
+  const range = getWorkWeekRange(new Date(`${week.startDate}T17:00:00`));
 
   const { data: planItemsData, error: planItemsError } = await measureAsync("work-planning:duplicate_week_items", () =>
     supabase
@@ -1086,7 +1235,7 @@ export async function getWorkPlanningWeeksOverview(weeks: Array<Pick<WorkPlannin
   if (weeks.length === 0) return { data: [], error: null };
 
   const supabase = await createClient();
-  const weekRanges = weeks.map((week) => ({ ...week, range: getWorkWeekRange(new Date(`${week.startDate}T15:00:00`)) }));
+  const weekRanges = weeks.map((week) => ({ ...week, range: getWorkWeekRange(new Date(`${week.startDate}T17:00:00`)) }));
   const firstStart = weekRanges[0].range.startIso;
   const lastEnd = weekRanges[weekRanges.length - 1].range.endIso;
   const ticketIdsByWeek = new Map<string, Set<string>>();

@@ -10,7 +10,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getTicket } from "@/lib/supabase/queries";
 import { assignTicketToWorker, confirmWorkerCompletion, unassignTicketWorker } from "@/lib/supabase/workers";
 import { createClient } from "@/lib/supabase/server";
-import { addDirectorTicketToWeeklyDraftPlan } from "@/lib/supabase/director-queries";
+import { addConfirmedTicketToWeeklyDraftPlan } from "@/lib/supabase/work-plans";
 import { sendTicketToWorker, sendWorkerCompletionConfirmedNotification } from "@/lib/telegram/worker-notifications";
 import type { PhotoType, TicketStatus } from "@/types/domain";
 
@@ -32,6 +32,16 @@ function deleteErrorRedirect(ticketId: string, message: string, returnTo?: strin
   console.error("[ticket-delete] failed", { ticketId, message });
   if (returnTo) redirect(appendSearchParam(returnTo, "error", message));
   redirectWith(ticketId, "statusError", message);
+}
+
+function confirmedPlanWarning(reason?: string | null) {
+  if (!reason || reason === "added" || reason === "already_planned") return "";
+  if (reason === "missing_category") return "Заявку підтверджено, але не додано в план: у заявки не вибрано категорію.";
+  if (reason === "category_not_mapped") return "Заявку підтверджено, але не додано в план виконання. Для цієї категорії не знайдено план або виконавця.";
+  if (reason === "plan_not_found") return "Заявку підтверджено, але не додано в план виконання. Чернетку потрібного плану не знайдено.";
+  if (reason === "ensure_failed") return "Заявку підтверджено, але не вдалося підготувати чернетки планів тижня.";
+  if (reason === "closed_ticket") return "Заявку підтверджено, але її не додано в план, бо вона вже закрита.";
+  return "Заявку підтверджено, але не додано в план. Перевірте категорію або виконавця.";
 }
 
 const statusActionLabels: Record<TicketStatus, string> = {
@@ -181,7 +191,7 @@ export async function confirmTicketAction(ticketId: string) {
 
   const supabase = await createClient();
   const isDirectorTicket = ticket.source === "director_portal";
-  const nextStatus: TicketStatus = isDirectorTicket && ticket.assignee_worker_id ? "assigned" : "new";
+  const nextStatus: TicketStatus = ticket.assignee_worker_id ? "assigned" : "new";
   const updatePayload: Record<string, string | null> = {
     status: nextStatus,
     completed_at: null,
@@ -202,16 +212,27 @@ export async function confirmTicketAction(ticketId: string) {
     metadata: { from: ticket.status, to: nextStatus, source: isDirectorTicket ? "director_portal" : ticket.source ?? null },
   });
 
-  if (isDirectorTicket) {
-    const planResult = await addDirectorTicketToWeeklyDraftPlan(ticketId, user.id);
-    if (planResult.error) console.warn("[director] add to plan failed", { ticketId, error: planResult.error });
-    revalidatePath("/director/tickets");
-    revalidatePath("/work-planning");
+  const planResult = await addConfirmedTicketToWeeklyDraftPlan(ticketId, user.id);
+  const planWarning = planResult.error ? confirmedPlanWarning("insert_error") : confirmedPlanWarning(planResult.data.reason);
+  if (planWarning) {
+    const adminClient = createAdminClient();
+    await adminClient.from("ticket_history").insert({
+      ticket_id: ticketId,
+      actor_id: user.id,
+      action: "Заявку підтверджено, але не додано в план виконання",
+      metadata: {
+        reason: planResult.error ?? planResult.data.reason,
+        source: ticket.source ?? null,
+      },
+    });
   }
+  if (isDirectorTicket) revalidatePath("/director/tickets");
+  revalidatePath("/work-planning");
 
   revalidatePath(`/tickets/${ticketId}`);
   revalidatePath("/tickets");
   revalidatePath("/dashboard");
+  if (planWarning) redirect(`/tickets/${ticketId}?statusSuccess=confirmed&statusWarning=${encodeURIComponent(planWarning)}`);
   redirect(`/tickets/${ticketId}?statusSuccess=confirmed`);
 }
 

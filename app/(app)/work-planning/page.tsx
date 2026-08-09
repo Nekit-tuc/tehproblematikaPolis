@@ -177,7 +177,7 @@ function planningHref(params: Record<string, string | undefined | null>) {
 }
 
 function weekRangeFromStart(startDate: string): WorkWeekRange {
-  return getWorkWeekRange(new Date(`${startDate}T15:00:00`));
+  return getWorkWeekRange(new Date(`${startDate}T17:00:00`));
 }
 
 function buildPlanningWeeks(currentWeek: WorkWeekRange, selectedWeek: WorkWeekRange) {

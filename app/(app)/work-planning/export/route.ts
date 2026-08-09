@@ -152,7 +152,7 @@ export async function GET(request: NextRequest) {
   await requireRole(["admin", "management", "tech_manager"]);
   const url = new URL(request.url);
   const weekParam = url.searchParams.get("week");
-  const week = getWorkWeekRange(weekParam ? new Date(`${weekParam}T15:00:00`) : new Date());
+  const week = getWorkWeekRange(weekParam ? new Date(`${weekParam}T17:00:00`) : new Date());
 
   const plansResult = await getWorkPlans({ from: week.startIso, to: week.endIso, limit: 300 });
   if (plansResult.error) return NextResponse.json({ error: plansResult.error }, { status: 500 });

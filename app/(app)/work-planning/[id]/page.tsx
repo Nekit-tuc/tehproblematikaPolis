@@ -432,6 +432,7 @@ function PlanItemCard({ item, plan, draftPlans, workers, categories, profile }: 
         </div>
         <div className="mt-1 line-clamp-2 break-words text-[10px] leading-4 text-zinc-400 md:text-xs">{ticket?.title || ticket?.description || "-"}</div>
         <div className="mt-1 line-clamp-1 break-words text-[10px] text-zinc-500 md:text-xs">{ticket?.category?.name ?? item.category ?? "-"}</div>
+        {ticket?.source === "director_portal" ? <Badge className="mt-1.5 w-fit rounded-[8px] px-2 text-[9px] md:text-xs" tone="orange">Від директора</Badge> : null}
         <div className="mt-1 line-clamp-1 break-words text-[10px] font-medium text-zinc-300 md:text-xs">Виконавець: {workerLabel}</div>
         {completionNote ? <div className="mt-1.5 flex items-center gap-1.5 break-words text-[9px] font-medium text-emerald-300 md:text-xs"><CheckCircle className="h-3 w-3 shrink-0" />{completionNote}</div> : null}
       </div>
