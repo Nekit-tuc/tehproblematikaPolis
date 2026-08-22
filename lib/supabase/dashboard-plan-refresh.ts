@@ -608,7 +608,7 @@ export async function addTicketsToSelectedWeekPlans(input: {
         work_plan_id: planResult.plan.id,
         ticket_id: ticket.id,
         worker_id: targetWorker.id,
-        status: "planned",
+        category: category?.name ?? null,
         sort_order: count ?? 0,
       });
 

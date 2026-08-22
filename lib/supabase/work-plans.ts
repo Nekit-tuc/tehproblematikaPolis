@@ -161,7 +161,7 @@ export type UpdateWorkPlanInput = {
   notes?: string | null;
 };
 
-const planningStatuses: TicketStatus[] = ["new", "assigned", "in_progress", "waiting_admin_confirmation"];
+const planningStatuses: TicketStatus[] = ["new", "assigned", "in_progress", "waiting", "waiting_admin_confirmation"];
 const activeWorkPlanStatuses: WorkPlanStatus[] = ["draft", "sent", "partially_done"];
 const closedTicketStatuses: TicketStatus[] = ["done", "cancelled", "rejected"];
 type AutoWorkPlanConfig = {
@@ -1871,7 +1871,8 @@ async function sendWorkPlanToWorkerGroup(input: {
 export async function getWorkPlanningSummary(): Promise<QueryResult<WorkPlanningSummary>> {
   if (!hasSupabaseEnv()) return emptyWithError({ totalActive: 0, plannedActive: 0, unplannedActive: 0 });
   const supabase = await createClient();
-  const activeStatuses: TicketStatus[] = ["new", "assigned", "in_progress", "waiting", "waiting_admin_confirmation", "pending_review"];
+  const activeStatuses: TicketStatus[] = planningStatuses;
+  const currentWeek = getWorkWeekRange();
 
   const [activeTicketsResult, plannedRowsResult] = await Promise.all([
     measureAsync("work-planning:summary_active_tickets", () =>
@@ -1881,8 +1882,10 @@ export async function getWorkPlanningSummary(): Promise<QueryResult<WorkPlanning
       supabase
         .from("work_plan_items")
         .select("ticket_id, ticket:tickets!inner(status), work_plan:work_plans!inner(status)")
-        .in("work_plan.status", ["sent", "partially_done"])
-        .in("ticket.status", activeStatuses),
+        .in("work_plan.status", activeWorkPlanStatuses)
+        .in("ticket.status", activeStatuses)
+        .eq("work_plan.period_start", currentWeek.startDate)
+        .eq("work_plan.period_end", currentWeek.endDate),
     ),
   ]);
 
