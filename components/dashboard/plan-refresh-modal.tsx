@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, CheckCircle2, RefreshCw, X } from "lucide-react";
 import { updatePlansFromDashboardAction } from "@/app/(app)/dashboard/actions";
 import type {
@@ -55,6 +55,21 @@ export function PlanRefreshModal({ data, error }: { data: DashboardPlanRefreshDa
   const [targetWeek, setTargetWeek] = useState<DashboardPlanRefreshTargetWeek>("next_week");
   const selectedWeek = targetWeek === "current_week" ? data?.weeks.current : data?.weeks.next;
   const selectableCount = useMemo(() => data?.tickets.filter((ticket) => !disabledReason(ticket, targetWeek)).length ?? 0, [data, targetWeek]);
+  const closeModal = () => setOpen(false);
+
+  useEffect(() => {
+    if (!open) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open]);
 
   return (
     <>
@@ -68,25 +83,36 @@ export function PlanRefreshModal({ data, error }: { data: DashboardPlanRefreshDa
       </button>
 
       {open ? (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-3 backdrop-blur-sm md:items-center md:p-6">
-          <div className="max-h-[92vh] w-full max-w-5xl overflow-hidden rounded-3xl border border-white/10 bg-zinc-950 shadow-2xl shadow-black/60">
-            <div className="flex items-start justify-between gap-4 border-b border-white/10 p-4">
+        <>
+          <div className="fixed inset-0 z-[100] bg-black/75 backdrop-blur-sm" onClick={closeModal} />
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="plan-refresh-title"
+            className="fixed left-1/2 top-1/2 z-[101] flex max-h-[calc(100dvh-32px)] w-[calc(100vw-24px)] max-w-[420px] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-[18px] border border-white/10 bg-zinc-950 shadow-2xl shadow-black/60 md:max-h-[calc(100vh-48px)] md:max-w-5xl md:rounded-3xl"
+          >
+            <div className="shrink-0 border-b border-white/10 p-3 md:p-4">
+              <button
+                type="button"
+                onClick={closeModal}
+                className="mb-2 inline-flex h-9 items-center gap-2 rounded-xl border border-white/10 px-3 text-xs font-semibold text-zinc-200 hover:bg-white/10"
+              >
+                <X className="h-4 w-4" />
+                Закрити
+              </button>
               <div className="min-w-0">
-                <h2 className="text-lg font-semibold text-zinc-50">Оновити плани</h2>
+                <h2 id="plan-refresh-title" className="text-lg font-semibold text-zinc-50">Оновити плани</h2>
                 <p className="mt-1 max-w-2xl text-sm text-zinc-400">
                   Оберіть невиконані заявки, змініть виконавця за потреби та додайте їх у план поточного або наступного тижня.
                 </p>
               </div>
-              <button type="button" onClick={() => setOpen(false)} className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-white/10 text-zinc-300 hover:bg-white/10" aria-label="Закрити">
-                <X className="h-4 w-4" />
-              </button>
             </div>
 
             {error ? <div className="m-4 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">{error}</div> : null}
 
             {data ? (
-              <form action={updatePlansFromDashboardAction} className="flex max-h-[calc(92vh-92px)] flex-col">
-                <div className="border-b border-white/10 p-4">
+              <form action={updatePlansFromDashboardAction} className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                <div className="shrink-0 border-b border-white/10 p-3 md:p-4">
                   <div className="grid gap-2 md:grid-cols-2">
                     {(["current_week", "next_week"] as DashboardPlanRefreshTargetWeek[]).map((week) => {
                       const info = week === "current_week" ? data.weeks.current : data.weeks.next;
@@ -105,7 +131,7 @@ export function PlanRefreshModal({ data, error }: { data: DashboardPlanRefreshDa
                   </p>
                 </div>
 
-                <div className="min-h-0 flex-1 overflow-y-auto p-4">
+                <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3 md:p-4">
                   {data.tickets.length === 0 ? (
                     <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-6 text-center text-sm text-zinc-400">Немає невиконаних заявок для оновлення планів.</div>
                   ) : (
@@ -151,23 +177,25 @@ export function PlanRefreshModal({ data, error }: { data: DashboardPlanRefreshDa
                   )}
                 </div>
 
-                <div className="flex flex-col gap-2 border-t border-white/10 p-4 md:flex-row md:items-center md:justify-between">
-                  <div className="flex items-center gap-2 text-xs text-zinc-500">
+                <div className="shrink-0 border-t border-white/10 p-3 md:p-4">
+                  <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                    <div className="flex items-center gap-2 text-xs text-zinc-500">
                     <AlertTriangle className="h-4 w-4 text-amber-300" />
                     Pending review не додаються в план до підтвердження.
                   </div>
-                  <div className="flex gap-2">
-                    <button type="button" onClick={() => setOpen(false)} className="h-11 rounded-xl border border-white/10 px-4 text-sm font-semibold text-zinc-200 hover:bg-white/10">Скасувати</button>
+                    <div className="flex gap-2">
+                    <button type="button" onClick={closeModal} className="h-11 rounded-xl border border-white/10 px-4 text-sm font-semibold text-zinc-200 hover:bg-white/10">Скасувати</button>
                     <button type="submit" className="inline-flex h-11 items-center rounded-xl bg-amber-400 px-4 text-sm font-bold text-black hover:bg-amber-300">
                       <CheckCircle2 className="mr-2 h-4 w-4" />
                       Додати вибрані в план
                     </button>
                   </div>
+                  </div>
                 </div>
               </form>
             ) : null}
           </div>
-        </div>
+        </>
       ) : null}
     </>
   );
