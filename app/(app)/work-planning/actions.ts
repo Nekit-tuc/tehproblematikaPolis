@@ -127,13 +127,10 @@ export async function ensureAutoDraftPlansAction() {
 
 export async function closeWorkWeekAndRefreshPlansAction(formData: FormData) {
   const { user } = await requireRole(["admin", "management", "tech_manager"]);
-  const weekStart = text(formData, "weekStart");
-  if (!weekStart) fail("Не вибрано робочий тиждень для закриття.");
-
-  const range = getWorkWeekRange(new Date(`${weekStart}T17:00:00`));
+  const range = getWorkWeekRange();
   const result = await closeWorkWeekAndRefreshPlans({ range, actorId: user.id });
   if (result.error) {
-    console.error("[work-planning] week close refresh failed", { weekStart, error: result.error });
+    console.error("[work-planning] week close refresh failed", { weekStart: range.startDate, error: result.error });
     redirect(`/work-planning?week=${range.startDate}&error=${encodeURIComponent(result.error)}`);
   }
 
@@ -150,8 +147,8 @@ export async function closeWorkWeekAndRefreshPlansAction(formData: FormData) {
     closed: String(result.data.plansClosed),
     kept: String(result.data.doneKept),
     released: String(result.data.notDoneReleased),
-    nextCreated: String(result.data.nextDraftPlansCreated),
-    nextDrafts: String(result.data.nextDraftPlansCount),
+    currentCreated: String(result.data.currentDraftPlansCreated),
+    currentDrafts: String(result.data.currentDraftPlansCount),
   });
   redirect(`/work-planning?${params.toString()}`);
 }

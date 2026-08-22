@@ -59,8 +59,8 @@ type SearchParams = {
   closed?: string;
   kept?: string;
   released?: string;
-  nextCreated?: string;
-  nextDrafts?: string;
+  currentCreated?: string;
+  currentDrafts?: string;
 };
 
 const planningStatuses: TicketStatus[] = ["new", "assigned", "in_progress", "waiting_admin_confirmation"];
@@ -233,7 +233,7 @@ export default async function WorkPlanningPage({ searchParams }: { searchParams:
     getWorkPlanningSummary(),
     getWorkPlanningWeeksOverview(weekOptions),
     getWorkPlanningDuplicateRepeatsForWeek(selectedWeek),
-    getWorkWeekClosePreview(selectedWeek),
+    getWorkWeekClosePreview(currentWorkWeek),
   ]);
 
   const error = plansResult.error ?? summaryResult.error ?? weeksOverviewResult.error ?? duplicatesResult.error ?? closePreviewResult.error;
@@ -295,7 +295,7 @@ export default async function WorkPlanningPage({ searchParams }: { searchParams:
       {params.success === "week_closed" ? (
         <div className="min-w-0 max-w-full overflow-hidden break-words whitespace-normal">
           <Alert title="Систему оновлено">
-            <span className="break-words whitespace-normal">Закрито планів: {params.closed ?? "0"}. Виконані залишено: {params.kept ?? "0"}. Невиконані виведено з планів: {params.released ?? "0"}. Чернеток наступного тижня створено: {params.nextCreated ?? "0"}.</span>
+            <span className="break-words whitespace-normal">Закрито старих планів: {params.closed ?? "0"}. Виконані залишено: {params.kept ?? "0"}. Невиконані виведено з планів: {params.released ?? "0"}. Чернеток поточного тижня створено: {params.currentCreated ?? "0"}.</span>
           </Alert>
         </div>
       ) : null}
@@ -311,7 +311,7 @@ export default async function WorkPlanningPage({ searchParams }: { searchParams:
       <WeekSlider weeks={weekOverview} selectedWeekStart={selectedWeek.startDate} params={params} />
       <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-start">
         <WorkPlanningDocumentsMenu weekStart={selectedWeekOverview.startDate} weekPeriod={shortWeekPeriod(selectedWeekOverview)} plans={plansResult.data.map((plan) => ({ id: plan.id, title: plan.title, itemsCount: plan.items_count ?? 0 }))} />
-        <WorkWeekCloseModal preview={closePreviewResult.data} weekLabel={shortWeekPeriod(selectedWeekOverview)} weekStart={selectedWeek.startDate} />
+        <WorkWeekCloseModal preview={closePreviewResult.data} weekLabel={shortWeekPeriod({ startDate: currentWorkWeek.startDate, endDate: currentWorkWeek.endDate })} />
       </div>
 
       {createMode ? (

@@ -141,8 +141,8 @@ export type WorkWeekCloseResult = {
   plansClosed: number;
   doneKept: number;
   notDoneReleased: number;
-  nextDraftPlansCreated: number;
-  nextDraftPlansCount: number;
+  currentDraftPlansCreated: number;
+  currentDraftPlansCount: number;
   alreadyClosed: boolean;
 };
 
@@ -767,8 +767,7 @@ async function getWorkWeekCloseRows(
     supabase
       .from("work_plans")
       .select("id,title,status,period_start,period_end")
-      .eq("period_start", range.startIso)
-      .eq("period_end", range.endIso)
+      .lt("period_start", range.startIso)
       .in("status", ["draft", "sent", "partially_done", "done", "cancelled"]),
   );
   if (plansError) return { plans: [] as CloseWeekPlanRow[], items: [] as CloseWeekItemRow[], error: plansError.message };
@@ -872,8 +871,8 @@ export async function closeWorkWeekAndRefreshPlans(input: {
     plansClosed: 0,
     doneKept: 0,
     notDoneReleased: 0,
-    nextDraftPlansCreated: 0,
-    nextDraftPlansCount: 0,
+    currentDraftPlansCreated: 0,
+    currentDraftPlansCount: 0,
     alreadyClosed: false,
   };
   if (!hasSupabaseEnv()) return { data: emptyResult, error: missingSupabaseMessage };
@@ -884,13 +883,9 @@ export async function closeWorkWeekAndRefreshPlans(input: {
     if (rows.error) return { data: emptyResult, error: rows.error };
 
     const activePlans = rows.plans.filter((plan) => activeWorkPlanStatuses.includes(plan.status));
-    if (rows.plans.length === 0) return { data: emptyResult, error: "Немає планів для закриття." };
-    if (activePlans.length === 0) return { data: { ...emptyResult, alreadyClosed: true }, error: null };
 
-    const activePlanIds = new Set(activePlans.map((plan) => plan.id));
-    const activeItems = rows.items.filter((item) => activePlanIds.has(item.work_plan_id));
-    const doneItems = activeItems.filter((item) => closeWeekRowTicket(item)?.status === "done");
-    const notDoneItems = activeItems.filter((item) => closeWeekRowTicket(item)?.status !== "done");
+    const doneItems = rows.items.filter((item) => closeWeekRowTicket(item)?.status === "done");
+    const notDoneItems = rows.items.filter((item) => closeWeekRowTicket(item)?.status !== "done");
     const notDoneItemIds = notDoneItems.map((item) => item.id);
 
     if (notDoneItemIds.length > 0) {
@@ -904,7 +899,7 @@ export async function closeWorkWeekAndRefreshPlans(input: {
         return {
           ticket_id: item.ticket_id,
           actor_id: input.actorId,
-          action: "Виведено з плану",
+          action: "Заявку виведено зі старого плану при оновленні системи планування.",
           metadata: {
             source: "week_close_refresh",
             workPlanId: plan?.id ?? item.work_plan_id,
@@ -921,17 +916,18 @@ export async function closeWorkWeekAndRefreshPlans(input: {
       if (historyError) console.warn("[work-planning:week-close] history insert failed", { error: historyError.message, count: historyRows.length });
     }
 
-    const { error: updateError } = await measureAsync("work-planning:week_close_plans_done", () =>
-      supabase
-        .from("work_plans")
-        .update({ status: "done", updated_at: new Date().toISOString() })
-        .in("id", activePlans.map((plan) => plan.id)),
-    );
-    if (updateError) return { data: emptyResult, error: updateError.message };
+    if (activePlans.length > 0) {
+      const { error: updateError } = await measureAsync("work-planning:week_close_plans_done", () =>
+        supabase
+          .from("work_plans")
+          .update({ status: "done", updated_at: new Date().toISOString() })
+          .in("id", activePlans.map((plan) => plan.id)),
+      );
+      if (updateError) return { data: emptyResult, error: updateError.message };
+    }
 
-    const nextRange = getWorkWeekRange(addDays(input.range.start, 7));
-    const nextDrafts = await ensureAutoDraftPlansForRangeWithoutCarryOver({ supabase, range: nextRange });
-    if (nextDrafts.error) return { data: emptyResult, error: nextDrafts.error };
+    const currentDrafts = await ensureAutoDraftPlansForRangeWithoutCarryOver({ supabase, range: input.range });
+    if (currentDrafts.error) return { data: emptyResult, error: currentDrafts.error };
 
     return {
       data: {
@@ -940,9 +936,9 @@ export async function closeWorkWeekAndRefreshPlans(input: {
         plansClosed: activePlans.length,
         doneKept: doneItems.length,
         notDoneReleased: notDoneItems.length,
-        nextDraftPlansCreated: nextDrafts.data.created,
-        nextDraftPlansCount: nextDrafts.data.plans.length,
-        alreadyClosed: false,
+        currentDraftPlansCreated: currentDrafts.data.created,
+        currentDraftPlansCount: currentDrafts.data.plans.length,
+        alreadyClosed: activePlans.length === 0 && notDoneItems.length === 0,
       },
       error: null,
     };

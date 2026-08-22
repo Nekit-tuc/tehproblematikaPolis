@@ -13,15 +13,12 @@ function countLabel(value: number, label: string) {
 export function WorkWeekCloseModal({
   preview,
   weekLabel,
-  weekStart,
 }: {
   preview: WorkWeekClosePreview;
   weekLabel: string;
-  weekStart: string;
 }) {
   const [open, setOpen] = useState(false);
   const closeModal = () => setOpen(false);
-  const disabled = preview.plansCount === 0 || preview.activePlansCount === 0;
 
   useEffect(() => {
     if (!open) return;
@@ -72,7 +69,7 @@ export function WorkWeekCloseModal({
                       Оновити систему планування?
                     </h2>
                     <p className="mt-1 text-sm leading-5 text-zinc-400">
-                      Система закриє плани вибраного робочого тижня, залишить у них виконані заявки, а всі невиконані заявки виведе зі старих планів.
+                      Система закриє всі минулі плани до поточного робочого тижня, залишить у них виконані заявки, а всі невиконані заявки виведе зі старих планів.
                     </p>
                   </div>
                 </div>
@@ -84,13 +81,13 @@ export function WorkWeekCloseModal({
                       {weekLabel}
                     </div>
                     <p className="mt-1 text-xs leading-5 text-orange-100/75">
-                      Виконані заявки залишаться в архіві цього тижня. Невиконані стануть доступними для нового планування.
+                      Поточний робочий тиждень: {weekLabel}. Виконані заявки залишаться в архіві старих тижнів. Невиконані стануть доступними для додавання в поточні плани.
                     </p>
                   </div>
 
                   <div className="mt-3 grid grid-cols-2 gap-2">
-                    <PreviewTile label="Планів" value={preview.plansCount} />
-                    <PreviewTile label="Активних планів" value={preview.activePlansCount} />
+                    <PreviewTile label="Старих планів" value={preview.plansCount} />
+                    <PreviewTile label="Активних старих планів" value={preview.activePlansCount} />
                     <PreviewTile label="Виконані залишаться" value={preview.doneItemsCount} tone="green" />
                     <PreviewTile label="Невиконані вийдуть" value={preview.notDoneItemsCount} tone="orange" />
                     <PreviewTile label="Pending review" value={preview.pendingReviewCount} />
@@ -99,7 +96,7 @@ export function WorkWeekCloseModal({
 
                   {preview.affectedPlans.length > 0 ? (
                     <div className="mt-3 rounded-2xl border border-white/10 bg-white/[0.03] p-3">
-                      <div className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">Плани тижня</div>
+                      <div className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">Минулі плани</div>
                       <div className="mt-2 space-y-2">
                         {preview.affectedPlans.map((plan) => (
                           <div key={plan.id} className="flex items-center justify-between gap-3 text-xs">
@@ -111,13 +108,13 @@ export function WorkWeekCloseModal({
                     </div>
                   ) : (
                     <div className="mt-3 rounded-2xl border border-white/10 bg-white/[0.03] p-3 text-sm text-zinc-400">
-                      Немає планів для закриття.
+                      Старих планів не знайдено. Система все одно перевірить чернетки поточного тижня.
                     </div>
                   )}
 
                   {preview.activePlansCount === 0 && preview.plansCount > 0 ? (
                     <div className="mt-3 rounded-2xl border border-emerald-400/20 bg-emerald-500/10 p-3 text-sm text-emerald-100">
-                      Цей тиждень уже закритий.
+                      Старі активні плани вже закриті. Система перевірить чернетки поточного тижня.
                     </div>
                   ) : null}
                 </div>
@@ -128,20 +125,18 @@ export function WorkWeekCloseModal({
                     Ця дія не видаляє заявки і не змінює їх статуси. Видаляються тільки зв'язки невиконаних заявок зі старими планами.
                   </div>
                   <form action={closeWorkWeekAndRefreshPlansAction} className="flex gap-2">
-                    <input type="hidden" name="weekStart" value={weekStart} />
                     <button type="button" onClick={closeModal} className="h-11 flex-1 rounded-xl border border-white/10 px-4 text-sm font-semibold text-zinc-200 hover:bg-white/10">
                       Скасувати
                     </button>
                     <button
                       type="submit"
-                      disabled={disabled}
                       className="inline-flex h-11 flex-[1.35] items-center justify-center rounded-xl bg-orange-500 px-4 text-sm font-bold text-white hover:bg-orange-400 disabled:cursor-not-allowed disabled:opacity-45"
                     >
                       <CheckCircle2 className="mr-2 h-4 w-4" />
                       Оновити систему
                     </button>
                   </form>
-                  {disabled ? <p className="mt-2 text-xs text-zinc-500">{preview.plansCount === 0 ? "Немає планів для закриття." : "Цей тиждень уже закритий."}</p> : null}
+                  {preview.activePlansCount === 0 ? <p className="mt-2 text-xs text-zinc-500">Старі активні плани вже закриті або відсутні. Дія лише перевірить поточні чернетки.</p> : null}
                 </div>
               </div>
             </>,
