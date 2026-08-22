@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
 import { AlertTriangle, CheckCircle2, RefreshCw, X } from "lucide-react";
 import { autoPlanAllActiveTicketsAction, updatePlansFromDashboardAction } from "@/app/(app)/dashboard/actions";
@@ -63,13 +63,16 @@ export function PlanRefreshModal({
   data,
   error,
   autoSummary = null,
+  actionError = null,
 }: {
   data: DashboardPlanRefreshData | null;
   error?: string | null;
   autoSummary?: PlanRefreshAutoSummary | null;
+  actionError?: string | null;
 }) {
-  const [open, setOpen] = useState(Boolean(autoSummary));
+  const [open, setOpen] = useState(Boolean(autoSummary || actionError));
   const [targetWeek, setTargetWeek] = useState<DashboardPlanRefreshTargetWeek>("current_week");
+  const [autoPending, startAutoTransition] = useTransition();
   const selectedWeek = targetWeek === "current_week" ? data?.weeks.current : data?.weeks.next;
   const selectableCount = useMemo(() => data?.tickets.filter((ticket) => !disabledReason(ticket, targetWeek)).length ?? 0, [data, targetWeek]);
   const closeModal = () => setOpen(false);
@@ -89,8 +92,16 @@ export function PlanRefreshModal({
   }, [open]);
 
   useEffect(() => {
-    if (autoSummary) setOpen(true);
-  }, [autoSummary]);
+    if (autoSummary || actionError) setOpen(true);
+  }, [autoSummary, actionError]);
+
+  const runAutoPlanning = () => {
+    const formData = new FormData();
+    formData.set("targetWeek", targetWeek);
+    startAutoTransition(() => {
+      void autoPlanAllActiveTicketsAction(formData);
+    });
+  };
 
   return (
     <>
@@ -130,6 +141,7 @@ export function PlanRefreshModal({
             </div>
 
             {error ? <div className="m-4 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">{error}</div> : null}
+            {actionError ? <div className="m-4 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">{actionError}</div> : null}
             {autoSummary ? (
               <div className="m-3 rounded-2xl border border-emerald-400/25 bg-emerald-500/10 p-3 text-sm text-emerald-50 md:m-4 md:p-4">
                 <div className="font-semibold">Автопланування завершено</div>
@@ -221,11 +233,12 @@ export function PlanRefreshModal({
                         </p>
                       </div>
                       <button
-                        type="submit"
-                        formAction={autoPlanAllActiveTicketsAction}
-                        className="h-10 shrink-0 rounded-xl border border-amber-300/30 bg-amber-400/15 px-4 text-sm font-bold text-amber-100 hover:bg-amber-400/20"
+                        type="button"
+                        onClick={runAutoPlanning}
+                        disabled={autoPending}
+                        className="h-10 shrink-0 rounded-xl border border-amber-300/30 bg-amber-400/15 px-4 text-sm font-bold text-amber-100 hover:bg-amber-400/20 disabled:cursor-wait disabled:opacity-60"
                       >
-                        Автопланування
+                        {autoPending ? "Автопланування..." : "Автопланування"}
                       </button>
                     </div>
                   </div>

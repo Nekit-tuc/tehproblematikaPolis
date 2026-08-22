@@ -1,11 +1,10 @@
-"use server";
+﻿"use server";
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireRole } from "@/lib/auth/server";
 import { measureAsync } from "@/lib/performance";
 import { createClient } from "@/lib/supabase/server";
-import { findRecommendedWorkerForTicket } from "@/lib/supabase/worker-queries";
 import { confirmTicketWithPlanningDecision } from "@/lib/tickets/confirm-ticket-with-planning";
 import type { TicketPriority } from "@/types/domain";
 
@@ -67,67 +66,50 @@ function revalidateAiTicketViews(ticketId: string) {
   revalidatePath(`/tickets/${ticketId}`);
 }
 
-export async function confirmAiTicketAction(ticketId: string) {
-    const { user } = await requireRole(["admin", "management", "tech_manager"]);
-    const { supabase, ticket, error } = await getPendingAiTicket(
-      ticketId,
-      "ai-ticket:confirm:load",
-    );
-    if (error || !ticket)
-      redirect(
-        `/ai-tickets?error=${encodeURIComponent("AI-заявку не знайдено або її вже опрацьовано.")}`,
-      );
+export async function confirmAiTicketAction(ticketId: string, formData?: FormData) {
+  const { user } = await requireRole(["admin", "management", "tech_manager"]);
+  const preferredWorkerId = text(formData ?? new FormData(), "preferred_worker_id") || null;
 
-    const existingWorkerResult = ticket!.assignee_worker_id
-      ? await measureAsync("ai-ticket:confirm:worker", () =>
-          supabase
-            .from("workers")
-            .select("id, name, telegram_id")
-            .eq("id", ticket!.assignee_worker_id)
-            .maybeSingle(),
-        )
-      : { data: null, error: null };
-
-    if (existingWorkerResult.error)
-      redirect(
-        `/ai-tickets?error=${encodeURIComponent(existingWorkerResult.error.message)}`,
-      );
-
-    const recommendedWorkerResult = existingWorkerResult.data
-      ? { data: existingWorkerResult.data, error: null }
-      : await measureAsync("ai-ticket:confirm:recommended-worker", () =>
-          findRecommendedWorkerForTicket(ticket!),
-        );
-
-    if (recommendedWorkerResult.error)
-      redirect(
-        `/ai-tickets?error=${encodeURIComponent(recommendedWorkerResult.error)}`,
-      );
-
-    const worker = recommendedWorkerResult.data;
-    const confirmResult = await confirmTicketWithPlanningDecision(ticketId, {
+  let confirmResult = await measureAsync("ai-ticket:confirm:total", () =>
+    confirmTicketWithPlanningDecision(ticketId, {
       actorProfileId: user.id,
       planningMode: "next_week",
-      preferredWorkerId: worker?.id ?? null,
+      preferredWorkerId,
       sourceContext: "ai_tickets",
       expectedSource: ["telegram_group", "telegram_private_test"],
       requireCategory: true,
-    });
-    if (!confirmResult.ok) {
-      redirect(`/ai-tickets?error=${encodeURIComponent(confirmResult.error ?? "AI-заявку не підтверджено.")}`);
-    }
+      skipPlanningCarryOver: true,
+    }),
+  );
 
-    revalidateAiTicketViews(ticketId);
-    revalidatePath("/work-planning");
-    revalidatePath("/dashboard");
+  if (!confirmResult.ok && preferredWorkerId && confirmResult.planning.reason === "worker_not_found") {
+    confirmResult = await measureAsync("ai-ticket:confirm:retry-without-preferred-worker", () =>
+      confirmTicketWithPlanningDecision(ticketId, {
+        actorProfileId: user.id,
+        planningMode: "next_week",
+        preferredWorkerId: null,
+        sourceContext: "ai_tickets",
+        expectedSource: ["telegram_group", "telegram_private_test"],
+        requireCategory: true,
+        skipPlanningCarryOver: true,
+      }),
+    );
+  }
 
-    if (confirmResult.planning.warning) {
-      redirect(`/ai-tickets?error=${encodeURIComponent(confirmResult.planning.warning)}`);
-    }
-    if (!worker) redirect("/ai-tickets?success=confirmed_no_worker");
-    redirect("/ai-tickets?success=confirmed_planned");
+  if (!confirmResult.ok) {
+    redirect(`/ai-tickets?error=${encodeURIComponent(confirmResult.error ?? "AI-заявку не підтверджено.")}`);
+  }
+
+  revalidateAiTicketViews(ticketId);
+  revalidatePath("/work-planning");
+  revalidatePath("/dashboard");
+
+  if (confirmResult.planning.warning) {
+    redirect(`/ai-tickets?error=${encodeURIComponent(confirmResult.planning.warning)}`);
+  }
+  if (!confirmResult.planning.workerId) redirect("/ai-tickets?success=confirmed_no_worker");
+  redirect("/ai-tickets?success=confirmed_planned");
 }
-
 export async function rejectAiTicketAction(ticketId: string) {
   const { user } = await requireRole(["admin", "management", "tech_manager"]);
   const { supabase, ticket, error } = await getPendingAiTicket(

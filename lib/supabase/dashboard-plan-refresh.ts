@@ -556,7 +556,15 @@ export async function autoPlanAllActiveTickets(input: {
       .map((ticket) => ticket.id)
       .filter((ticketId): ticketId is string => Boolean(ticketId));
 
-    if (ticketIds.length === 0) return { data: summary, error: null };
+    if (ticketIds.length === 0) {
+      addSummaryDetail(summary, {
+        ticketId: "system",
+        ticketNumber: null,
+        status: "skipped",
+        message: "Немає активних заявок для планування.",
+      });
+      return { data: summary, error: null };
+    }
 
     return addTicketsToSelectedWeekPlans({
       actorId: input.actorId,

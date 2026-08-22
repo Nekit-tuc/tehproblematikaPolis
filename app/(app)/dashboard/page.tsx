@@ -45,6 +45,9 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         details: params.details ? params.details.split("\n").filter(Boolean) : [],
       }
     : null;
+  const planRefreshActionError = params.planRefresh === "error"
+    ? (params.message ?? "Спробуйте ще раз.")
+    : null;
 
   return (
     <div className="page-shell relative mx-auto max-w-6xl overflow-hidden pb-28 md:pb-8">
@@ -72,7 +75,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                 <p className="text-[10px] text-orange-200">{text.workWeek}</p>
                 <p className="text-[16px] font-semibold text-orange-100 md:text-lg">{data.week.label}</p>
               </div>
-              {canRefreshPlans ? <PlanRefreshModal data={planRefreshData?.data ?? null} error={planRefreshData?.error ?? null} autoSummary={autoSummary} /> : null}
+              {canRefreshPlans ? <PlanRefreshModal data={planRefreshData?.data ?? null} error={planRefreshData?.error ?? null} autoSummary={autoSummary} actionError={planRefreshActionError} /> : null}
             </div>
           </div>
         </section>

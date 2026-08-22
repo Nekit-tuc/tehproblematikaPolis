@@ -945,7 +945,10 @@ export async function closeWorkWeekAndRefreshPlans(input: {
   });
 }
 
-export async function ensureWeeklyDraftPlansForAutoRouting(date = new Date()): Promise<QueryResult<{ periodStart: string; periodEnd: string; plans: WorkPlan[]; created: number; carriedOver: number }>> {
+export async function ensureWeeklyDraftPlansForAutoRouting(
+  date = new Date(),
+  options: { skipCarryOver?: boolean } = {},
+): Promise<QueryResult<{ periodStart: string; periodEnd: string; plans: WorkPlan[]; created: number; carriedOver: number }>> {
   if (!hasSupabaseEnv()) return emptyWithError({ periodStart: "", periodEnd: "", plans: [], created: 0, carriedOver: 0 });
   const supabase = createAdminClient();
   const range = getNextWorkWeekRange(date);
@@ -997,6 +1000,19 @@ export async function ensureWeeklyDraftPlansForAutoRouting(date = new Date()): P
   }));
 
   const plans = [...existing, ...createdPlans];
+  if (options.skipCarryOver) {
+    return {
+      data: {
+        periodStart: range.startDate,
+        periodEnd: range.endDate,
+        plans,
+        created: createdPlans.length,
+        carriedOver: 0,
+      },
+      error: null,
+    };
+  }
+
   const carryResult = await carryOverUnfinishedTicketsToWeeklyDraftPlans({ supabase, range, plans });
   if (carryResult.error) return { data: { periodStart: range.startDate, periodEnd: range.endDate, plans, created: createdPlans.length, carriedOver: 0 }, error: carryResult.error };
 
@@ -1140,6 +1156,7 @@ function planForWorker(worker: Pick<Worker, "name" | "telegram_username"> | null
 export async function addConfirmedTicketToWeeklyDraftPlan(
   ticketId: string,
   actorId?: string | null,
+  options: { skipCarryOver?: boolean } = {},
 ): Promise<QueryResult<ConfirmedTicketPlanResult>> {
   if (!hasSupabaseEnv()) return { data: { added: false, reason: "supabase_missing" }, error: missingSupabaseMessage };
   const supabase = createAdminClient();
@@ -1179,7 +1196,7 @@ export async function addConfirmedTicketToWeeklyDraftPlan(
   const config = workerConfig ?? categoryConfig;
   if (!config) return { data: { added: false, reason: "category_not_mapped" }, error: null };
 
-  const plansResult = await ensureWeeklyDraftPlansForAutoRouting();
+  const plansResult = await ensureWeeklyDraftPlansForAutoRouting(new Date(), { skipCarryOver: options.skipCarryOver });
   if (plansResult.error) return { data: { added: false, reason: "ensure_failed" }, error: plansResult.error };
   const weekPlanIds = plansResult.data.plans.map((plan) => plan.id);
   if (weekPlanIds.length === 0) return { data: { added: false, reason: "plan_not_found" }, error: null };

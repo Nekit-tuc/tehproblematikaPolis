@@ -2,6 +2,7 @@ import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
 import { hasSupabaseEnv, missingSupabaseMessage } from "@/lib/supabase/env";
 import { measureAsync } from "@/lib/performance";
+import { ensureWeeklyDraftPlansForAutoRouting, getAutoWorkPlanRoutePreview } from "@/lib/supabase/work-plans";
 import type {
   Category,
   CompanyObject,
@@ -84,6 +85,22 @@ export type AiTicketsMeta = {
     Pick<Category, "id" | "name" | "description" | "is_active" | "created_at">
   >;
   workers: WorkerWithCategories[];
+};
+
+export type AiTicketConfirmReadiness = {
+  ticketId: string;
+  canConfirm: boolean;
+  suggestedWorkerId: string | null;
+  suggestedWorkerName: string | null;
+  targetPlanTitle: string | null;
+  routeStatus:
+    | "ready"
+    | "missing_category"
+    | "category_not_mapped"
+    | "worker_not_found"
+    | "plan_not_ready"
+    | "already_planned";
+  warning: string | null;
 };
 
 const aiTicketListSelect = `
@@ -176,6 +193,131 @@ function normalizeWorker(worker: WorkerWithCategories): WorkerWithCategories {
       .map((item) => normalizeRelation(item.category))
       .filter((category): category is Category => Boolean(category?.is_active)),
   };
+}
+
+function normalizePlanningText(value: string | null | undefined) {
+  return (value ?? "")
+    .toLowerCase()
+    .replace(/[’'`]/g, "'")
+    .replace(/[\/\\–—-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function findWorkerByRoute(workers: WorkerWithCategories[], workerName: string | null | undefined) {
+  const expected = normalizePlanningText(workerName);
+  if (!expected) return null;
+  return workers.find((worker) => {
+    const actual = normalizePlanningText(worker.name);
+    return actual === expected || actual.includes(expected) || expected.includes(actual);
+  }) ?? null;
+}
+
+export async function getAiTicketConfirmReadiness(
+  tickets: AiTicketListItem[],
+  workers: WorkerWithCategories[],
+): Promise<QueryResult<Map<string, AiTicketConfirmReadiness>>> {
+  const empty = new Map<string, AiTicketConfirmReadiness>();
+  if (!hasSupabaseEnv()) return { data: empty, error: missingSupabaseMessage };
+  if (tickets.length === 0) return { data: empty, error: null };
+
+  return measureAsync("ai-tickets:confirm-readiness", async () => {
+    const ticketIds = tickets.map((ticket) => ticket.id);
+    const [plansResult, existingItemsResult] = await Promise.all([
+      ensureWeeklyDraftPlansForAutoRouting(new Date(), { skipCarryOver: true }),
+      (async () => {
+        const supabase = await createClient();
+        return measureAsync("ai-tickets:confirm-readiness:existing", () =>
+          supabase
+            .from("work_plan_items")
+            .select("ticket_id, work_plan:work_plans!inner(id,title,status)")
+            .in("ticket_id", ticketIds)
+            .in("work_plan.status", ["draft", "sent", "partially_done"])
+        );
+      })(),
+    ]);
+
+    if (plansResult.error) return { data: empty, error: plansResult.error };
+    if (existingItemsResult.error) return { data: empty, error: existingItemsResult.error.message };
+
+    const plannedTicketIds = new Set((existingItemsResult.data ?? []).map((item) => item.ticket_id).filter(Boolean));
+    const draftPlanTitles = new Set(plansResult.data.plans.filter((plan) => plan.status === "draft").map((plan) => plan.title));
+    const readiness = new Map<string, AiTicketConfirmReadiness>();
+
+    for (const ticket of tickets) {
+      if (plannedTicketIds.has(ticket.id)) {
+        readiness.set(ticket.id, {
+          ticketId: ticket.id,
+          canConfirm: true,
+          suggestedWorkerId: ticket.assignee_worker_id ?? null,
+          suggestedWorkerName: workers.find((worker) => worker.id === ticket.assignee_worker_id)?.name ?? null,
+          targetPlanTitle: null,
+          routeStatus: "already_planned",
+          warning: "Заявка вже є в активному плані.",
+        });
+        continue;
+      }
+
+      if (!ticket.category_id || !ticket.category?.name) {
+        readiness.set(ticket.id, {
+          ticketId: ticket.id,
+          canConfirm: false,
+          suggestedWorkerId: null,
+          suggestedWorkerName: null,
+          targetPlanTitle: null,
+          routeStatus: "missing_category",
+          warning: "Перед підтвердженням потрібно вибрати категорію.",
+        });
+        continue;
+      }
+
+      const assignedWorker = ticket.assignee_worker_id ? workers.find((worker) => worker.id === ticket.assignee_worker_id) ?? null : null;
+      const route = getAutoWorkPlanRoutePreview({
+        categoryName: ticket.category.name,
+        worker: assignedWorker ? { name: assignedWorker.name, telegram_username: assignedWorker.telegram_username ?? null } : null,
+      });
+
+      if (!route.found || !route.planTitle) {
+        readiness.set(ticket.id, {
+          ticketId: ticket.id,
+          canConfirm: true,
+          suggestedWorkerId: assignedWorker?.id ?? null,
+          suggestedWorkerName: assignedWorker?.name ?? null,
+          targetPlanTitle: null,
+          routeStatus: "category_not_mapped",
+          warning: "Для категорії не знайдено маршрут у план.",
+        });
+        continue;
+      }
+
+      const suggestedWorker = assignedWorker ?? findWorkerByRoute(workers, route.workerName);
+      if (!suggestedWorker) {
+        readiness.set(ticket.id, {
+          ticketId: ticket.id,
+          canConfirm: true,
+          suggestedWorkerId: null,
+          suggestedWorkerName: null,
+          targetPlanTitle: route.planTitle,
+          routeStatus: "worker_not_found",
+          warning: "Маршрут знайдено, але виконавця не визначено.",
+        });
+        continue;
+      }
+
+      const planReady = draftPlanTitles.has(route.planTitle);
+      readiness.set(ticket.id, {
+        ticketId: ticket.id,
+        canConfirm: true,
+        suggestedWorkerId: suggestedWorker.id,
+        suggestedWorkerName: suggestedWorker.name,
+        targetPlanTitle: route.planTitle,
+        routeStatus: planReady ? "ready" : "plan_not_ready",
+        warning: planReady ? null : "Чернетку потрібного плану не знайдено.",
+      });
+    }
+
+    return { data: readiness, error: null };
+  });
 }
 
 export async function getAiTicketsPage(

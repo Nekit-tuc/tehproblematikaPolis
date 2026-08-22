@@ -20,6 +20,8 @@ import { formatDate } from "@/lib/utils";
 import {
   getAiTicketsMeta,
   getAiTicketsPage,
+  getAiTicketConfirmReadiness,
+  type AiTicketConfirmReadiness,
   type AiTicketListItem,
   type AiTicketsMeta,
 } from "@/lib/supabase/ai-tickets";
@@ -116,6 +118,8 @@ export default async function AiTicketsPage({
   const workersById = new Map(workers.map((worker) => [worker.id, worker]));
   const visibleTickets = tickets;
   const relatedGroups = groupTickets(tickets);
+  const readinessResult = await getAiTicketConfirmReadiness(visibleTickets, workers);
+  const readinessByTicket = readinessResult.data;
   const pageHref = (page: number) => {
     const next = new URLSearchParams();
     for (const [key, value] of Object.entries(params)) {
@@ -180,6 +184,11 @@ export default async function AiTicketsPage({
       {ticketsPageResult.error || metaResult.error ? (
         <Alert title="Не вдалося завантажити AI-заявки">
           {ticketsPageResult.error ?? metaResult.error}
+        </Alert>
+      ) : null}
+      {readinessResult.error ? (
+        <Alert title="Маршрути підтвердження не підготовлено">
+          {readinessResult.error}
         </Alert>
       ) : null}
       {params.error ? (
@@ -492,6 +501,7 @@ export default async function AiTicketsPage({
                   ? (workersById.get(ticket.assignee_worker_id) ?? null)
                   : null
               }
+              readiness={readinessByTicket.get(ticket.id) ?? null}
             />
           ))}
         </div>
@@ -554,6 +564,7 @@ function AiTicketCard({
   categories,
   workers,
   assignedWorker,
+  readiness,
 }: {
   ticket: AiTicketListItem;
   related: AiTicketListItem[];
@@ -561,6 +572,7 @@ function AiTicketCard({
   categories: AiTicketsMeta["categories"];
   workers: WorkerWithCategories[];
   assignedWorker: WorkerWithCategories | null;
+  readiness: AiTicketConfirmReadiness | null;
 }) {
   const siblingTickets = related.filter((item) => item.id !== ticket.id);
   return (
@@ -627,6 +639,7 @@ function AiTicketCard({
           ticket={ticket}
           workers={workers}
           assignedWorker={assignedWorker}
+          readiness={readiness}
         />
 
         <div className="rounded-lg border border-border bg-stone-950/30 p-2 md:rounded-md md:p-3">
@@ -666,9 +679,10 @@ function AiTicketCard({
 
         <div className="grid gap-1 md:flex md:flex-wrap">
           <form action={confirmAiTicketAction.bind(null, ticket.id)}>
+            {readiness?.suggestedWorkerId ? <input type="hidden" name="preferred_worker_id" value={readiness.suggestedWorkerId} /> : null}
             <SubmitButton
               type="submit"
-              pendingText="Підтверджується..."
+              pendingText="Підтверджуємо..."
               showOverlay
               className="min-h-8 w-full rounded-lg px-2 text-[10px] md:min-h-0 md:w-auto md:rounded-md md:text-sm"
             >
@@ -780,10 +794,12 @@ function WorkerAssignPanel({
   ticket,
   workers,
   assignedWorker,
+  readiness,
 }: {
   ticket: AiTicketListItem;
   workers: WorkerWithCategories[];
   assignedWorker: WorkerWithCategories | null;
+  readiness: AiTicketConfirmReadiness | null;
 }) {
   const recommendedWorkers = workers.filter((worker) =>
     worker.categories?.some((category) => category.id === ticket.category_id),
@@ -844,6 +860,21 @@ function WorkerAssignPanel({
       <p className="mt-1.5 text-[10px] text-muted-foreground md:text-xs">
         Telegram не надсилається автоматично.
       </p>
+      {readiness ? (
+        <div className={`mt-2 rounded-lg border px-2 py-1.5 text-[10px] leading-4 md:text-xs ${
+          readiness.routeStatus === "ready"
+            ? "border-emerald-400/25 bg-emerald-500/10 text-emerald-100"
+            : "border-amber-400/25 bg-amber-500/10 text-amber-100"
+        }`}>
+          {readiness.routeStatus === "ready" ? (
+            <>
+              Маршрут підготовлено: {readiness.suggestedWorkerName ?? "виконавець"} · {readiness.targetPlanTitle ?? "план"}.
+            </>
+          ) : (
+            readiness.warning ?? "Маршрут потребує перевірки."
+          )}
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -14,6 +14,7 @@ export type ConfirmTicketWithPlanningOptions = {
   expectedSource?: string | string[];
   requireObject?: boolean;
   requireCategory?: boolean;
+  skipPlanningCarryOver?: boolean;
 };
 
 export type ConfirmTicketPlanningResult = {
@@ -275,7 +276,9 @@ export async function confirmTicketWithPlanningDecision(
     };
   }
 
-  const planResult = await addConfirmedTicketToWeeklyDraftPlan(ticketId, options.actorProfileId);
+  const planResult = await addConfirmedTicketToWeeklyDraftPlan(ticketId, options.actorProfileId, {
+    skipCarryOver: options.skipPlanningCarryOver,
+  });
   const planReason = planResult.error ? "insert_error" : planResult.data.reason;
   const warning = confirmedTicketPlanWarning(planReason);
   if (warning) {
