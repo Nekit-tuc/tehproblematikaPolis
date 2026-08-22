@@ -233,7 +233,7 @@ export default async function WorkPlanningPage({ searchParams }: { searchParams:
   const createMode = params.create === "1";
   const currentWorkWeek = getWorkWeekRange();
   const nextWorkWeek = getNextWorkWeekRange();
-  const selectedWeek = isDateParam(params.week) ? weekRangeFromStart(params.week!) : nextWorkWeek;
+  const selectedWeek = isDateParam(params.week) ? weekRangeFromStart(params.week!) : currentWorkWeek;
   const weekOptions = buildPlanningWeeks(currentWorkWeek, selectedWeek);
 
   const [plansResult, summaryResult, weeksOverviewResult, duplicatesResult, closePreviewResult] = await Promise.all([

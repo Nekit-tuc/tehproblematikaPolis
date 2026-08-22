@@ -226,6 +226,7 @@ export type TicketListFilters = {
   page?: number;
   limit?: number;
   source?: string;
+  hideDone?: boolean;
 };
 
 export type TicketPageResult = {
@@ -283,6 +284,7 @@ function applyTicketAccess(query: any, profile: Profile) {
 
 function applyTicketFilters(query: any, filters: TicketListFilters) {
   if (filters.status && filters.status !== "all") query = query.eq("status", filters.status);
+  else if (filters.hideDone !== false) query = query.neq("status", "done");
   if (filters.category && filters.category !== "all") query = query.eq("category_id", filters.category);
   if (filters.priority && filters.priority !== "all") query = query.eq("priority", filters.priority);
   if (filters.worker === "unassigned") query = query.is("assignee_worker_id", null);

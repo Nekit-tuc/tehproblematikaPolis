@@ -179,6 +179,7 @@ export default async function TicketsPage({
     to?: string;
     worker?: string;
     source?: string;
+    hideDone?: string;
   }>;
 }) {
   const { profile } = await requireAuth();
@@ -200,9 +201,11 @@ export default async function TicketsPage({
   const activeWorker = query.worker && query.worker !== "all" ? query.worker : "all";
   const currentPage = Math.max(Number(query.page ?? 1) || 1, 1);
   const activeSource = query.source === "director_portal" ? "director_portal" : "all";
+  const explicitHideDoneParam = query.hideDone === "false" ? "false" : query.hideDone === "true" ? "true" : undefined;
+  const hideDone = activeStatus === "done" ? false : explicitHideDoneParam !== "false";
 
   const [ticketsPageResult, categoriesResult, workersResult, aiTicketsCountResult] = await Promise.all([
-    getTicketsPage({ status: activeStatus, category: activeCategory, priority: activePriority, worker: activeWorker, source: activeSource, sort: activeSort, q: searchQuery, period: activePeriod, from: activeFrom, to: activeTo, page: currentPage, limit: PAGE_SIZE }),
+    getTicketsPage({ status: activeStatus, category: activeCategory, priority: activePriority, worker: activeWorker, source: activeSource, hideDone, sort: activeSort, q: searchQuery, period: activePeriod, from: activeFrom, to: activeTo, page: currentPage, limit: PAGE_SIZE }),
     getCategories(),
     getTicketFilterWorkers(),
     getTicketsCount({ status: "pending_review", source: ["telegram_group", "telegram_private_test"] }),
@@ -225,6 +228,8 @@ export default async function TicketsPage({
     if (activeWorker && activeWorker !== "all") params.set("worker", activeWorker);
     if (activeSort !== "newest") params.set("sort", activeSort);
     if (activeSource !== "all") params.set("source", activeSource);
+    if (explicitHideDoneParam) params.set("hideDone", explicitHideDoneParam);
+    else if (!hideDone) params.set("hideDone", "false");
     if (searchQuery) params.set("q", searchQuery);
     if (activePeriod) params.set("period", activePeriod);
     if (activeFrom) params.set("from", activeFrom);
@@ -242,6 +247,7 @@ export default async function TicketsPage({
       params.delete("from");
       params.delete("to");
     }
+    if (updates.status === "done") params.delete("hideDone");
     if (updates.from || updates.to) params.delete("period");
     if (Object.keys(updates).some((key) => key !== "page")) params.delete("page");
 
@@ -282,6 +288,7 @@ export default async function TicketsPage({
           {activeWorker !== "all" ? <input type="hidden" name="worker" value={activeWorker} /> : null}
           {activeSort !== "newest" ? <input type="hidden" name="sort" value={activeSort} /> : null}
           {activeSource !== "all" ? <input type="hidden" name="source" value={activeSource} /> : null}
+          {!hideDone ? <input type="hidden" name="hideDone" value="false" /> : explicitHideDoneParam === "true" ? <input type="hidden" name="hideDone" value="true" /> : null}
           {activeFrom ? <input type="hidden" name="from" value={activeFrom} /> : null}
           {activeTo ? <input type="hidden" name="to" value={activeTo} /> : null}
         </form>
@@ -294,6 +301,7 @@ export default async function TicketsPage({
             <span className="text-[10px] text-zinc-400">{statusFilters.find((filter) => filter.value === activeStatus)?.label ?? "Всі"}</span>
           </summary>
           <div className="space-y-2 px-2 pb-2.5 pt-2">
+            <DoneVisibilityToggle hideDone={hideDone} disabled={activeStatus === "done"} href={ticketHref({ hideDone: hideDone ? "false" : "true" })} compact />
             <FilterGroup title="Статус">{statusFilters.map((filter) => <FilterButton key={filter.value} href={ticketHref({ status: filter.value })} active={activeStatus === filter.value}>{filter.label}</FilterButton>)}</FilterGroup>
             <FilterGroup title="Категорія">
               <FilterButton href={ticketHref({ category: "all" })} active={activeCategory === "all"}>Всі</FilterButton>
@@ -313,7 +321,7 @@ export default async function TicketsPage({
               <FilterButton href={ticketHref({ sort: "newest" })} active={activeSort === "newest"}>Нові спочатку</FilterButton>
               <FilterButton href={ticketHref({ sort: "priority_desc" })} active={activeSort === "priority_desc"}>Вищий пріоритет</FilterButton>
             </FilterGroup>
-            <PeriodFilterForm activeFrom={activeFrom} activeTo={activeTo} searchQuery={searchQuery} activeStatus={activeStatus} activeCategory={activeCategory} activePriority={activePriority} activeWorker={activeWorker} activeSort={activeSort} />
+            <PeriodFilterForm activeFrom={activeFrom} activeTo={activeTo} searchQuery={searchQuery} activeStatus={activeStatus} activeCategory={activeCategory} activePriority={activePriority} activeWorker={activeWorker} activeSort={activeSort} activeSource={activeSource} hideDone={hideDone} explicitHideDoneParam={explicitHideDoneParam} />
             <div className="flex max-w-full gap-1.5 overflow-x-auto pb-0.5">
               <FilterButton href={periodLinks.thisWeek} active={activePeriod === "this_week"}>Цей тиждень</FilterButton>
               <FilterButton href={periodLinks.previousWeek} active={activePeriod === "previous_week"}>Минулий тиждень</FilterButton>
@@ -331,7 +339,7 @@ export default async function TicketsPage({
 
         <div className="space-y-2">
           {tickets.map((ticket) => <MobileTicketCard key={ticket.id} ticket={ticket} canDeleteTickets={canDeleteTickets} returnTo={returnTo} />)}
-          {tickets.length === 0 ? <EmptyTickets /> : null}
+          {tickets.length === 0 ? <EmptyTickets hideDone={hideDone} /> : null}
         </div>
       </section>
 
@@ -345,6 +353,8 @@ export default async function TicketsPage({
           <CardHeader><CardTitle>Список заявок</CardTitle></CardHeader>
           <CardContent className="space-y-4">
             <div className="flex flex-wrap gap-2">{statusFilters.map((filter) => <Button key={filter.value} asChild variant={activeStatus === filter.value ? "default" : "outline"} size="sm"><Link href={ticketHref({ status: filter.value })}>{filter.label}</Link></Button>)}</div>
+            <DoneVisibilityToggle hideDone={hideDone} disabled={activeStatus === "done"} href={ticketHref({ hideDone: hideDone ? "false" : "true" })} />
+            {hideDone ? <div className="inline-flex w-fit rounded-full border border-emerald-400/20 bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-300">Виконані приховані</div> : null}
             <div className="space-y-3 rounded-2xl border border-white/[0.08] bg-black/20 p-3">
               <div>
                 <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">Категорія</div>
@@ -364,7 +374,7 @@ export default async function TicketsPage({
             </div>
             <div className="rounded-2xl border border-white/[0.08] bg-black/20 p-3">
               <div className="flex flex-wrap items-end gap-2">
-                <PeriodFilterForm activeFrom={activeFrom} activeTo={activeTo} searchQuery={searchQuery} activeStatus={activeStatus} activeCategory={activeCategory} activePriority={activePriority} activeWorker={activeWorker} activeSort={activeSort} />
+                <PeriodFilterForm activeFrom={activeFrom} activeTo={activeTo} searchQuery={searchQuery} activeStatus={activeStatus} activeCategory={activeCategory} activePriority={activePriority} activeWorker={activeWorker} activeSort={activeSort} activeSource={activeSource} hideDone={hideDone} explicitHideDoneParam={explicitHideDoneParam} />
                 <div className="flex flex-wrap gap-2">
                   <Button asChild variant={activeSource === "all" ? "default" : "outline"} size="sm"><Link href={ticketHref({ source: "all" })}>Всі джерела</Link></Button>
                   <Button asChild variant={activeSource === "director_portal" ? "default" : "outline"} size="sm"><Link href={ticketHref({ source: "director_portal" })}>Від директорів</Link></Button>
@@ -378,7 +388,7 @@ export default async function TicketsPage({
               </div>
             </div>
             <PaginationBar page={safePage} total={totalTickets} totalPages={totalPages} shownFrom={shownFrom} shownTo={shownTo} hrefForPage={(page) => ticketHref({ page: String(page) })} />
-            {tickets.length === 0 ? <p className="text-sm text-muted-foreground">Заявок поки немає. Спробуйте змінити фільтри.</p> : (
+            {tickets.length === 0 ? <p className="text-sm text-muted-foreground">{hideDone ? "Заявок не знайдено. Спробуйте вимкнути фільтр ‘Не показувати виконані заявки’." : "Заявок не знайдено."}</p> : (
               <Table>
                 <THead><TR><TH>Номер</TH><TH>Заявка</TH><TH>Об'єкт</TH><TH>Виконавець</TH><TH>Статус</TH><TH>Дедлайн</TH><TH>Дії</TH></TR></THead>
                 <TBody>{tickets.map((ticket) => <DesktopTicketRow key={ticket.id} ticket={ticket} canDeleteTickets={canDeleteTickets} returnTo={returnTo} />)}</TBody>
@@ -399,7 +409,27 @@ function TicketsMessages({ error, queryError, deleted }: { error?: string | null
   </>;
 }
 
-function PeriodFilterForm({ activeFrom, activeTo, searchQuery, activeStatus, activeCategory, activePriority, activeWorker, activeSort }: { activeFrom: string; activeTo: string; searchQuery: string; activeStatus: "all" | TicketStatus; activeCategory: string; activePriority: "all" | TicketPriority; activeWorker: string; activeSort: string }) {
+function DoneVisibilityToggle({ hideDone, disabled, href, compact = false }: { hideDone: boolean; disabled: boolean; href: string; compact?: boolean }) {
+  const label = compact ? "Без виконаних" : "Не показувати виконані заявки";
+  const className = [
+    "inline-flex w-fit items-center gap-2 rounded-xl border px-3 py-2 text-[11px] font-semibold transition md:text-sm",
+    hideDone ? "border-emerald-400/25 bg-emerald-500/10 text-emerald-200" : "border-white/10 bg-white/[0.035] text-zinc-300",
+    disabled ? "cursor-not-allowed opacity-60" : "hover:bg-white/[0.07]",
+  ].join(" ");
+  const content = (
+    <>
+      <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${hideDone ? "border-emerald-300 bg-emerald-400 text-black" : "border-zinc-500 bg-transparent text-transparent"}`}>
+        <CheckCircle2 className="h-3 w-3" />
+      </span>
+      <span>{label}</span>
+      {disabled ? <span className="text-[10px] font-normal text-zinc-500">status=done</span> : null}
+    </>
+  );
+  if (disabled) return <span className={className}>{content}</span>;
+  return <Link href={href} className={className}>{content}</Link>;
+}
+
+function PeriodFilterForm({ activeFrom, activeTo, searchQuery, activeStatus, activeCategory, activePriority, activeWorker, activeSort, activeSource, hideDone, explicitHideDoneParam }: { activeFrom: string; activeTo: string; searchQuery: string; activeStatus: "all" | TicketStatus; activeCategory: string; activePriority: "all" | TicketPriority; activeWorker: string; activeSort: string; activeSource: string; hideDone: boolean; explicitHideDoneParam?: "true" | "false" }) {
   return (
     <form action="/tickets" className="flex w-full flex-wrap items-end gap-2 md:w-auto">
       {searchQuery ? <input type="hidden" name="q" value={searchQuery} /> : null}
@@ -408,6 +438,8 @@ function PeriodFilterForm({ activeFrom, activeTo, searchQuery, activeStatus, act
       {activePriority !== "all" ? <input type="hidden" name="priority" value={activePriority} /> : null}
       {activeWorker !== "all" ? <input type="hidden" name="worker" value={activeWorker} /> : null}
       {activeSort !== "newest" ? <input type="hidden" name="sort" value={activeSort} /> : null}
+      {activeSource !== "all" ? <input type="hidden" name="source" value={activeSource} /> : null}
+      {!hideDone ? <input type="hidden" name="hideDone" value="false" /> : explicitHideDoneParam === "true" ? <input type="hidden" name="hideDone" value="true" /> : null}
       <label className="min-w-[130px] flex-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-500 md:flex-none">
         Від
         <input type="date" name="from" defaultValue={activeFrom} className="mt-1 h-9 w-full rounded-xl border border-white/10 bg-white/[0.055] px-2 text-[11px] text-zinc-100 outline-none focus:border-orange-400/50" />
@@ -531,8 +563,8 @@ function TicketActionsMenu({ ticket, canDeleteTickets, returnTo }: { ticket: Tic
   );
 }
 
-function EmptyTickets() {
-  return <div className="rounded-[16px] border border-white/10 bg-white/[0.035] p-3 text-[11px] text-zinc-400">Заявок за поточними фільтрами немає.</div>;
+function EmptyTickets({ hideDone }: { hideDone: boolean }) {
+  return <div className="rounded-[16px] border border-white/10 bg-white/[0.035] p-3 text-[11px] text-zinc-400">{hideDone ? "Заявок не знайдено. Спробуйте вимкнути фільтр ‘Не показувати виконані заявки’." : "Заявок не знайдено."}</div>;
 }
 
 function MetaItem({ icon: Icon, label }: { icon: React.ElementType; label: string }) {

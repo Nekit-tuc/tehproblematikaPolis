@@ -38,8 +38,10 @@ function periodFromRequest(request: Request) {
     category: url.searchParams.get("category") ?? undefined,
     priority: url.searchParams.get("priority") ?? undefined,
     worker: url.searchParams.get("worker") ?? undefined,
+    source: url.searchParams.get("source") ?? undefined,
     q: url.searchParams.get("q") ?? undefined,
     sort: url.searchParams.get("sort") ?? undefined,
+    hideDone: url.searchParams.get("status") === "done" ? false : url.searchParams.get("hideDone") !== "false",
   };
 }
 
@@ -197,8 +199,10 @@ export async function GET(request: Request) {
     category: period.category,
     priority: period.priority,
     worker: period.worker,
+    source: period.source,
     q: period.q?.trim(),
     sort: period.sort,
+    hideDone: period.hideDone,
     limit: 2000,
   });
 
