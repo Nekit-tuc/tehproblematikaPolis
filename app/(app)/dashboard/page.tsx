@@ -2,7 +2,10 @@ import Link from "next/link";
 import type React from "react";
 import { AlertTriangle, ArrowRight, CalendarCheck, CheckCircle2, ClipboardList, Hourglass, ListChecks, Sparkles } from "lucide-react";
 import { Alert } from "@/components/ui/alert";
+import { PlanRefreshModal } from "@/components/dashboard/plan-refresh-modal";
+import { requireAuth } from "@/lib/auth/server";
 import { getDashboardOverview } from "@/lib/supabase/queries";
+import { getDashboardPlanRefreshData } from "@/lib/supabase/dashboard-plan-refresh";
 
 const text = {
   forbiddenTitle: "Недостатньо прав",
@@ -22,9 +25,14 @@ const text = {
   noPlans: "На цей робочий тиждень ще немає активних планів.",
 };
 
-export default async function DashboardPage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
+export default async function DashboardPage({ searchParams }: { searchParams: Promise<{ error?: string; planRefresh?: string; added?: string; already?: string; skipped?: string; errors?: string; message?: string }> }) {
   const params = await searchParams;
-  const result = await getDashboardOverview();
+  const { profile } = await requireAuth();
+  const canRefreshPlans = ["admin", "management", "tech_manager"].includes(profile.role);
+  const [result, planRefreshData] = await Promise.all([
+    getDashboardOverview(),
+    canRefreshPlans ? getDashboardPlanRefreshData() : Promise.resolve(null),
+  ]);
   const data = result.data;
   const ticketsHref = `/tickets?from=${data.week.startDate}&to=${data.week.endDate}`;
   const plansHref = `/work-planning?from=${data.week.startDate}&to=${data.week.endDate}`;
@@ -35,6 +43,10 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
       <div className="relative space-y-4 md:space-y-5">
         {params.error === "forbidden" ? <Alert title={text.forbiddenTitle}>{text.forbiddenBody}</Alert> : null}
         {result.error ? <Alert title={text.supabaseTitle}>{result.error}</Alert> : null}
+        {params.planRefresh === "error" ? <Alert title="Не вдалося оновити плани">{params.message ?? "Спробуйте ще раз."}</Alert> : null}
+        {params.planRefresh === "success" ? (
+          <Alert title="Плани оновлено">Додано: {params.added ?? "0"}. Уже були в плані: {params.already ?? "0"}. Пропущено: {params.skipped ?? "0"}. Помилки: {params.errors ?? "0"}.</Alert>
+        ) : null}
 
         <section className="rounded-[20px] border border-white/[0.08] bg-white/[0.04] p-4 shadow-sm shadow-black/20 backdrop-blur md:p-5">
           <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
@@ -43,9 +55,12 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
               <h1 className="mt-1 text-[23px] font-semibold leading-tight text-stone-50 md:text-3xl">{text.title}</h1>
               <p className="mt-2 text-[12px] leading-relaxed text-stone-400 md:text-sm">{text.greeting}, {data.userName}</p>
             </div>
-            <div className="shrink-0 rounded-2xl border border-orange-400/20 bg-orange-500/10 px-3 py-2 text-left md:text-right">
-              <p className="text-[10px] text-orange-200">{text.workWeek}</p>
-              <p className="text-[16px] font-semibold text-orange-100 md:text-lg">{data.week.label}</p>
+            <div className="flex shrink-0 flex-col gap-2">
+              <div className="rounded-2xl border border-orange-400/20 bg-orange-500/10 px-3 py-2 text-left md:text-right">
+                <p className="text-[10px] text-orange-200">{text.workWeek}</p>
+                <p className="text-[16px] font-semibold text-orange-100 md:text-lg">{data.week.label}</p>
+              </div>
+              {canRefreshPlans ? <PlanRefreshModal data={planRefreshData?.data ?? null} error={planRefreshData?.error ?? null} /> : null}
             </div>
           </div>
         </section>
