@@ -23,6 +23,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { ConfirmSubmitButton } from "@/components/tickets/confirm-submit-button";
+import { WorkWeekCloseModal } from "@/components/work-planning/work-week-close-modal";
 import { WorkPlanningDocumentsMenu } from "@/components/work-planning/work-planning-documents-menu";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -35,7 +36,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { requireRole } from "@/lib/auth/server";
 import { addDays, formatWorkWeekDateRange, getNextWorkWeekRange, getWorkWeekRange, type WorkWeekRange } from "@/lib/date/work-week";
 import { priorityLabels, statusLabels } from "@/lib/labels";
-import { getWorkPlanningDuplicateRepeatsForWeek, getWorkPlanningSummary, getWorkPlanningWeeksOverview, getWorkPlans, type PlanningFilters, type PlanningTicket, type WorkPlan, type WorkPlanStatus, type WorkPlanningDuplicateRepeat, type WorkPlanningSummary, type WorkPlanningWeekOverview } from "@/lib/supabase/work-plans";
+import { getWorkPlanningDuplicateRepeatsForWeek, getWorkPlanningSummary, getWorkPlanningWeeksOverview, getWorkPlans, getWorkWeekClosePreview, type PlanningFilters, type PlanningTicket, type WorkPlan, type WorkPlanStatus, type WorkPlanningDuplicateRepeat, type WorkPlanningSummary, type WorkPlanningWeekOverview } from "@/lib/supabase/work-plans";
 import { cn, formatDate } from "@/lib/utils";
 import type { TicketPriority, TicketStatus, WorkerWithCategories } from "@/types/domain";
 import { createWorkPlanAction, deleteWorkPlanAction, ensureAutoDraftPlansAction } from "./actions";
@@ -55,6 +56,11 @@ type SearchParams = {
   carried?: string;
   success?: string;
   error?: string;
+  closed?: string;
+  kept?: string;
+  released?: string;
+  nextCreated?: string;
+  nextDrafts?: string;
 };
 
 const planningStatuses: TicketStatus[] = ["new", "assigned", "in_progress", "waiting_admin_confirmation"];
@@ -63,7 +69,7 @@ const planStatusLabels: Record<WorkPlanStatus, string> = {
   draft: "Чернетка",
   sent: "Надіслано",
   partially_done: "Частково виконано",
-  done: "Виконано",
+  done: "Архів",
   cancelled: "Скасовано",
 };
 
@@ -222,14 +228,15 @@ export default async function WorkPlanningPage({ searchParams }: { searchParams:
   const selectedWeek = isDateParam(params.week) ? weekRangeFromStart(params.week!) : nextWorkWeek;
   const weekOptions = buildPlanningWeeks(currentWorkWeek, selectedWeek);
 
-  const [plansResult, summaryResult, weeksOverviewResult, duplicatesResult] = await Promise.all([
+  const [plansResult, summaryResult, weeksOverviewResult, duplicatesResult, closePreviewResult] = await Promise.all([
     getWorkPlans({ from: selectedWeek.startIso, to: selectedWeek.endIso, limit: 100 }),
     getWorkPlanningSummary(),
     getWorkPlanningWeeksOverview(weekOptions),
     getWorkPlanningDuplicateRepeatsForWeek(selectedWeek),
+    getWorkWeekClosePreview(selectedWeek),
   ]);
 
-  const error = plansResult.error ?? summaryResult.error ?? weeksOverviewResult.error ?? duplicatesResult.error;
+  const error = plansResult.error ?? summaryResult.error ?? weeksOverviewResult.error ?? duplicatesResult.error ?? closePreviewResult.error;
   const pageError = displayWorkPlanningError(error);
   const createError = displayWorkPlanningError(params.error);
   const planningSummary = summaryResult.data;
@@ -285,9 +292,26 @@ export default async function WorkPlanningPage({ searchParams }: { searchParams:
         </div>
       ) : null}
 
+      {params.success === "week_closed" ? (
+        <div className="min-w-0 max-w-full overflow-hidden break-words whitespace-normal">
+          <Alert title="Систему оновлено">
+            <span className="break-words whitespace-normal">Закрито планів: {params.closed ?? "0"}. Виконані залишено: {params.kept ?? "0"}. Невиконані виведено з планів: {params.released ?? "0"}. Чернеток наступного тижня створено: {params.nextCreated ?? "0"}.</span>
+          </Alert>
+        </div>
+      ) : null}
+
+      {params.success === "week_already_closed" ? (
+        <div className="min-w-0 max-w-full overflow-hidden break-words whitespace-normal">
+          <Alert title="Тиждень уже закритий">
+            <span className="break-words whitespace-normal">Активних планів для закриття немає.</span>
+          </Alert>
+        </div>
+      ) : null}
+
       <WeekSlider weeks={weekOverview} selectedWeekStart={selectedWeek.startDate} params={params} />
-      <div className="flex justify-stretch md:justify-start">
+      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-start">
         <WorkPlanningDocumentsMenu weekStart={selectedWeekOverview.startDate} weekPeriod={shortWeekPeriod(selectedWeekOverview)} plans={plansResult.data.map((plan) => ({ id: plan.id, title: plan.title, itemsCount: plan.items_count ?? 0 }))} />
+        <WorkWeekCloseModal preview={closePreviewResult.data} weekLabel={shortWeekPeriod(selectedWeekOverview)} weekStart={selectedWeek.startDate} />
       </div>
 
       {createMode ? (

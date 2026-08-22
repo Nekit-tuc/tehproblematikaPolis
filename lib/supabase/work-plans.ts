@@ -119,6 +119,33 @@ export type PlanningFilters = {
   limit?: number;
 };
 
+export type WorkWeekClosePreview = {
+  periodStart: string;
+  periodEnd: string;
+  plansCount: number;
+  activePlansCount: number;
+  closedPlansCount: number;
+  itemsCount: number;
+  doneItemsCount: number;
+  notDoneItemsCount: number;
+  pendingReviewCount: number;
+  rejectedCount: number;
+  cancelledCount: number;
+  plansByStatus: Record<WorkPlanStatus, number>;
+  affectedPlans: Array<{ id: string; title: string; status: WorkPlanStatus }>;
+};
+
+export type WorkWeekCloseResult = {
+  periodStart: string;
+  periodEnd: string;
+  plansClosed: number;
+  doneKept: number;
+  notDoneReleased: number;
+  nextDraftPlansCreated: number;
+  nextDraftPlansCount: number;
+  alreadyClosed: boolean;
+};
+
 export type CreateWorkPlanInput = {
   title: string;
   periodStart: string;
@@ -695,6 +722,231 @@ async function carryOverUnfinishedTicketsToWeeklyDraftPlans(input: {
   if (historyError) console.warn("[work-planning:carry-over] history insert failed", { error: historyError.message, count: historyRows.length });
 
   return { data: { carriedOver: rows.length }, error: null };
+}
+
+function emptyWorkWeekClosePreview(range: WorkWeekRange): WorkWeekClosePreview {
+  return {
+    periodStart: range.startDate,
+    periodEnd: range.endDate,
+    plansCount: 0,
+    activePlansCount: 0,
+    closedPlansCount: 0,
+    itemsCount: 0,
+    doneItemsCount: 0,
+    notDoneItemsCount: 0,
+    pendingReviewCount: 0,
+    rejectedCount: 0,
+    cancelledCount: 0,
+    plansByStatus: { draft: 0, sent: 0, partially_done: 0, done: 0, cancelled: 0 },
+    affectedPlans: [],
+  };
+}
+
+type CloseWeekPlanRow = Pick<WorkPlan, "id" | "title" | "status" | "period_start" | "period_end">;
+type CloseWeekItemRow = {
+  id: string;
+  work_plan_id: string;
+  ticket_id: string;
+  work_plan?: { id: string; title: string; period_start: string; period_end: string } | { id: string; title: string; period_start: string; period_end: string }[] | null;
+  ticket?: { id: string; status: TicketStatus | null } | { id: string; status: TicketStatus | null }[] | null;
+};
+
+function closeWeekRowPlan(row: CloseWeekItemRow) {
+  return Array.isArray(row.work_plan) ? row.work_plan[0] : row.work_plan;
+}
+
+function closeWeekRowTicket(row: CloseWeekItemRow) {
+  return Array.isArray(row.ticket) ? row.ticket[0] : row.ticket;
+}
+
+async function getWorkWeekCloseRows(
+  supabase: ReturnType<typeof createAdminClient>,
+  range: WorkWeekRange,
+) {
+  const { data: plansData, error: plansError } = await measureAsync("work-planning:week_close_plans", () =>
+    supabase
+      .from("work_plans")
+      .select("id,title,status,period_start,period_end")
+      .eq("period_start", range.startIso)
+      .eq("period_end", range.endIso)
+      .in("status", ["draft", "sent", "partially_done", "done", "cancelled"]),
+  );
+  if (plansError) return { plans: [] as CloseWeekPlanRow[], items: [] as CloseWeekItemRow[], error: plansError.message };
+
+  const plans = (plansData ?? []) as CloseWeekPlanRow[];
+  const planIds = plans.map((plan) => plan.id);
+  if (planIds.length === 0) return { plans, items: [] as CloseWeekItemRow[], error: null };
+
+  const { data: itemsData, error: itemsError } = await measureAsync("work-planning:week_close_items", () =>
+    supabase
+      .from("work_plan_items")
+      .select(`
+        id,
+        work_plan_id,
+        ticket_id,
+        work_plan:work_plans(id,title,period_start,period_end),
+        ticket:tickets(id,status)
+      `)
+      .in("work_plan_id", planIds)
+      .limit(5000),
+  );
+  if (itemsError) return { plans, items: [] as CloseWeekItemRow[], error: itemsError.message };
+  return { plans, items: (itemsData ?? []) as unknown as CloseWeekItemRow[], error: null };
+}
+
+export async function getWorkWeekClosePreview(range: WorkWeekRange): Promise<QueryResult<WorkWeekClosePreview>> {
+  if (!hasSupabaseEnv()) return emptyWithError(emptyWorkWeekClosePreview(range));
+  const supabase = createAdminClient();
+  const rows = await getWorkWeekCloseRows(supabase, range);
+  if (rows.error) return { data: emptyWorkWeekClosePreview(range), error: rows.error };
+
+  const preview = emptyWorkWeekClosePreview(range);
+  preview.plansCount = rows.plans.length;
+  preview.activePlansCount = rows.plans.filter((plan) => activeWorkPlanStatuses.includes(plan.status)).length;
+  preview.closedPlansCount = rows.plans.filter((plan) => plan.status === "done").length;
+  preview.affectedPlans = rows.plans.map((plan) => ({ id: plan.id, title: plan.title, status: plan.status }));
+  for (const plan of rows.plans) preview.plansByStatus[plan.status] += 1;
+
+  for (const item of rows.items) {
+    const ticket = closeWeekRowTicket(item);
+    const status = ticket?.status ?? null;
+    preview.itemsCount += 1;
+    if (status === "done") preview.doneItemsCount += 1;
+    else preview.notDoneItemsCount += 1;
+    if (status === "pending_review") preview.pendingReviewCount += 1;
+    if (status === "rejected") preview.rejectedCount += 1;
+    if (status === "cancelled") preview.cancelledCount += 1;
+  }
+
+  return { data: preview, error: null };
+}
+
+async function ensureAutoDraftPlansForRangeWithoutCarryOver(input: {
+  supabase: ReturnType<typeof createAdminClient>;
+  range: WorkWeekRange;
+}): Promise<QueryResult<{ plans: WorkPlan[]; created: number }>> {
+  const titles = autoWorkPlanConfigs.map((config) => config.title);
+  const { data: existingData, error: existingError } = await measureAsync("work-planning:week_close_next_existing_plans", () =>
+    input.supabase
+      .from("work_plans")
+      .select("id, title, period_start, period_end, status, created_by, created_at, updated_at, sent_at, notes")
+      .eq("period_start", input.range.startIso)
+      .eq("period_end", input.range.endIso)
+      .in("title", titles)
+      .in("status", activeWorkPlanStatuses),
+  );
+  if (existingError) return { data: { plans: [], created: 0 }, error: existingError.message };
+
+  const existing = (existingData ?? []) as WorkPlan[];
+  const existingTitles = new Set(existing.map((plan) => plan.title));
+  const missing = autoWorkPlanConfigs.filter((config) => !existingTitles.has(config.title));
+  let createdPlans: WorkPlan[] = [];
+
+  if (missing.length > 0) {
+    const { data: inserted, error: insertError } = await measureAsync("work-planning:week_close_next_create_plans", () =>
+      input.supabase
+        .from("work_plans")
+        .insert(missing.map((config) => ({
+          title: config.title,
+          period_start: input.range.startIso,
+          period_end: input.range.endIso,
+          status: "draft",
+          notes: autoPlanNote(config),
+        })))
+        .select("id, title, period_start, period_end, status, created_by, created_at, updated_at, sent_at, notes"),
+    );
+    if (insertError) return { data: { plans: existing, created: 0 }, error: insertError.message };
+    createdPlans = (inserted ?? []) as WorkPlan[];
+  }
+
+  return { data: { plans: [...existing, ...createdPlans], created: createdPlans.length }, error: null };
+}
+
+export async function closeWorkWeekAndRefreshPlans(input: {
+  range: WorkWeekRange;
+  actorId: string;
+}): Promise<QueryResult<WorkWeekCloseResult>> {
+  const emptyResult: WorkWeekCloseResult = {
+    periodStart: input.range.startDate,
+    periodEnd: input.range.endDate,
+    plansClosed: 0,
+    doneKept: 0,
+    notDoneReleased: 0,
+    nextDraftPlansCreated: 0,
+    nextDraftPlansCount: 0,
+    alreadyClosed: false,
+  };
+  if (!hasSupabaseEnv()) return { data: emptyResult, error: missingSupabaseMessage };
+
+  return measureAsync("work-planning:week_close_refresh", async () => {
+    const supabase = createAdminClient();
+    const rows = await getWorkWeekCloseRows(supabase, input.range);
+    if (rows.error) return { data: emptyResult, error: rows.error };
+
+    const activePlans = rows.plans.filter((plan) => activeWorkPlanStatuses.includes(plan.status));
+    if (rows.plans.length === 0) return { data: emptyResult, error: "Немає планів для закриття." };
+    if (activePlans.length === 0) return { data: { ...emptyResult, alreadyClosed: true }, error: null };
+
+    const activePlanIds = new Set(activePlans.map((plan) => plan.id));
+    const activeItems = rows.items.filter((item) => activePlanIds.has(item.work_plan_id));
+    const doneItems = activeItems.filter((item) => closeWeekRowTicket(item)?.status === "done");
+    const notDoneItems = activeItems.filter((item) => closeWeekRowTicket(item)?.status !== "done");
+    const notDoneItemIds = notDoneItems.map((item) => item.id);
+
+    if (notDoneItemIds.length > 0) {
+      const { error: deleteError } = await measureAsync("work-planning:week_close_release_items", () =>
+        supabase.from("work_plan_items").delete().in("id", notDoneItemIds),
+      );
+      if (deleteError) return { data: emptyResult, error: deleteError.message };
+
+      const historyRows = notDoneItems.map((item) => {
+        const plan = closeWeekRowPlan(item);
+        return {
+          ticket_id: item.ticket_id,
+          actor_id: input.actorId,
+          action: "Виведено з плану",
+          metadata: {
+            source: "week_close_refresh",
+            workPlanId: plan?.id ?? item.work_plan_id,
+            workPlanTitle: plan?.title ?? null,
+            periodStart: plan?.period_start ?? input.range.startIso,
+            periodEnd: plan?.period_end ?? input.range.endIso,
+            description: "Заявку виведено з плану при закритті робочого тижня. Вона доступна для нового планування.",
+          },
+        };
+      });
+      const { error: historyError } = await measureAsync("work-planning:week_close_history", () =>
+        supabase.from("ticket_history").insert(historyRows),
+      );
+      if (historyError) console.warn("[work-planning:week-close] history insert failed", { error: historyError.message, count: historyRows.length });
+    }
+
+    const { error: updateError } = await measureAsync("work-planning:week_close_plans_done", () =>
+      supabase
+        .from("work_plans")
+        .update({ status: "done", updated_at: new Date().toISOString() })
+        .in("id", activePlans.map((plan) => plan.id)),
+    );
+    if (updateError) return { data: emptyResult, error: updateError.message };
+
+    const nextRange = getWorkWeekRange(addDays(input.range.start, 7));
+    const nextDrafts = await ensureAutoDraftPlansForRangeWithoutCarryOver({ supabase, range: nextRange });
+    if (nextDrafts.error) return { data: emptyResult, error: nextDrafts.error };
+
+    return {
+      data: {
+        periodStart: input.range.startDate,
+        periodEnd: input.range.endDate,
+        plansClosed: activePlans.length,
+        doneKept: doneItems.length,
+        notDoneReleased: notDoneItems.length,
+        nextDraftPlansCreated: nextDrafts.data.created,
+        nextDraftPlansCount: nextDrafts.data.plans.length,
+        alreadyClosed: false,
+      },
+      error: null,
+    };
+  });
 }
 
 export async function ensureWeeklyDraftPlansForAutoRouting(date = new Date()): Promise<QueryResult<{ periodStart: string; periodEnd: string; plans: WorkPlan[]; created: number; carriedOver: number }>> {

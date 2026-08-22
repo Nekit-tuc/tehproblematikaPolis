@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireRole } from "@/lib/auth/server";
 import { getWorkWeekRange } from "@/lib/date/work-week";
-import { addTicketsToWorkPlan, createWorkPlan, deleteWorkPlan, ensureWeeklyDraftPlansForAutoRouting, getActivePlannedTickets } from "@/lib/supabase/work-plans";
+import { addTicketsToWorkPlan, closeWorkWeekAndRefreshPlans, createWorkPlan, deleteWorkPlan, ensureWeeklyDraftPlansForAutoRouting, getActivePlannedTickets } from "@/lib/supabase/work-plans";
 
 function text(formData: FormData, key: string) {
   const value = formData.get(key);
@@ -123,4 +123,35 @@ export async function ensureAutoDraftPlansAction() {
 
   revalidatePath("/work-planning");
   redirect(`/work-planning?week=${result.data.periodStart}&success=auto_drafts&created=${result.data.created}&carried=${result.data.carriedOver}`);
+}
+
+export async function closeWorkWeekAndRefreshPlansAction(formData: FormData) {
+  const { user } = await requireRole(["admin", "management", "tech_manager"]);
+  const weekStart = text(formData, "weekStart");
+  if (!weekStart) fail("Не вибрано робочий тиждень для закриття.");
+
+  const range = getWorkWeekRange(new Date(`${weekStart}T17:00:00`));
+  const result = await closeWorkWeekAndRefreshPlans({ range, actorId: user.id });
+  if (result.error) {
+    console.error("[work-planning] week close refresh failed", { weekStart, error: result.error });
+    redirect(`/work-planning?week=${range.startDate}&error=${encodeURIComponent(result.error)}`);
+  }
+
+  revalidatePath("/work-planning");
+  revalidatePath("/dashboard");
+  revalidatePath("/tickets");
+  revalidatePath("/weekly-control");
+  revalidatePath("/reports");
+  revalidatePath("/director/tickets");
+
+  const params = new URLSearchParams({
+    week: range.startDate,
+    success: result.data.alreadyClosed ? "week_already_closed" : "week_closed",
+    closed: String(result.data.plansClosed),
+    kept: String(result.data.doneKept),
+    released: String(result.data.notDoneReleased),
+    nextCreated: String(result.data.nextDraftPlansCreated),
+    nextDrafts: String(result.data.nextDraftPlansCount),
+  });
+  redirect(`/work-planning?${params.toString()}`);
 }
