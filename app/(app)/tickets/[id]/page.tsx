@@ -49,8 +49,11 @@ function statusSuccessMessage(value?: string) {
   if (value === "confirmed") return "Заявку підтверджено.";
   if (value === "rejected") return "Заявку відхилено.";
   if (value === "category") return "Категорію заявки збережено.";
+  if (value === "category_plan_synced") return "Заявку оновлено. План синхронізовано.";
   if (value === "assigned") return "Виконавця призначено.";
+  if (value === "assigned_plan_synced") return "Виконавця призначено. План синхронізовано.";
   if (value === "unassigned") return "Виконавця знято із заявки.";
+  if (value === "unassigned_plan_synced") return "Виконавця знято. План синхронізовано.";
   if (value === "sent") return "Заявку надіслано виконавцю.";
   if (value === "worker_confirmed") return "Виконання заявки підтверджено.";
   if (value === "worker_returned") return "Заявку повернуто в роботу.";
@@ -591,7 +594,7 @@ function TicketQuickActions({ ticket, profile, categories, returnTo }: { ticket:
               </select>
               <SubmitButton type="submit" pendingText="Зберігаємо..." className="h-10 rounded-[14px] px-3 text-[12px]">Зберегти</SubmitButton>
             </div>
-            <p className="text-[10px] leading-4 text-zinc-500">Категорія зміниться у заявці. План виконавця не змінюється автоматично.</p>
+            <p className="text-[10px] leading-4 text-zinc-500">Категорія зміниться у заявці. Якщо заявка є у draft-плані, система спробує синхронізувати план.</p>
           </form>
         ) : null}
       </CardContent>

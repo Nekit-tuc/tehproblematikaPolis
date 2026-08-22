@@ -12,6 +12,7 @@ import { assignTicketToWorker, confirmWorkerCompletion, unassignTicketWorker } f
 import { createClient } from "@/lib/supabase/server";
 import { sendTicketToWorker, sendWorkerCompletionConfirmedNotification } from "@/lib/telegram/worker-notifications";
 import { confirmTicketWithPlanningDecision } from "@/lib/tickets/confirm-ticket-with-planning";
+import { syncTicketPlanningAfterUpdate, type TicketPlanningSyncResult } from "@/lib/supabase/work-plans";
 import type { PhotoType, TicketStatus } from "@/types/domain";
 
 function readString(formData: FormData, key: string) {
@@ -51,6 +52,19 @@ function redirectWith(ticketId: string, key: string, message: string, returnTo?:
 
 function redirectSuccess(ticketId: string, key: string, value: string, returnTo?: string | null): never {
   redirect(appendSearchParam(ticketDetailHref(ticketId, returnTo), key, value));
+}
+
+function syncWarningText(sync: TicketPlanningSyncResult) {
+  if (sync.errors.length > 0) return sync.errors[0];
+  if (sync.warnings.length > 0) return sync.warnings[0];
+  return null;
+}
+
+function redirectWithSyncResult(ticketId: string, successValue: string, sync: TicketPlanningSyncResult, returnTo?: string | null): never {
+  let url = appendSearchParam(ticketDetailHref(ticketId, returnTo), "statusSuccess", successValue);
+  const warning = syncWarningText(sync);
+  if (warning) url = appendSearchParam(url, "statusWarning", warning);
+  redirect(url);
 }
 
 function deleteErrorRedirect(ticketId: string, message: string, returnTo?: string | null): never {
@@ -206,7 +220,10 @@ export async function updateTicketCategoryAction(ticketId: string, formData: For
   revalidatePath("/tickets");
   revalidatePath("/dashboard");
   revalidatePath("/work-planning");
-  redirectSuccess(ticketId, "statusSuccess", "category", returnTo);
+  const sync = await syncTicketPlanningAfterUpdate({ ticketId, actorProfileId: user.id, reason: "category_changed", categoryId });
+  if (sync.error) console.warn("[ticket-plan-sync] category sync warning", { ticketId, error: sync.error });
+  revalidatePath("/work-planning");
+  redirectWithSyncResult(ticketId, sync.data.synced ? "category_plan_synced" : "category", sync.data, returnTo);
 }
 
 export async function confirmTicketAction(ticketId: string, formData?: FormData) {
@@ -270,11 +287,14 @@ export async function assignWorkerAction(ticketId: string, formData: FormData) {
 
   const result = await assignTicketToWorker({ ticketId, workerId, actorId: user.id, fromStatus: ticket.status });
   if (result.error) redirectWith(ticketId, "statusError", result.error.message, returnTo);
+  const sync = await syncTicketPlanningAfterUpdate({ ticketId, actorProfileId: user.id, reason: "worker_changed", preferredWorkerId: workerId });
+  if (sync.error) console.warn("[ticket-plan-sync] worker sync warning", { ticketId, error: sync.error });
 
   revalidatePath(`/tickets/${ticketId}`);
   revalidatePath("/tickets");
+  revalidatePath("/work-planning");
   console.info(`[perf] worker:assign ${Math.round(performance.now() - startedAt)}ms`);
-  redirectSuccess(ticketId, "statusSuccess", "assigned", returnTo);
+  redirectWithSyncResult(ticketId, sync.data.synced ? "assigned_plan_synced" : "assigned", sync.data, returnTo);
 }
 
 export async function unassignWorkerAction(ticketId: string, formData: FormData) {
@@ -304,13 +324,16 @@ export async function unassignWorkerAction(ticketId: string, formData: FormData)
   if (result.error) {
     redirectWith(ticketId, "statusError", result.error.message, returnTo);
   }
+  const sync = await syncTicketPlanningAfterUpdate({ ticketId, actorProfileId: user.id, reason: "worker_unassigned" });
+  if (sync.error) console.warn("[ticket-plan-sync] unassign sync warning", { ticketId, error: sync.error });
 
   revalidatePath(`/tickets/${ticketId}`);
   revalidatePath("/tickets");
   revalidatePath("/dashboard");
   revalidatePath("/workers");
+  revalidatePath("/work-planning");
   if (returnTo) revalidatePath(returnTo.split("?")[0] || "/tickets");
-  redirectSuccess(ticketId, "statusSuccess", "unassigned", returnTo);
+  redirectWithSyncResult(ticketId, sync.data.synced ? "unassigned_plan_synced" : "unassigned", sync.data, returnTo);
 }
 
 export async function sendTicketToWorkerAction(ticketId: string, formData: FormData) {

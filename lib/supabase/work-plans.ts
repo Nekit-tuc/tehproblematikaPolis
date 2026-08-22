@@ -1168,6 +1168,20 @@ export type ConfirmedTicketPlanResult = {
   workerId?: string | null;
 };
 
+export type TicketPlanningSyncReason = "worker_changed" | "category_changed" | "worker_unassigned" | "status_changed";
+
+export type TicketPlanningSyncResult = {
+  synced: boolean;
+  moved: number;
+  updatedItems: number;
+  duplicatesRemoved: number;
+  warnings: string[];
+  errors: string[];
+  oldPlanTitle?: string | null;
+  newPlanTitle?: string | null;
+  workerName?: string | null;
+};
+
 function planForWorker(worker: Pick<Worker, "name" | "telegram_username"> | null | undefined) {
   if (!worker) return null;
   return autoWorkPlanConfigs.find((config) => workerMatches(worker, config)) ?? null;
@@ -1297,6 +1311,282 @@ export async function addConfirmedTicketToWeeklyDraftPlan(
     },
     error: null,
   };
+}
+
+function syncWarningMessage(code: string, planTitle?: string | null) {
+  if (code === "no_active_plan") return "Активного плану для синхронізації немає.";
+  if (code === "sent_plan") return `Заявка знаходиться у надісланому плані${planTitle ? `: ${planTitle}` : ""}. Перенесіть її вручну або повторно надішліть план.`;
+  if (code === "archived_plan") return "Заявка знаходиться в архівному плані. Архів не змінено.";
+  if (code === "target_plan_not_found") return "План для нового виконавця або категорії не знайдено.";
+  if (code === "worker_not_found") return "Не знайдено виконавця для нової категорії або вибраного маршруту.";
+  return code;
+}
+
+export async function syncTicketPlanningAfterUpdate(input: {
+  ticketId: string;
+  actorProfileId?: string | null;
+  reason: TicketPlanningSyncReason;
+  preferredWorkerId?: string | null;
+  categoryId?: string | null;
+}): Promise<QueryResult<TicketPlanningSyncResult>> {
+  const emptyResult: TicketPlanningSyncResult = {
+    synced: false,
+    moved: 0,
+    updatedItems: 0,
+    duplicatesRemoved: 0,
+    warnings: [],
+    errors: [],
+  };
+  if (!hasSupabaseEnv()) return { data: emptyResult, error: missingSupabaseMessage };
+
+  const supabase = createAdminClient();
+  const { data: ticketData, error: ticketError } = await measureAsync("ticket-plan-sync:ticket", () =>
+    supabase
+      .from("tickets")
+      .select("id, number, status, category_id, assignee_worker_id, category:categories(name), worker:workers(id,name,telegram_username)")
+      .eq("id", input.ticketId)
+      .maybeSingle(),
+  );
+  if (ticketError) return { data: emptyResult, error: ticketError.message };
+  const ticket = ticketData as {
+    id: string;
+    number?: string | null;
+    status?: TicketStatus | null;
+    category_id?: string | null;
+    assignee_worker_id?: string | null;
+    category?: { name?: string | null } | { name?: string | null }[] | null;
+    worker?: Pick<Worker, "id" | "name" | "telegram_username"> | Pick<Worker, "id" | "name" | "telegram_username">[] | null;
+  } | null;
+  if (!ticket) return { data: emptyResult, error: "Заявку не знайдено." };
+
+  const { data: itemsData, error: itemsError } = await measureAsync("ticket-plan-sync:active_items", () =>
+    supabase
+      .from("work_plan_items")
+      .select("id, work_plan_id, ticket_id, worker_id, category, sort_order, work_plan:work_plans!inner(id,title,status,period_start,period_end)")
+      .eq("ticket_id", input.ticketId)
+      .in("work_plan.status", activeWorkPlanStatuses),
+  );
+  if (itemsError) return { data: emptyResult, error: itemsError.message };
+
+  const items = (itemsData ?? []) as Array<{
+    id: string;
+    work_plan_id: string;
+    ticket_id: string;
+    worker_id?: string | null;
+    category?: string | null;
+    sort_order?: number | null;
+    work_plan?: WorkPlan | WorkPlan[] | null;
+  }>;
+  if (items.length === 0) {
+    return { data: { ...emptyResult, warnings: [syncWarningMessage("no_active_plan")] }, error: null };
+  }
+
+  const category = Array.isArray(ticket.category) ? ticket.category[0] : ticket.category;
+  const categoryName = category?.name ?? null;
+  if (input.reason === "worker_unassigned") {
+    const result: TicketPlanningSyncResult = { ...emptyResult };
+    for (const item of items) {
+      const plan = Array.isArray(item.work_plan) ? item.work_plan[0] : item.work_plan;
+      if (!plan) continue;
+      if (plan.status === "draft") {
+        const { error: updateError } = await measureAsync("ticket-plan-sync:unassign_item", () =>
+          supabase
+            .from("work_plan_items")
+            .update({ worker_id: null, category: categoryName })
+            .eq("id", item.id),
+        );
+        if (updateError) result.errors.push(updateError.message);
+        else {
+          result.synced = true;
+          result.updatedItems += 1;
+          result.oldPlanTitle ??= plan.title;
+          result.newPlanTitle ??= plan.title;
+        }
+      } else if (plan.status === "sent" || plan.status === "partially_done") {
+        result.warnings.push(syncWarningMessage("sent_plan", plan.title));
+      }
+    }
+
+    if (result.synced || result.warnings.length > 0 || result.errors.length > 0) {
+      await supabase.from("ticket_history").insert({
+        ticket_id: input.ticketId,
+        actor_id: input.actorProfileId ?? null,
+        action: result.synced ? "Заявку синхронізовано з планом" : "Заявку оновлено, але план потребує перевірки",
+        metadata: {
+          source: "ticket_plan_sync",
+          reason: input.reason,
+          updatedItems: result.updatedItems,
+          warnings: result.warnings,
+          errors: result.errors,
+        },
+      });
+    }
+    return { data: result, error: result.errors[0] ?? null };
+  }
+
+  const categoryConfig = autoPlanConfigForCategory(categoryName);
+  let targetWorkerId = input.preferredWorkerId || null;
+  let targetWorker: Pick<Worker, "id" | "name" | "telegram_username"> | null = null;
+  let targetConfig: AutoWorkPlanConfig | null = null;
+
+  if (targetWorkerId) {
+    const { data: workerData, error: workerError } = await measureAsync("ticket-plan-sync:preferred_worker", () =>
+      supabase.from("workers").select("id,name,telegram_username").eq("id", targetWorkerId).eq("is_active", true).maybeSingle(),
+    );
+    if (workerError) return { data: emptyResult, error: workerError.message };
+    targetWorker = workerData as Pick<Worker, "id" | "name" | "telegram_username"> | null;
+    if (!targetWorker) {
+      emptyResult.warnings.push(syncWarningMessage("worker_not_found"));
+      return { data: emptyResult, error: null };
+    }
+    targetConfig = planForWorker(targetWorker);
+  } else if (input.reason === "category_changed") {
+    targetConfig = categoryConfig;
+    targetWorkerId = await findAutoPlanWorkerId(supabase, targetConfig);
+  } else if (ticket.assignee_worker_id) {
+    const worker = Array.isArray(ticket.worker) ? ticket.worker[0] : ticket.worker;
+    targetWorker = worker ?? null;
+    targetWorkerId = ticket.assignee_worker_id;
+    targetConfig = planForWorker(worker);
+  } else {
+    targetConfig = categoryConfig;
+    targetWorkerId = await findAutoPlanWorkerId(supabase, targetConfig);
+  }
+
+  if (!targetConfig && categoryConfig) targetConfig = categoryConfig;
+  if (!targetWorkerId && targetConfig) targetWorkerId = await findAutoPlanWorkerId(supabase, targetConfig);
+  if (!targetConfig || !targetWorkerId) {
+    return { data: { ...emptyResult, warnings: [syncWarningMessage("worker_not_found")] }, error: null };
+  }
+
+  if (input.reason === "category_changed" && targetWorkerId && ticket.assignee_worker_id !== targetWorkerId) {
+    const now = new Date().toISOString();
+    const { error: assignError } = await measureAsync("ticket-plan-sync:update_ticket_worker", () =>
+      supabase
+        .from("tickets")
+        .update({
+          assignee_worker_id: targetWorkerId,
+          assigned_at: now,
+          status: ticket.status === "new" ? "assigned" : ticket.status,
+          updated_at: now,
+        })
+        .eq("id", input.ticketId),
+    );
+    if (assignError) return { data: emptyResult, error: assignError.message };
+  }
+
+  const result: TicketPlanningSyncResult = { ...emptyResult, workerName: targetConfig.workerName };
+  const draftItems = items.filter((item) => {
+    const plan = Array.isArray(item.work_plan) ? item.work_plan[0] : item.work_plan;
+    if (!plan) return false;
+    if (plan.status === "draft") return true;
+    if (plan.status === "sent" || plan.status === "partially_done") result.warnings.push(syncWarningMessage("sent_plan", plan.title));
+    return false;
+  });
+
+  for (const item of draftItems) {
+    const sourcePlan = Array.isArray(item.work_plan) ? item.work_plan[0] : item.work_plan;
+    if (!sourcePlan) continue;
+    result.oldPlanTitle ??= sourcePlan.title;
+
+    let targetPlan = (await measureAsync("ticket-plan-sync:target_plan", () =>
+      supabase
+        .from("work_plans")
+        .select("id, title, period_start, period_end, status, created_by, created_at, updated_at, sent_at, notes")
+        .eq("period_start", sourcePlan.period_start)
+        .eq("period_end", sourcePlan.period_end)
+        .eq("title", targetConfig.title)
+        .eq("status", "draft")
+        .maybeSingle(),
+    )).data as WorkPlan | null;
+
+    if (!targetPlan) {
+      const range = getWorkWeekRange(new Date(sourcePlan.period_start));
+      const ensureResult = await ensureAutoDraftPlansForRangeWithoutCarryOver({ supabase, range });
+      if (ensureResult.error) {
+        result.errors.push(ensureResult.error);
+        continue;
+      }
+      targetPlan = ensureResult.data.plans.find((plan) => plan.title === targetConfig.title && plan.status === "draft") ?? null;
+    }
+
+    if (!targetPlan) {
+      result.warnings.push(syncWarningMessage("target_plan_not_found"));
+      continue;
+    }
+
+    const duplicateResult = await measureAsync("ticket-plan-sync:duplicate", () =>
+      supabase
+        .from("work_plan_items")
+        .select("id")
+        .eq("work_plan_id", targetPlan.id)
+        .eq("ticket_id", input.ticketId)
+        .neq("id", item.id),
+    );
+    if (duplicateResult.error) {
+      result.errors.push(duplicateResult.error.message);
+      continue;
+    }
+    const duplicateIds = ((duplicateResult.data ?? []) as Array<{ id: string }>).map((row) => row.id);
+    if (duplicateIds.length > 0) {
+      const { error: deleteError } = await measureAsync("ticket-plan-sync:delete_duplicates", () =>
+        supabase.from("work_plan_items").delete().in("id", duplicateIds),
+      );
+      if (deleteError) {
+        result.errors.push(deleteError.message);
+        continue;
+      }
+      result.duplicatesRemoved += duplicateIds.length;
+      result.warnings.push("Заявка була у кількох активних планах, дублікати очищено.");
+    }
+
+    const countResult = await measureAsync("ticket-plan-sync:target_count", () =>
+      supabase.from("work_plan_items").select("id", { count: "exact", head: true }).eq("work_plan_id", targetPlan.id),
+    );
+    const { error: updateError } = await measureAsync("ticket-plan-sync:update_item", () =>
+      supabase
+        .from("work_plan_items")
+        .update({
+          work_plan_id: targetPlan.id,
+          worker_id: targetWorkerId,
+          category: categoryName,
+          sort_order: sourcePlan.id === targetPlan.id ? item.sort_order ?? 0 : countResult.count ?? 0,
+        })
+        .eq("id", item.id),
+    );
+    if (updateError) {
+      result.errors.push(updateError.message);
+      continue;
+    }
+
+    result.synced = true;
+    result.updatedItems += 1;
+    result.newPlanTitle = targetPlan.title;
+    if (sourcePlan.id !== targetPlan.id) result.moved += 1;
+  }
+
+  if (result.synced || result.warnings.length > 0 || result.errors.length > 0) {
+    await supabase.from("ticket_history").insert({
+      ticket_id: input.ticketId,
+      actor_id: input.actorProfileId ?? null,
+      action: result.synced ? "Заявку синхронізовано з планом" : "Заявку оновлено, але план потребує перевірки",
+      metadata: {
+        source: "ticket_plan_sync",
+        reason: input.reason,
+        preferredWorkerId: input.preferredWorkerId ?? null,
+        categoryId: input.categoryId ?? ticket.category_id ?? null,
+        moved: result.moved,
+        updatedItems: result.updatedItems,
+        duplicatesRemoved: result.duplicatesRemoved,
+        oldPlanTitle: result.oldPlanTitle ?? null,
+        newPlanTitle: result.newPlanTitle ?? null,
+        warnings: result.warnings,
+        errors: result.errors,
+      },
+    });
+  }
+
+  return { data: result, error: result.errors[0] ?? null };
 }
 
 export async function addTicketsToWorkPlan(workPlanId: string, ticketIds: string[]) {

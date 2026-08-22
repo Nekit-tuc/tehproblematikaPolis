@@ -6,6 +6,7 @@ import { requireAuth } from "@/lib/auth/server";
 import { getTicket } from "@/lib/supabase/queries";
 import { createClient } from "@/lib/supabase/server";
 import { assignTicketToWorker, unassignTicketWorker } from "@/lib/supabase/workers";
+import { syncTicketPlanningAfterUpdate } from "@/lib/supabase/work-plans";
 import type { TicketStatus } from "@/types/domain";
 
 export type QuickTicketActionResult = {
@@ -124,10 +125,12 @@ export async function quickAssignWorkerAction(workPlanId: string, ticketId: stri
 
   const result = await assignTicketToWorker({ ticketId, workerId, actorId: user.id, fromStatus: ticket.status });
   if (result.error) return error(result.error.message);
+  const sync = await syncTicketPlanningAfterUpdate({ ticketId, actorProfileId: user.id, reason: "worker_changed", preferredWorkerId: workerId });
+  if (sync.error) console.warn("[ticket-plan-sync] quick worker sync warning", { ticketId, error: sync.error });
 
   revalidateTicketViews(ticketId, workPlanId);
   revalidatePath("/workers");
-  return success(`Виконавця призначено: ${worker.name}.`);
+  return success(sync.data.synced ? `Виконавця призначено: ${worker.name}. План синхронізовано.` : `Виконавця призначено: ${worker.name}. ${sync.data.warnings[0] ?? ""}`.trim());
 }
 
 export async function quickUnassignWorkerAction(workPlanId: string, ticketId: string): Promise<QuickTicketActionResult> {
@@ -145,10 +148,12 @@ export async function quickUnassignWorkerAction(workPlanId: string, ticketId: st
     workerId: ticket.assignee_worker_id,
   });
   if (result.error) return error(result.error.message);
+  const sync = await syncTicketPlanningAfterUpdate({ ticketId, actorProfileId: user.id, reason: "worker_unassigned" });
+  if (sync.error) console.warn("[ticket-plan-sync] quick unassign sync warning", { ticketId, error: sync.error });
 
   revalidateTicketViews(ticketId, workPlanId);
   revalidatePath("/workers");
-  return success("Виконавця знято із заявки.");
+  return success(sync.data.synced ? "Виконавця знято із заявки. План синхронізовано." : `Виконавця знято із заявки. ${sync.data.warnings[0] ?? ""}`.trim());
 }
 
 export async function quickUpdateTicketCategoryAction(workPlanId: string, ticketId: string, formData: FormData): Promise<QuickTicketActionResult> {
@@ -189,10 +194,12 @@ export async function quickUpdateTicketCategoryAction(workPlanId: string, ticket
       from_category_name: ticket.category?.name ?? null,
       to_category_name: category.name,
       source: "work_plan_quick_modal",
-      note: "План виконавця не змінюється автоматично.",
+      note: "Після зміни категорії запускається синхронізація планування.",
     },
   });
+  const sync = await syncTicketPlanningAfterUpdate({ ticketId, actorProfileId: user.id, reason: "category_changed", categoryId });
+  if (sync.error) console.warn("[ticket-plan-sync] quick category sync warning", { ticketId, error: sync.error });
 
   revalidateTicketViews(ticketId, workPlanId);
-  return success(`Категорію змінено: ${category.name}.`);
+  return success(sync.data.synced ? `Категорію змінено: ${category.name}. План синхронізовано.` : `Категорію змінено: ${category.name}. ${sync.data.warnings[0] ?? ""}`.trim());
 }
