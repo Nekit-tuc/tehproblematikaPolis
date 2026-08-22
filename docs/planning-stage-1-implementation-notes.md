@@ -59,7 +59,7 @@
 - AI action як і раніше визначає existing/recommended worker;
 - далі викликає `confirmTicketWithPlanningDecision`;
 - service оновлює ticket, пише history і додає заявку в план;
-- Telegram-відправка лишилась після confirm, щоб не переписувати bot flow на цьому етапі.
+- Telegram-відправка більше не виконується автоматично після AI confirm. Виконавець отримує заявку після dispatch плану або через ручну дію “Надіслати виконавцю”.
 
 ## Director заявки
 
@@ -127,7 +127,7 @@ Service повертає warning-и для:
 
 1. `current_week` ще не додає в поточний тиждень автоматично.
 2. Mapping категорій усе ще залежить від існуючої auto-plan логіки.
-3. Telegram-відправка AI заявки лишилась окремим кроком після confirm.
+3. Telegram-відправка AI заявки не виконується після confirm; вона лишається тільки для dispatch плану або ручної відправки.
 4. Старий inline confirm-код у actions залишено нижче нового early path як тимчасовий fallback/cleanup target; фактично він не виконується після redirect.
 5. UI ще не дає адмінам вибрати current week / next week / no plan вручну.
 
@@ -138,4 +138,3 @@ Service повертає warning-и для:
 - додати компактний planning selector у pending confirm UI;
 - прибрати старий unreachable confirm-код з actions;
 - показати на `/tickets/[id]`, у який саме план потрапила заявка або чому вона не в плані.
-

@@ -192,7 +192,12 @@ export default async function AiTicketsPage({
       ) : null}
       {params.success === "confirmed_sent" ? (
         <Alert title="AI-заявку підтверджено">
-          AI-заявку підтверджено, виконавця призначено, Telegram надіслано.
+          AI-заявку підтверджено і додано в план. Виконавець отримає її після надсилання плану.
+        </Alert>
+      ) : null}
+      {params.success === "confirmed_planned" ? (
+        <Alert title="AI-заявку підтверджено">
+          AI-заявку підтверджено і додано в план. Виконавець отримає її після надсилання плану.
         </Alert>
       ) : null}
       {params.success === "confirmed_no_worker" ? (

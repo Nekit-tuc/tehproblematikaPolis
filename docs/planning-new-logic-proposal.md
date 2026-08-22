@@ -164,7 +164,7 @@ Helper має:
 
 ### Поточна проблема
 
-Telegram group intake може додавати заявку в план ще до адмінського підтвердження. `/ai-tickets` confirm-flow підтверджує і призначає worker, але не гарантує додавання в plan. Це створює різну поведінку для одного типу джерела.
+Telegram group intake створює pending_review заявку, а `/ai-tickets` confirm-flow має підтверджувати її через shared confirm/planning service і додавати в plan без прямого Telegram-відправлення виконавцю.
 
 ### Нова логіка
 

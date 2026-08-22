@@ -17,7 +17,7 @@
 
 Автоматичні чернетки створюються на наступний робочий тиждень. Поточний робочий тиждень визначається helper-ом `lib/date/work-week.ts` як четвер 17:00 -> наступний четвер 17:00, але обчислення зроблене через локальний `Date`, без явного timezone-conversion в коді. Це означає, що фактична timezone залежить від runtime.
 
-Підтвердження заявки через generic action `/tickets/[id]` викликає `addConfirmedTicketToWeeklyDraftPlan(ticketId)`. Директорська confirm-action також викликає цей helper. Окремий `/ai-tickets` confirm-flow має власну логіку підтвердження і не викликає цей helper; Telegram group intake може додавати Telegram/AI заявки в план ще на етапі створення через `autoAddTelegramTicketToWeeklyDraftPlan()`.
+Підтвердження заявки через generic action `/tickets/[id]`, директорська confirm-action і `/ai-tickets` проходять через shared confirm/planning service. Telegram group intake створює pending_review заявки; додавання в план має відбуватись після підтвердження.
 
 ## 2. Перевірені файли
 
@@ -430,10 +430,10 @@ Flow:
    - працює тільки з `status = pending_review` і source `telegram_group` / `telegram_private_test`.
    - призначає рекомендованого worker через `findRecommendedWorkerForTicket()`.
    - оновлює status на `assigned` або `new`.
-   - надсилає Telegram виконавцю через `sendTicketToWorker()`.
-   - не викликає `addConfirmedTicketToWeeklyDraftPlan()`.
+   - не надсилає Telegram виконавцю напряму після confirm.
+   - додає заявку в план через shared confirm/planning service.
 
-Висновок: AI/Telegram заявки можуть потрапити в plan при створенні з Telegram group intake. Якщо заявка підтверджується через `/ai-tickets`, сам confirm-flow не гарантує додавання в plan.
+Висновок: AI/Telegram заявки підтверджуються через shared confirm/planning service. Виконавець отримує Telegram після dispatch плану або через окрему ручну дію “Надіслати виконавцю”.
 
 ### Manual/admin заявка
 
@@ -916,7 +916,7 @@ order by t.created_at desc;
 - Автоматичні плани: створюються на наступний тиждень за `autoWorkPlanConfigs`.
 - Директорська заявка: pending_review -> admin confirm -> new/assigned -> addConfirmedTicketToWeeklyDraftPlan -> next week draft plan або warning.
 - Telegram group заявка: pending_review -> autoAddTelegramTicketToWeeklyDraftPlan при створенні -> next week draft plan, якщо category mapped.
-- `/ai-tickets` confirm: pending_review -> new/assigned, worker recommendation, Telegram send; не гарантує додавання в plan.
+- `/ai-tickets` confirm: pending_review -> new/assigned, worker recommendation, додавання в plan через shared service; Telegram виконавцю не надсилається до dispatch плану або ручної дії.
 - Manual/admin заявка: створюється `new`, автоматично не планується.
 - Carry-over: переносить незакриті tickets із попереднього тижня в наступні draft plans при ensure.
 - Каналізація: у `autoWorkPlanConfigs` маршрутизується до Лени.

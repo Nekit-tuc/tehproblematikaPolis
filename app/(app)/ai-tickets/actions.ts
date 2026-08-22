@@ -6,7 +6,6 @@ import { requireRole } from "@/lib/auth/server";
 import { measureAsync } from "@/lib/performance";
 import { createClient } from "@/lib/supabase/server";
 import { findRecommendedWorkerForTicket } from "@/lib/supabase/worker-queries";
-import { sendTicketToWorker } from "@/lib/telegram/worker-notifications";
 import { confirmTicketWithPlanningDecision } from "@/lib/tickets/confirm-ticket-with-planning";
 import type { TicketPriority } from "@/types/domain";
 
@@ -122,37 +121,11 @@ export async function confirmAiTicketAction(ticketId: string) {
     revalidatePath("/work-planning");
     revalidatePath("/dashboard");
 
-    if (!worker) {
-      if (confirmResult.planning.warning) redirect(`/ai-tickets?error=${encodeURIComponent(confirmResult.planning.warning)}`);
-      redirect("/ai-tickets?success=confirmed_no_worker");
-    }
-
-    const telegramResult = await measureAsync("ai-ticket:confirm:telegram", () =>
-      sendTicketToWorker(ticketId, worker.id, user.id),
-    );
-    revalidatePath("/workers");
-
     if (confirmResult.planning.warning) {
       redirect(`/ai-tickets?error=${encodeURIComponent(confirmResult.planning.warning)}`);
     }
-    if (telegramResult.ok) redirect("/ai-tickets?success=confirmed_sent");
-
-    await addHistory(
-      supabase,
-      ticketId,
-      user.id,
-      "Не вдалося автоматично надіслати заявку виконавцю в Telegram",
-      {
-        source: "ai_tickets",
-        worker_id: worker.id,
-        worker_name: worker.name,
-        error: telegramResult.error,
-      },
-      "ai-ticket:confirm:telegram-error-history",
-    );
-    redirect(
-      `/ai-tickets?error=${encodeURIComponent(`Заявку підтверджено і призначено, але Telegram не надіслано: ${telegramResult.error}`)}`,
-    );
+    if (!worker) redirect("/ai-tickets?success=confirmed_no_worker");
+    redirect("/ai-tickets?success=confirmed_planned");
 }
 
 export async function rejectAiTicketAction(ticketId: string) {

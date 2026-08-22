@@ -13,7 +13,7 @@
 Є два різні confirm-flow:
 
 - `/tickets/[id]` використовує `confirmTicketAction` або `confirmDirectorTicketAction` і після підтвердження викликає `addConfirmedTicketToWeeklyDraftPlan`.
-- `/ai-tickets` використовує `confirmAiTicketAction`, призначає/рекомендує виконавця і надсилає Telegram, але не викликає `addConfirmedTicketToWeeklyDraftPlan`.
+- `/ai-tickets` використовує `confirmAiTicketAction`, призначає/рекомендує виконавця і підтверджує заявку через shared confirm/planning service. Telegram виконавцю не надсилається під час confirm.
 
 Це головний ризик: підтвердження AI-заявок у різних UI може поводитись по-різному.
 
@@ -324,7 +324,7 @@ Actions:
 - якщо worker є, ставить `assigned`, `assignee_worker_id`, `assigned_at`;
 - якщо worker немає, ставить `new`;
 - пише `ticket_history`;
-- надсилає Telegram виконавцю, якщо worker є;
+- не надсилає Telegram виконавцю під час confirm; виконавець отримує заявку після dispatch плану або через ручну дію;
 - redirect з success code.
 
 Важливо: цей flow не викликає `addConfirmedTicketToWeeklyDraftPlan`, тому може відрізнятись від confirm через `/tickets/[id]`.
@@ -571,7 +571,7 @@ Export читає дані, не змінює таблиці. Має включ�
 | `/tickets/[id]` | Додати коментар | `canEditTicket` | editable ticket | `addTicketCommentAction` | ticket_comments, ticket_history | шум у history |
 | `/tickets/[id]` | Видалити заявку | admin only | якщо дозволено | `hardDeleteTicketAction` | deletes ticket/deps | незворотно |
 | `/tickets/new` | Створити заявку | `canCreateTicket` | valid form | `createTicketAction` | tickets, photos, history | не додає в план |
-| `/ai-tickets` | Підтвердити | admin roles | AI pending | `confirmAiTicketAction` | tickets, history, Telegram | не додає в plan |
+| `/ai-tickets` | Підтвердити | admin roles | AI pending | `confirmAiTicketAction` | tickets, work_plan_items, history | Telegram не надсилається до dispatch плану |
 | `/ai-tickets` | Відхилити | admin roles | AI pending | `rejectAiTicketAction` | tickets, history | destructive status |
 | `/ai-tickets` | Зберегти правки | admin roles | details open | `updateAiTicketAction` | tickets, history | може відрізнятись від `/tickets/[id]` |
 | `/ai-tickets` | Зберегти виконавця | admin roles | workers list | `assignWorkerToAiTicketAction` | tickets, history | Telegram не надсилається автоматично |
@@ -856,4 +856,3 @@ order by sent_at desc;
 - `lib/supabase/workers.ts`
 - `lib/telegram/work-plan-notifications.ts`
 - `lib/telegram/worker-notifications.ts`
-
