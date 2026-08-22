@@ -45,6 +45,7 @@ type QuickTicketModalProps = {
   ticket: QuickTicketData;
   workers: QuickTicketWorker[];
   categories: QuickTicketCategory[];
+  returnTo: string;
   permissions: {
     canChangeStatus: boolean;
     canAssignWorker: boolean;
@@ -52,6 +53,10 @@ type QuickTicketModalProps = {
     canComment: boolean;
   };
 };
+
+function ticketDetailHref(ticketId: string, returnTo: string) {
+  return `/tickets/${ticketId}?returnTo=${encodeURIComponent(returnTo)}`;
+}
 
 const statusOptions: Array<{ value: TicketStatus; label: string; hint: string }> = [
   { value: "new", label: "Нова / відкрита", hint: "Заявка очікує старту" },
@@ -132,7 +137,7 @@ function ActionRow({ icon: Icon, title, subtitle, onClick }: { icon: React.Compo
   );
 }
 
-export function QuickTicketModalButton({ workPlanId, ticket, workers, categories, permissions }: QuickTicketModalProps) {
+export function QuickTicketModalButton({ workPlanId, ticket, workers, categories, returnTo, permissions }: QuickTicketModalProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<QuickMode>("overview");
@@ -145,6 +150,7 @@ export function QuickTicketModalButton({ workPlanId, ticket, workers, categories
   const [workerSearch, setWorkerSearch] = useState("");
   const [categorySearch, setCategorySearch] = useState("");
   const [isPending, startTransition] = useTransition();
+  const detailHref = ticketDetailHref(ticket.id, returnTo);
 
   const selectedWorker = workers.find((worker) => worker.id === workerId) ?? null;
   const filteredWorkers = useMemo(() => {
@@ -246,7 +252,7 @@ export function QuickTicketModalButton({ workPlanId, ticket, workers, categories
         <ClipboardList className="h-3 w-3" />
         Відкрити заявку
       </button>
-      <Link href={`/tickets/${ticket.id}`} className="hidden h-8 items-center justify-center gap-1.5 rounded-md border border-white/[0.08] bg-white/[0.035] px-3 text-sm font-medium text-zinc-100 transition hover:bg-white/[0.06] md:inline-flex">
+      <Link href={detailHref} className="hidden h-8 items-center justify-center gap-1.5 rounded-md border border-white/[0.08] bg-white/[0.035] px-3 text-sm font-medium text-zinc-100 transition hover:bg-white/[0.06] md:inline-flex">
         <ClipboardList className="h-3.5 w-3.5" />
         Відкрити заявку
       </Link>
@@ -419,7 +425,7 @@ export function QuickTicketModalButton({ workPlanId, ticket, workers, categories
             </div>
 
             <div className="fixed inset-x-0 bottom-0 z-[143] grid grid-cols-2 gap-2 border-t border-white/[0.1] bg-[#070707]/95 px-4 pb-[calc(env(safe-area-inset-bottom)+12px)] pt-3 backdrop-blur md:hidden">
-              <Link href={`/tickets/${ticket.id}`} className="inline-flex h-12 items-center justify-center rounded-[18px] border border-white/[0.12] bg-white/[0.06] text-[12px] font-semibold text-zinc-100">
+              <Link href={detailHref} className="inline-flex h-12 items-center justify-center rounded-[18px] border border-white/[0.12] bg-white/[0.06] text-[12px] font-semibold text-zinc-100">
                 Перейти на сторінку
               </Link>
               <button type="button" onClick={close} className="h-12 rounded-[18px] bg-gradient-to-r from-orange-500 to-orange-400 text-[13px] font-bold text-black shadow-[0_12px_32px_rgba(249,115,22,0.26)]">

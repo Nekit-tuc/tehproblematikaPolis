@@ -157,6 +157,10 @@ function paginationPages(page: number, totalPages: number) {
   return Array.from(set).sort((a, b) => a - b);
 }
 
+function ticketDetailHref(ticketId: string, returnTo: string) {
+  return `/tickets/${ticketId}?returnTo=${encodeURIComponent(returnTo)}`;
+}
+
 export default async function TicketsPage({
   searchParams,
 }: {
@@ -452,9 +456,10 @@ function RepeatBadge({ ticket }: { ticket: TicketWithRelations }) {
 }
 
 function DesktopTicketRow({ ticket, canDeleteTickets, returnTo }: { ticket: TicketWithRelations; canDeleteTickets: boolean; returnTo: string }) {
+  const detailHref = ticketDetailHref(ticket.id, returnTo);
   return (
     <TR>
-      <TD><Link className="font-medium text-orange-200 hover:underline" href={"/tickets/" + ticket.id}>{ticket.number}</Link></TD>
+      <TD><Link className="font-medium text-orange-200 hover:underline" href={detailHref}>{ticket.number}</Link></TD>
       <TD>
         <div>{ticket.title}</div>
         <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
@@ -474,12 +479,13 @@ function DesktopTicketRow({ ticket, canDeleteTickets, returnTo }: { ticket: Tick
 
 function MobileTicketCard({ ticket, canDeleteTickets, returnTo }: { ticket: TicketWithRelations; canDeleteTickets: boolean; returnTo: string }) {
   const StatusIcon = statusIcon(ticket.status);
+  const detailHref = ticketDetailHref(ticket.id, returnTo);
   return (
     <article className="relative overflow-visible rounded-[17px] border border-white/10 bg-[linear-gradient(145deg,rgba(255,255,255,0.07),rgba(255,255,255,0.025))] shadow-[0_10px_26px_rgba(0,0,0,0.3)]">
       <div className={`absolute inset-y-0 left-0 w-[3px] rounded-l-[17px] bg-gradient-to-b ${statusAccent(ticket.status)}`} />
       <div className="px-3 py-2.5">
         <div className="flex items-start justify-between gap-2">
-          <Link href={`/tickets/${ticket.id}`} className="min-w-0 flex-1">
+          <Link href={detailHref} className="min-w-0 flex-1">
             <div className="text-[13px] font-bold leading-4 tracking-tight text-zinc-100">{ticket.number}</div>
             <h2 className="mt-1.5 line-clamp-2 text-[12px] font-semibold leading-4 text-zinc-100">{ticket.title}</h2>
           </Link>
@@ -506,11 +512,12 @@ function MobileTicketCard({ ticket, canDeleteTickets, returnTo }: { ticket: Tick
 }
 
 function TicketActionsMenu({ ticket, canDeleteTickets, returnTo }: { ticket: TicketWithRelations; canDeleteTickets: boolean; returnTo: string }) {
+  const detailHref = ticketDetailHref(ticket.id, returnTo);
   return (
     <details className="group relative">
       <summary className="flex h-8 w-8 cursor-pointer list-none items-center justify-center rounded-[10px] border border-white/10 bg-white/[0.04] text-zinc-300"><MoreVertical className="h-4 w-4" /></summary>
       <div className="absolute right-0 top-9 z-30 w-40 rounded-[12px] border border-white/[0.10] bg-[#111]/95 p-1.5 shadow-2xl shadow-black/40">
-        <Button asChild variant="ghost" className="h-8 w-full justify-start rounded-[10px] px-2 text-[11px]"><Link href={`/tickets/${ticket.id}`}><Eye className="h-3.5 w-3.5" />Відкрити</Link></Button>
+        <Button asChild variant="ghost" className="h-8 w-full justify-start rounded-[10px] px-2 text-[11px]"><Link href={detailHref}><Eye className="h-3.5 w-3.5" />Відкрити</Link></Button>
         {canDeleteTickets ? (
           <form action={hardDeleteTicketAction.bind(null, ticket.id)}>
             <input type="hidden" name="returnTo" value={returnTo} />

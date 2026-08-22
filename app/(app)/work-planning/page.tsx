@@ -182,6 +182,14 @@ function planningHref(params: Record<string, string | undefined | null>) {
   return query ? `/work-planning?${query}` : "/work-planning";
 }
 
+function workPlanDetailHref(planId: string, returnTo: string) {
+  return `/work-planning/${planId}?returnTo=${encodeURIComponent(returnTo)}`;
+}
+
+function ticketDetailHref(ticketId: string, returnTo: string) {
+  return `/tickets/${ticketId}?returnTo=${encodeURIComponent(returnTo)}`;
+}
+
 function weekRangeFromStart(startDate: string): WorkWeekRange {
   return getWorkWeekRange(new Date(`${startDate}T17:00:00`));
 }
@@ -244,6 +252,7 @@ export default async function WorkPlanningPage({ searchParams }: { searchParams:
   const selectedWeekBase = weekOptions.find((week) => week.startDate === selectedWeek.startDate) ?? { startDate: selectedWeek.startDate, endDate: selectedWeek.endDate, label: "future" as const };
   const selectedWeekOverview = weekOverview.find((week) => week.startDate === selectedWeek.startDate) ?? { ...selectedWeekBase, plansCount: 0, ticketsCount: 0, draftCount: 0, sentCount: 0, doneCount: 0, notDoneCount: 0, withoutWorkerCount: 0 };
   const isNextSelectedWeek = selectedWeek.startDate === nextWorkWeek.startDate;
+  const workPlanningReturnTo = planningHref({ week: selectedWeek.startDate, view });
 
   return (
     <div className="page-shell max-w-full space-y-2.5 overflow-x-hidden bg-[radial-gradient(circle_at_50%_0%,rgba(249,115,22,0.10),transparent_28%)] pb-[180px] md:space-y-6 md:bg-none md:pb-8">
@@ -349,8 +358,8 @@ export default async function WorkPlanningPage({ searchParams }: { searchParams:
         </form>
       ) : null}
 
-      <PlansSection plans={plansResult.data} selectedWeek={selectedWeek} />
-      <DuplicateRepeatsSection repeats={duplicatesResult.data} />
+      <PlansSection plans={plansResult.data} selectedWeek={selectedWeek} returnTo={workPlanningReturnTo} />
+      <DuplicateRepeatsSection repeats={duplicatesResult.data} returnTo={workPlanningReturnTo} />
 
 
     </div>
@@ -412,7 +421,7 @@ function WeekHeroMetric({ icon: Icon, label, value }: { icon: React.ElementType;
   );
 }
 
-function PlansSection({ plans, selectedWeek }: { plans: WorkPlan[]; selectedWeek: WorkWeekRange }) {
+function PlansSection({ plans, selectedWeek, returnTo }: { plans: WorkPlan[]; selectedWeek: WorkWeekRange; returnTo: string }) {
   return (
     <section className="rounded-[24px] border border-white/[0.10] bg-[radial-gradient(circle_at_0%_0%,rgba(249,115,22,0.08),transparent_30%),rgba(255,255,255,0.035)] p-3.5 shadow-[0_18px_42px_rgba(0,0,0,0.34)] md:p-5">
       <div className="mb-4 flex items-start justify-between gap-3">
@@ -430,14 +439,14 @@ function PlansSection({ plans, selectedWeek }: { plans: WorkPlan[]; selectedWeek
         </div>
       ) : (
         <div className="space-y-2.5 md:grid md:grid-cols-2 md:gap-3 md:space-y-0 xl:grid-cols-3">
-          {plans.map((plan) => <PlanCard key={plan.id} plan={plan} />)}
+          {plans.map((plan) => <PlanCard key={plan.id} plan={plan} returnTo={returnTo} />)}
         </div>
       )}
     </section>
   );
 }
 
-function DuplicateRepeatsSection({ repeats }: { repeats: WorkPlanningDuplicateRepeat[] }) {
+function DuplicateRepeatsSection({ repeats, returnTo }: { repeats: WorkPlanningDuplicateRepeat[]; returnTo: string }) {
   if (repeats.length === 0) return null;
 
   return (
@@ -474,7 +483,7 @@ function DuplicateRepeatsSection({ repeats }: { repeats: WorkPlanningDuplicateRe
                 {repeat.detectedBy ? `detected: ${repeat.detectedBy}` : "detected: rule"}
               </div>
               <Button asChild variant="outline" className="h-8 rounded-[11px] border-white/[0.10] bg-white/[0.04] px-3 text-[11px] text-orange-200 hover:bg-orange-500/10">
-                <Link href={`/tickets/${repeat.ticketId}`}>Відкрити основну заявку</Link>
+                <Link href={ticketDetailHref(repeat.ticketId, returnTo)}>Відкрити основну заявку</Link>
               </Button>
             </div>
           </article>
@@ -522,13 +531,14 @@ function progressTone(status: WorkPlanStatus, percent: number) {
   return "bg-orange-400";
 }
 
-function PlanCard({ plan }: { plan: WorkPlan }) {
+function PlanCard({ plan, returnTo }: { plan: WorkPlan; returnTo: string }) {
   const style = planStatusStyle[plan.status];
   const StatusIcon = style.icon;
   const { ownerName, direction, title } = planDisplayParts(plan);
   const progress = planProgress(plan);
   const period = shortWeekPeriod({ startDate: plan.period_start, endDate: plan.period_end });
   const withoutWorkerCount = plan.without_worker_count ?? 0;
+  const detailHref = workPlanDetailHref(plan.id, returnTo);
 
   return (
     <div className="relative min-w-0 overflow-hidden rounded-[22px] border border-white/[0.10] bg-[linear-gradient(145deg,rgba(255,255,255,0.065),rgba(255,255,255,0.025))] p-3 pl-3.5 shadow-[0_14px_30px_rgba(0,0,0,0.30)] md:p-4 md:pl-5">
@@ -578,10 +588,10 @@ function PlanCard({ plan }: { plan: WorkPlan }) {
 
       <div className="mt-2.5 flex justify-end gap-2">
         <Button asChild variant="outline" className="h-10 w-10 rounded-full border-white/[0.12] bg-white/[0.045] p-0 text-orange-300 hover:bg-orange-500/10 hover:text-orange-200">
-          <Link href={`/work-planning/${plan.id}`} aria-label={`Редагувати план ${plan.title}`}><Pencil className="h-4 w-4" /></Link>
+          <Link href={detailHref} aria-label={`Редагувати план ${plan.title}`}><Pencil className="h-4 w-4" /></Link>
         </Button>
         <Button asChild variant="outline" className="h-10 w-10 rounded-full border-white/[0.12] bg-white/[0.045] p-0 text-orange-300 hover:bg-orange-500/10 hover:text-orange-200">
-          <Link href={`/work-planning/${plan.id}`} aria-label={`Відкрити план ${plan.title}`}><Eye className="h-4 w-4" /></Link>
+          <Link href={detailHref} aria-label={`Відкрити план ${plan.title}`}><Eye className="h-4 w-4" /></Link>
         </Button>
         <PlanActionsMenu plan={plan} />
       </div>
@@ -700,7 +710,7 @@ function FilterForm({
   );
 }
 
-function CategoryGroup({ title, tickets, workersById }: { title: string; tickets: PlanningTicket[]; workersById: Map<string, WorkerWithCategories> }) {
+function CategoryGroup({ title, tickets, workersById, returnTo = "/work-planning" }: { title: string; tickets: PlanningTicket[]; workersById: Map<string, WorkerWithCategories>; returnTo?: string }) {
   return (
     <Card className="rounded-[17px] border-white/10 bg-white/[0.04] md:rounded-lg">
       <CardHeader className="p-3 md:p-6">
@@ -725,7 +735,7 @@ function CategoryGroup({ title, tickets, workersById }: { title: string; tickets
             </thead>
             <tbody className="divide-y divide-border">
               {tickets.map((ticket) => (
-                <TicketPlanningRow key={ticket.id} ticket={ticket} workersById={workersById} />
+                <TicketPlanningRow key={ticket.id} ticket={ticket} workersById={workersById} returnTo={returnTo} />
               ))}
             </tbody>
           </table>
@@ -735,7 +745,7 @@ function CategoryGroup({ title, tickets, workersById }: { title: string; tickets
   );
 }
 
-function TicketPlanningRow({ ticket, workersById }: { ticket: PlanningTicket; workersById: Map<string, WorkerWithCategories> }) {
+function TicketPlanningRow({ ticket, workersById, returnTo }: { ticket: PlanningTicket; workersById: Map<string, WorkerWithCategories>; returnTo: string }) {
   const planned = plannedLabel(ticket);
   return (
     <tr className={cn("transition hover:bg-stone-900/60", ticket.isPlanned && "opacity-60")}>
@@ -773,7 +783,7 @@ function TicketPlanningRow({ ticket, workersById }: { ticket: PlanningTicket; wo
       <td className="max-w-[160px] break-words px-3 py-3 align-top text-xs text-muted-foreground">{assignmentLabel(ticket.assignee_worker_id, workersById)}</td>
       <td className="px-3 py-3 align-top text-right">
         <Button asChild variant="outline" size="sm" className="min-h-8 rounded-lg text-[10px] md:min-h-0 md:rounded-md md:text-sm">
-          <Link href={`/tickets/${ticket.id}`}>Відкрити</Link>
+          <Link href={ticketDetailHref(ticket.id, returnTo)}>Відкрити</Link>
         </Button>
       </td>
     </tr>

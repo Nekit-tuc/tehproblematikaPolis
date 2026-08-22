@@ -20,6 +20,10 @@ function text(value?: string | null) {
   return value || "-";
 }
 
+function ticketDetailHref(ticketId: string, returnTo: string) {
+  return `/tickets/${ticketId}?returnTo=${encodeURIComponent(returnTo)}`;
+}
+
 export default async function AdminActsPage({ searchParams }: { searchParams: Promise<Params> }) {
   await requireRole(["admin", "management", "tech_manager"]);
   const params = await searchParams;
@@ -42,6 +46,7 @@ export default async function AdminActsPage({ searchParams }: { searchParams: Pr
   const acts = actsResult.data;
   const meta = metaResult.data;
   const error = actsResult.error ?? metaResult.error;
+  const returnTo = `/tickets/acts${query}`;
 
   return (
     <div className="mx-auto w-full max-w-7xl space-y-4 px-4 pb-32 pt-4 md:px-6 md:pt-6">
@@ -151,7 +156,7 @@ export default async function AdminActsPage({ searchParams }: { searchParams: Pr
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
                 <Button asChild variant="ghost" size="sm" className="h-9 rounded-2xl px-2 text-xs text-zinc-300">
-                  <Link href={`/tickets/${act.ticket_id}`}>Відкрити заявку</Link>
+                  <Link href={ticketDetailHref(act.ticket_id, returnTo)}>Відкрити заявку</Link>
                 </Button>
               </div>
             </article>

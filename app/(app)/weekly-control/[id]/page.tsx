@@ -30,6 +30,10 @@ const statusLabels: Record<string, string> = {
   rejected: "Відхилена",
 };
 
+function ticketDetailHref(ticketId: string, returnTo: string) {
+  return `/tickets/${ticketId}?returnTo=${encodeURIComponent(returnTo)}`;
+}
+
 export default async function WeeklyPeriodDetailsPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ success?: string; error?: string }> }) {
   await requireRole(["admin", "management", "tech_manager"]);
   const [{ id }, query] = await Promise.all([params, searchParams]);
@@ -37,6 +41,7 @@ export default async function WeeklyPeriodDetailsPage({ params, searchParams }: 
   if (!result.data.period) notFound();
   const { period, tickets, summary } = result.data;
   const grouped = groupByRole(tickets);
+  const returnTo = `/weekly-control/${period.id}`;
 
   return (
     <div className="page-shell mx-auto max-w-6xl space-y-4 pb-28 md:pb-8">
@@ -86,7 +91,7 @@ export default async function WeeklyPeriodDetailsPage({ params, searchParams }: 
 
       <section className="space-y-3">
         {(["created", "planned", "completed", "unresolved", "carried_over", "hot"] as WeeklyTicketRole[]).map((role) => (
-          <TicketSection key={role} title={roleLabels[role]} tickets={grouped[role] ?? []} />
+          <TicketSection key={role} title={roleLabels[role]} tickets={grouped[role] ?? []} returnTo={returnTo} />
         ))}
       </section>
     </div>
@@ -155,7 +160,7 @@ function TopList({ title, rows }: { title: string; rows: Array<{ name: string; c
   );
 }
 
-function TicketSection({ title, tickets }: { title: string; tickets: WeeklyPeriodTicket[] }) {
+function TicketSection({ title, tickets, returnTo }: { title: string; tickets: WeeklyPeriodTicket[]; returnTo: string }) {
   return (
     <section className="rounded-[18px] border border-white/[0.08] bg-white/[0.025] p-3">
       <div className="mb-3 flex items-center justify-between gap-3">
@@ -163,13 +168,13 @@ function TicketSection({ title, tickets }: { title: string; tickets: WeeklyPerio
         <span className="rounded-full bg-white/[0.07] px-2 py-1 text-[10px] text-stone-300">{tickets.length}</span>
       </div>
       <div className="grid gap-2 md:grid-cols-2">
-        {tickets.length ? tickets.map((ticket) => <TicketSnapshotCard key={`${ticket.ticket_id}-${ticket.role}`} ticket={ticket} />) : <p className="rounded-2xl border border-dashed border-white/[0.08] p-3 text-[11px] text-stone-500">Немає заявок у цій групі.</p>}
+        {tickets.length ? tickets.map((ticket) => <TicketSnapshotCard key={`${ticket.ticket_id}-${ticket.role}`} ticket={ticket} returnTo={returnTo} />) : <p className="rounded-2xl border border-dashed border-white/[0.08] p-3 text-[11px] text-stone-500">Немає заявок у цій групі.</p>}
       </div>
     </section>
   );
 }
 
-function TicketSnapshotCard({ ticket }: { ticket: WeeklyPeriodTicket }) {
+function TicketSnapshotCard({ ticket, returnTo }: { ticket: WeeklyPeriodTicket; returnTo: string }) {
   return (
     <article className="min-w-0 rounded-2xl border border-white/[0.07] bg-black/20 p-3">
       <div className="flex items-start justify-between gap-3">
@@ -177,7 +182,7 @@ function TicketSnapshotCard({ ticket }: { ticket: WeeklyPeriodTicket }) {
           <p className="text-[10px] font-semibold text-orange-300">{ticket.ticket_number ?? "Без номера"}</p>
           <h3 className="mt-0.5 line-clamp-2 text-[13px] font-semibold leading-snug text-stone-100">{ticket.ticket_title ?? "Без назви"}</h3>
         </div>
-        <Button asChild variant="ghost" size="sm"><Link href={`/tickets/${ticket.ticket_id}`}><ExternalLink className="h-3.5 w-3.5" /></Link></Button>
+        <Button asChild variant="ghost" size="sm"><Link href={ticketDetailHref(ticket.ticket_id, returnTo)}><ExternalLink className="h-3.5 w-3.5" /></Link></Button>
       </div>
       <div className="mt-2 grid gap-1 text-[10px] text-stone-500">
         <p className="truncate">{ticket.object_name ?? "Об'єкт не вказано"}</p>

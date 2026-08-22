@@ -15,8 +15,34 @@ function readString(formData: FormData | undefined, key: string) {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function redirectWith(ticketId: string, key: string, message: string): never {
-  redirect(`/tickets/${ticketId}?${key}=${encodeURIComponent(message)}`);
+function safeTicketReturnTo(value?: string | null) {
+  if (!value) return null;
+  if (value.startsWith("//")) return null;
+  if (value.startsWith("http://") || value.startsWith("https://")) return null;
+  if (value.toLowerCase().startsWith("javascript:")) return null;
+  const allowedPrefixes = ["/tickets", "/ai-tickets", "/dashboard", "/work-planning", "/director/tickets", "/workers", "/weekly-control", "/reports"];
+  return allowedPrefixes.some((prefix) => value.startsWith(prefix)) ? value : null;
+}
+
+function ticketDetailHref(ticketId: string, returnTo?: string | null) {
+  const params = new URLSearchParams();
+  const safeReturnTo = safeTicketReturnTo(returnTo);
+  if (safeReturnTo) params.set("returnTo", safeReturnTo);
+  const query = params.toString();
+  return query ? `/tickets/${ticketId}?${query}` : `/tickets/${ticketId}`;
+}
+
+function appendSearchParam(url: string, key: string, value: string) {
+  const separator = url.includes("?") ? "&" : "?";
+  return `${url}${separator}${key}=${encodeURIComponent(value)}`;
+}
+
+function redirectWith(ticketId: string, key: string, message: string, returnTo?: string | null): never {
+  redirect(appendSearchParam(ticketDetailHref(ticketId, returnTo), key, message));
+}
+
+function redirectSuccess(ticketId: string, key: string, value: string, returnTo?: string | null): never {
+  redirect(appendSearchParam(ticketDetailHref(ticketId, returnTo), key, value));
 }
 
 function planWarningMessage(reason: string) {
@@ -31,6 +57,7 @@ function planWarningMessage(reason: string) {
 
 export async function confirmDirectorTicketAction(ticketId: string, formData?: FormData) {
   const { user } = await requireAuth();
+  const returnTo = safeTicketReturnTo(readString(formData, "returnTo"));
   const requestedPlanningMode = readString(formData, "planningMode");
   const planningMode = requestedPlanningMode === "no_plan" ? "no_plan" : "next_week";
   const result = await confirmTicketWithPlanningDecision(ticketId, {
@@ -41,7 +68,7 @@ export async function confirmDirectorTicketAction(ticketId: string, formData?: F
     requireObject: true,
     requireCategory: true,
   });
-  if (!result.ok) redirectWith(ticketId, "statusError", result.error ?? planWarningMessage(result.planning.reason));
+  if (!result.ok) redirectWith(ticketId, "statusError", result.error ?? planWarningMessage(result.planning.reason), returnTo);
 
   revalidatePath(`/tickets/${ticketId}`);
   revalidatePath("/tickets");
@@ -49,21 +76,22 @@ export async function confirmDirectorTicketAction(ticketId: string, formData?: F
   revalidatePath("/work-planning");
   revalidatePath("/director/tickets");
 
-  if (result.planning.warning) redirect(`/tickets/${ticketId}?statusSuccess=confirmed&statusWarning=${encodeURIComponent(result.planning.warning)}`);
-  if (planningMode === "no_plan") redirect(`/tickets/${ticketId}?statusSuccess=confirmed_no_plan`);
-  if (result.planning.reason === "already_planned") redirect(`/tickets/${ticketId}?statusSuccess=confirmed_already_planned`);
-  redirect(`/tickets/${ticketId}?statusSuccess=confirmed_planned`);
+  if (result.planning.warning) redirect(appendSearchParam(appendSearchParam(ticketDetailHref(ticketId, returnTo), "statusSuccess", "confirmed"), "statusWarning", result.planning.warning));
+  if (planningMode === "no_plan") redirectSuccess(ticketId, "statusSuccess", "confirmed_no_plan", returnTo);
+  if (result.planning.reason === "already_planned") redirectSuccess(ticketId, "statusSuccess", "confirmed_already_planned", returnTo);
+  redirectSuccess(ticketId, "statusSuccess", "confirmed_planned", returnTo);
 }
 
 export async function rejectDirectorTicketAction(ticketId: string, formData?: FormData) {
   const { user, profile } = await requireAuth();
-  if (!canConfirmTicket(profile)) redirectWith(ticketId, "statusError", "Недостатньо прав для відхилення заявки директора.");
+  const returnTo = safeTicketReturnTo(readString(formData, "returnTo"));
+  if (!canConfirmTicket(profile)) redirectWith(ticketId, "statusError", "Недостатньо прав для відхилення заявки директора.", returnTo);
 
   const ticketResult = await getTicket(ticketId);
   const ticket = ticketResult.data;
-  if (!ticket) redirectWith(ticketId, "statusError", ticketResult.error ?? "Заявку не знайдено.");
-  if (ticket.source !== "director_portal") redirectWith(ticketId, "statusError", "Це не заявка від директора.");
-  if (ticket.status !== "pending_review") redirectWith(ticketId, "statusError", "Відхилити можна тільки заявку, що очікує перевірки.");
+  if (!ticket) redirectWith(ticketId, "statusError", ticketResult.error ?? "Заявку не знайдено.", returnTo);
+  if (ticket.source !== "director_portal") redirectWith(ticketId, "statusError", "Це не заявка від директора.", returnTo);
+  if (ticket.status !== "pending_review") redirectWith(ticketId, "statusError", "Відхилити можна тільки заявку, що очікує перевірки.", returnTo);
 
   const reason = readString(formData, "reason");
   const supabase = await createClient();
@@ -73,7 +101,7 @@ export async function rejectDirectorTicketAction(ticketId: string, formData?: Fo
       .update({ status: "rejected", completed_at: null, updated_at: new Date().toISOString() })
       .eq("id", ticketId),
   );
-  if (error) redirectWith(ticketId, "statusError", error.message);
+  if (error) redirectWith(ticketId, "statusError", error.message, returnTo);
 
   await supabase.from("ticket_history").insert({
     ticket_id: ticketId,
@@ -86,5 +114,5 @@ export async function rejectDirectorTicketAction(ticketId: string, formData?: Fo
   revalidatePath("/tickets");
   revalidatePath("/dashboard");
   revalidatePath("/director/tickets");
-  redirect(`/tickets/${ticketId}?statusSuccess=rejected`);
+  redirectSuccess(ticketId, "statusSuccess", "rejected", returnTo);
 }

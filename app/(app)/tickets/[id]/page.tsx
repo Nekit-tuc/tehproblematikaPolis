@@ -1,4 +1,4 @@
-import { Bot, BriefcaseBusiness, CalendarDays, Camera, CheckCircle2, ChevronRight, Clock, MapPin, MessageSquare, Send, Store, Tag, Trash2, UserX } from "lucide-react";
+import { ArrowLeft, Bot, BriefcaseBusiness, CalendarDays, Camera, CheckCircle2, ChevronRight, Clock, MapPin, MessageSquare, Send, Store, Tag, Trash2, UserX } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
@@ -57,12 +57,35 @@ function statusSuccessMessage(value?: string) {
   return "Новий статус заявки збережено.";
 }
 
+function safeTicketReturnTo(value?: string | null) {
+  if (!value) return null;
+  if (value.startsWith("//")) return null;
+  if (value.startsWith("http://") || value.startsWith("https://")) return null;
+  if (value.toLowerCase().startsWith("javascript:")) return null;
+  const allowedPrefixes = ["/tickets", "/ai-tickets", "/dashboard", "/work-planning", "/director/tickets", "/workers", "/weekly-control", "/reports"];
+  return allowedPrefixes.some((prefix) => value.startsWith(prefix)) ? value : null;
+}
+
+function fallbackReturnToForTicket(ticket: TicketWithRelations) {
+  if (ticket.source === "director_portal") return "/tickets?source=director_portal";
+  if (ticket.status === "pending_review" && (ticket.source === "telegram_group" || ticket.source === "telegram_private_test")) return "/ai-tickets";
+  return "/tickets";
+}
+
+function ticketDetailHref(ticketId: string, returnTo: string) {
+  return `/tickets/${ticketId}?returnTo=${encodeURIComponent(returnTo)}`;
+}
+
+function ReturnToInput({ returnTo }: { returnTo: string }) {
+  return <input type="hidden" name="returnTo" value={returnTo} />;
+}
+
 export default async function TicketDetailsPage({
   params,
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ photoError?: string; photoSuccess?: string; commentError?: string; commentSuccess?: string; statusError?: string; statusSuccess?: string; statusWarning?: string }>;
+  searchParams: Promise<{ photoError?: string; photoSuccess?: string; commentError?: string; commentSuccess?: string; statusError?: string; statusSuccess?: string; statusWarning?: string; returnTo?: string }>;
 }) {
   const { profile } = await requireAuth();
   const { id } = await params;
@@ -86,9 +109,14 @@ export default async function TicketDetailsPage({
   }
 
   const error = ticketResult.error;
+  const requestedReturnTo = safeTicketReturnTo(query.returnTo);
+  const returnTo = ticket ? requestedReturnTo ?? fallbackReturnToForTicket(ticket) : requestedReturnTo ?? "/tickets";
 
   return (
     <div className="page-shell space-y-3 pb-32 md:space-y-5 md:pb-10">
+      <Button asChild variant="outline" size="sm" className="h-9 w-fit rounded-[13px] border-white/[0.08] bg-white/[0.035] px-3 text-[11px] text-zinc-200 md:h-auto md:rounded-md md:text-sm">
+        <Link href={returnTo}><ArrowLeft className="h-3.5 w-3.5 md:h-4 md:w-4" />Назад</Link>
+      </Button>
       {error ? <Alert title={"Не вдалося завантажити дані"}>{error}</Alert> : null}
       {query.photoError ? <Alert title={"Фото не завантажено"}>{decodeURIComponent(query.photoError)}</Alert> : null}
       {query.photoSuccess ? <Alert title={"Фото додано"}>{"Завантаження завершено успішно."}</Alert> : null}
@@ -104,41 +132,41 @@ export default async function TicketDetailsPage({
         <>
           <div className="md:hidden">
             <Suspense fallback={<DetailBlockFallback title="Заявка" />}>
-              <MobileTicketDetails ticket={ticket} profile={profile} assignedWorker={assignedWorker} categories={categories} />
+              <MobileTicketDetails ticket={ticket} profile={profile} assignedWorker={assignedWorker} categories={categories} returnTo={returnTo} />
             </Suspense>
           </div>
           <div className="hidden space-y-5 md:block">
           <TicketHeroCard ticket={ticket} />
-          <DirectorTicketPanel ticket={ticket} profile={profile} />
+          <DirectorTicketPanel ticket={ticket} profile={profile} returnTo={returnTo} />
           <div className="grid min-w-0 gap-3 lg:grid-cols-[minmax(0,1fr)_360px] lg:gap-5">
             <div className="order-2 min-w-0 space-y-3 md:space-y-5 lg:order-1">
               <TicketDescriptionCard ticket={ticket} assignedWorker={assignedWorker} />
               {canConfirmTicket(profile) ? (
                 <Suspense fallback={<DetailBlockFallback title="Виконавець" />}>
-                  <WorkerAssignmentSection ticket={ticket} profile={profile} assignedWorker={assignedWorker} />
+                  <WorkerAssignmentSection ticket={ticket} profile={profile} assignedWorker={assignedWorker} returnTo={returnTo} />
                 </Suspense>
               ) : null}
               <Suspense fallback={<DetailBlockFallback title="Фото" />}>
-                <TicketPhotosSection ticket={ticket} profile={profile} />
+                <TicketPhotosSection ticket={ticket} profile={profile} returnTo={returnTo} />
               </Suspense>
               <Suspense fallback={<DetailBlockFallback title="Коментарі" />}>
-                <TicketCommentsSection ticketId={ticket.id} />
+                <TicketCommentsSection ticketId={ticket.id} returnTo={returnTo} />
               </Suspense>
             </div>
             <div className="order-1 min-w-0 space-y-3 md:space-y-5 lg:order-2">
-              <TicketQuickActions ticket={ticket} profile={profile} categories={categories} />
+              <TicketQuickActions ticket={ticket} profile={profile} categories={categories} returnTo={returnTo} />
               <Suspense fallback={<DetailBlockFallback title="Історія" />}>
                 <TicketHistorySection ticketId={ticket.id} />
               </Suspense>
               <Suspense fallback={<DetailBlockFallback title="Пов'язані заявки" />}>
-                <RelatedTicketsSection ticket={ticket} />
+                <RelatedTicketsSection ticket={ticket} returnTo={returnTo} />
               </Suspense>
               {(ticket.repeat_count ?? 0) > 0 ? (
                 <Suspense fallback={<DetailBlockFallback title="Дублі / повторні звернення" />}>
                   <TicketRepeatsSection ticket={ticket} />
                 </Suspense>
               ) : null}
-              {canHardDeleteTicket(profile) ? <TicketDangerZone ticketId={ticket.id} /> : null}
+              {canHardDeleteTicket(profile) ? <TicketDangerZone ticketId={ticket.id} returnTo={returnTo} /> : null}
             </div>
           </div>
           </div>
@@ -179,11 +207,13 @@ async function MobileTicketDetails({
   profile,
   assignedWorker,
   categories,
+  returnTo,
 }: {
   ticket: TicketWithRelations;
   profile: Profile;
   assignedWorker: Worker | WorkerWithCategories | null;
   categories: Category[];
+  returnTo: string;
 }) {
   const [photosResult, historyResult, workersResult] = await Promise.all([
     getTicketPhotos(ticket.id),
@@ -197,17 +227,17 @@ async function MobileTicketDetails({
 
   return (
     <div className="space-y-3">
-      <MobileTicketMainCard ticket={ticket} profile={profile} assignedWorker={assignedWorker} />
+      <MobileTicketMainCard ticket={ticket} profile={profile} assignedWorker={assignedWorker} returnTo={returnTo} />
       <MobileTicketSourceCard ticket={ticket} />
-      <MobileTicketActionPanel ticket={ticket} profile={profile} workers={workersResult.data} categories={categories} />
+      <MobileTicketActionPanel ticket={ticket} profile={profile} workers={workersResult.data} categories={categories} returnTo={returnTo} />
       <MobileTicketPhotosCard photos={photosResult.data} />
       <TicketHistoryAccordion history={historyResult.data} />
-      {canHardDeleteTicket(profile) ? <MobileDeleteTicketButton ticketId={ticket.id} /> : null}
+      {canHardDeleteTicket(profile) ? <MobileDeleteTicketButton ticketId={ticket.id} returnTo={returnTo} /> : null}
     </div>
   );
 }
 
-function MobileTicketMainCard({ ticket, profile, assignedWorker }: { ticket: TicketWithRelations; profile: Profile; assignedWorker: Worker | WorkerWithCategories | null }) {
+function MobileTicketMainCard({ ticket, profile, assignedWorker, returnTo }: { ticket: TicketWithRelations; profile: Profile; assignedWorker: Worker | WorkerWithCategories | null; returnTo: string }) {
   const canReview = canConfirmTicket(profile) && ticket.status === "pending_review";
   return (
     <SoftCard className="overflow-hidden">
@@ -243,18 +273,21 @@ function MobileTicketMainCard({ ticket, profile, assignedWorker }: { ticket: Tic
         {canReview && ticket.source === "director_portal" ? (
           <div className="space-y-2 pt-1">
             <form action={confirmDirectorTicketAction.bind(null, ticket.id)}>
+              <ReturnToInput returnTo={returnTo} />
               <SubmitButton type="submit" pendingText="Підтверджуємо..." className="h-12 w-full rounded-xl bg-orange-500 px-3 text-[13px] font-semibold text-black hover:bg-orange-400">
                 Підтвердити і додати в план
               </SubmitButton>
             </form>
             <div className="grid grid-cols-2 gap-2">
               <form action={confirmDirectorTicketAction.bind(null, ticket.id)}>
+                <ReturnToInput returnTo={returnTo} />
                 <input type="hidden" name="planningMode" value="no_plan" />
                 <SubmitButton type="submit" pendingText="Підтверджуємо..." variant="outline" className="h-10 w-full rounded-xl border-white/10 px-2 text-[11px] font-semibold text-zinc-200 hover:bg-white/5">
                   Без плану
                 </SubmitButton>
               </form>
               <form action={rejectDirectorTicketAction.bind(null, ticket.id)}>
+                <ReturnToInput returnTo={returnTo} />
                 <input type="hidden" name="reason" value="" />
                 <SubmitButton type="submit" pendingText="Відхиляємо..." variant="outline" className="h-10 w-full rounded-xl border-red-500/30 px-2 text-[11px] font-semibold text-red-300 hover:bg-red-500/10">
                   Відхилити
@@ -265,9 +298,11 @@ function MobileTicketMainCard({ ticket, profile, assignedWorker }: { ticket: Tic
         ) : canReview ? (
           <div className="grid grid-cols-2 gap-2 pt-1">
             <form action={confirmTicketAction.bind(null, ticket.id)}>
+              <ReturnToInput returnTo={returnTo} />
               <SubmitButton type="submit" pendingText="Підтверджуємо..." className="h-11 w-full rounded-xl bg-orange-500 px-2 text-[13px] font-semibold text-black hover:bg-orange-400">Підтвердити</SubmitButton>
             </form>
             <form action={rejectTicketAction.bind(null, ticket.id)}>
+              <ReturnToInput returnTo={returnTo} />
               <SubmitButton type="submit" pendingText="Відхиляємо..." variant="outline" className="h-11 w-full rounded-xl border-red-500/30 px-2 text-[13px] font-semibold text-red-300 hover:bg-red-500/10">Відхилити</SubmitButton>
             </form>
           </div>
@@ -309,7 +344,7 @@ function MobileTicketSourceCard({ ticket }: { ticket: TicketWithRelations }) {
   );
 }
 
-function MobileTicketActionPanel({ ticket, profile, workers, categories }: { ticket: TicketWithRelations; profile: Profile; workers: WorkerWithCategories[]; categories: Category[] }) {
+function MobileTicketActionPanel({ ticket, profile, workers, categories, returnTo }: { ticket: TicketWithRelations; profile: Profile; workers: WorkerWithCategories[]; categories: Category[]; returnTo: string }) {
   const editable = canEditTicket(profile, ticket);
   const canManage = canConfirmTicket(profile);
   if (!editable && !canManage) return null;
@@ -321,6 +356,7 @@ function MobileTicketActionPanel({ ticket, profile, workers, categories }: { tic
 
         {editable ? (
           <form action={updateTicketStatusAction.bind(null, ticket.id)} className="space-y-1.5">
+            <ReturnToInput returnTo={returnTo} />
             <label className="text-[11px] font-semibold text-zinc-400">Статус</label>
             <div className="grid grid-cols-[1fr_auto] gap-2">
               <MobileSelect name="status" defaultValue={ticket.status}>
@@ -333,6 +369,7 @@ function MobileTicketActionPanel({ ticket, profile, workers, categories }: { tic
 
         {canManage ? (
           <form action={assignWorkerAction.bind(null, ticket.id)} className="space-y-1.5">
+            <ReturnToInput returnTo={returnTo} />
             <label className="text-[11px] font-semibold text-zinc-400">Виконавець</label>
             <div className="grid grid-cols-[1fr_auto] gap-2">
               <MobileSelect name="workerId" defaultValue={ticket.assignee_worker_id ?? ""} required>
@@ -346,6 +383,7 @@ function MobileTicketActionPanel({ ticket, profile, workers, categories }: { tic
 
         {canManage && categories.length > 0 ? (
           <form action={updateTicketCategoryAction.bind(null, ticket.id)} className="space-y-1.5">
+            <ReturnToInput returnTo={returnTo} />
             <label className="text-[11px] font-semibold text-zinc-400">Категорія</label>
             <div className="grid grid-cols-[1fr_auto] gap-2">
               <MobileSelect name="categoryId" defaultValue={ticket.category_id} required>
@@ -387,9 +425,10 @@ function MobileTicketPhotosCard({ photos }: { photos: TicketPhotoWithUrl[] }) {
   );
 }
 
-function MobileDeleteTicketButton({ ticketId }: { ticketId: string }) {
+function MobileDeleteTicketButton({ ticketId, returnTo }: { ticketId: string; returnTo: string }) {
   return (
     <form action={hardDeleteTicketAction.bind(null, ticketId)} className="pt-1">
+      <ReturnToInput returnTo={returnTo} />
       <ConfirmSubmitButton
         type="submit"
         variant="outline"
@@ -417,7 +456,7 @@ function shortCategoryName(name?: string | null) {
   return name.length > 30 ? `${name.slice(0, 27).trim()}...` : name;
 }
 
-async function WorkerAssignmentSection({ ticket, profile, assignedWorker }: { ticket: TicketWithRelations; profile: Profile; assignedWorker: Worker | WorkerWithCategories | null }) {
+async function WorkerAssignmentSection({ ticket, profile, assignedWorker, returnTo }: { ticket: TicketWithRelations; profile: Profile; assignedWorker: Worker | WorkerWithCategories | null; returnTo: string }) {
   const [workersLoad, recommendedWorkersLoad] = await Promise.allSettled([
     getActiveWorkers(),
     ticket.category_id ? getWorkersByCategory(ticket.category_id) : Promise.resolve({ data: [] as WorkerWithCategories[], error: null as string | null }),
@@ -441,20 +480,21 @@ async function WorkerAssignmentSection({ ticket, profile, assignedWorker }: { ti
       sentAt={ticket.sent_to_worker_at}
       completedAt={ticket.worker_completed_at}
       canUnassign={canUnassignWorkerFromTicket(profile)}
+      returnTo={returnTo}
     />
   );
 }
 
-async function TicketPhotosSection({ ticket, profile }: { ticket: TicketWithRelations; profile: Profile }) {
+async function TicketPhotosSection({ ticket, profile, returnTo }: { ticket: TicketWithRelations; profile: Profile; returnTo: string }) {
   const photosResult = await getTicketPhotos(ticket.id);
   if (photosResult.error) return <DetailBlockError title="Фото" error={photosResult.error} />;
-  return <TicketPhotosCard ticket={ticket} profile={profile} photos={photosResult.data} />;
+  return <TicketPhotosCard ticket={ticket} profile={profile} photos={photosResult.data} returnTo={returnTo} />;
 }
 
-async function TicketCommentsSection({ ticketId }: { ticketId: string }) {
+async function TicketCommentsSection({ ticketId, returnTo }: { ticketId: string; returnTo: string }) {
   const commentsResult = await getTicketComments(ticketId);
   if (commentsResult.error) return <DetailBlockError title="Коментарі" error={commentsResult.error} />;
-  return <TicketCommentsCard ticketId={ticketId} comments={commentsResult.data} />;
+  return <TicketCommentsCard ticketId={ticketId} comments={commentsResult.data} returnTo={returnTo} />;
 }
 
 async function TicketHistorySection({ ticketId }: { ticketId: string }) {
@@ -463,11 +503,11 @@ async function TicketHistorySection({ ticketId }: { ticketId: string }) {
   return <TicketHistoryCard history={historyResult.data} />;
 }
 
-async function RelatedTicketsSection({ ticket }: { ticket: TicketWithRelations }) {
+async function RelatedTicketsSection({ ticket, returnTo }: { ticket: TicketWithRelations; returnTo: string }) {
   if (!ticket.telegram_source_group_id) return null;
   const relatedResult = await getRelatedTicketsBySourceGroup(ticket.telegram_source_group_id, ticket.id);
   if (relatedResult.error) return <DetailBlockError title="Пов'язані заявки" error={relatedResult.error} />;
-  return relatedResult.data.length > 0 ? <RelatedTicketsCard tickets={relatedResult.data} /> : null;
+  return relatedResult.data.length > 0 ? <RelatedTicketsCard tickets={relatedResult.data} returnTo={returnTo} /> : null;
 }
 
 async function TicketRepeatsSection({ ticket }: { ticket: TicketWithRelations }) {
@@ -518,7 +558,7 @@ function TicketHeroCard({ ticket }: { ticket: TicketWithRelations }) {
   );
 }
 
-function TicketQuickActions({ ticket, profile, categories }: { ticket: TicketWithRelations; profile: Profile; categories: Category[] }) {
+function TicketQuickActions({ ticket, profile, categories, returnTo }: { ticket: TicketWithRelations; profile: Profile; categories: Category[]; returnTo: string }) {
   const canConfirm = canConfirmTicket(profile) && ticket.status === "pending_review" && ticket.source !== "director_portal";
   const editable = canEditTicket(profile, ticket);
   const canChangeCategory = canConfirmTicket(profile) && categories.length > 0;
@@ -529,12 +569,13 @@ function TicketQuickActions({ ticket, profile, categories }: { ticket: TicketWit
         <SectionTitle icon={CheckCircle2} title={"Швидкі дії"} />
         {canConfirm ? (
           <div className="grid grid-cols-2 gap-2">
-            <form action={confirmTicketAction.bind(null, ticket.id)}><SubmitButton type="submit" pendingText="Підтверджуємо..." className="h-10 w-full rounded-[14px] bg-emerald-600 px-2 text-[11px] hover:bg-emerald-500 md:text-sm">{"Підтвердити"}</SubmitButton></form>
-            <form action={rejectTicketAction.bind(null, ticket.id)}><SubmitButton type="submit" pendingText="Відхиляємо..." variant="destructive" className="h-10 w-full rounded-[14px] px-2 text-[11px] md:text-sm">{"Відхилити"}</SubmitButton></form>
+            <form action={confirmTicketAction.bind(null, ticket.id)}><ReturnToInput returnTo={returnTo} /><SubmitButton type="submit" pendingText="Підтверджуємо..." className="h-10 w-full rounded-[14px] bg-emerald-600 px-2 text-[11px] hover:bg-emerald-500 md:text-sm">{"Підтвердити"}</SubmitButton></form>
+            <form action={rejectTicketAction.bind(null, ticket.id)}><ReturnToInput returnTo={returnTo} /><SubmitButton type="submit" pendingText="Відхиляємо..." variant="destructive" className="h-10 w-full rounded-[14px] px-2 text-[11px] md:text-sm">{"Відхилити"}</SubmitButton></form>
           </div>
         ) : null}
         {editable ? (
           <form action={updateTicketStatusAction.bind(null, ticket.id)} className="grid grid-cols-2 gap-2">
+            <ReturnToInput returnTo={returnTo} />
             {(["new", "assigned", "in_progress", "waiting", "waiting_admin_confirmation", "done", "cancelled"] as TicketStatus[]).map((status) => (
               <SubmitButton key={status} type="submit" name="status" value={status} pendingText="Оновлюємо..." variant={ticket.status === status ? "default" : "outline"} className="h-10 rounded-[14px] px-2 text-[10px] md:text-xs">{statusLabels[status]}</SubmitButton>
             ))}
@@ -542,6 +583,7 @@ function TicketQuickActions({ ticket, profile, categories }: { ticket: TicketWit
         ) : null}
         {canChangeCategory ? (
           <form action={updateTicketCategoryAction.bind(null, ticket.id)} className="grid gap-2">
+            <ReturnToInput returnTo={returnTo} />
             <div className="text-[11px] font-semibold text-zinc-400">Змінити категорію</div>
             <div className="grid gap-2 md:grid-cols-[1fr_auto]">
               <select name="categoryId" defaultValue={ticket.category_id} required className="h-10 w-full rounded-[14px] border border-white/[0.09] bg-black/25 px-3 text-[12px] text-zinc-100 outline-none focus:ring-2 focus:ring-orange-500/40">
@@ -580,26 +622,26 @@ function InlineInfo({ label, value }: { label: string; value: string }) {
   return <div className="flex min-w-0 items-start justify-between gap-3 rounded-[13px] border border-white/[0.07] bg-black/20 px-3 py-2"><span className="shrink-0 text-zinc-500">{label}</span><span className="min-w-0 break-words text-right font-medium text-zinc-200">{value}</span></div>;
 }
 
-function TicketPhotosCard({ ticket, profile, photos }: { ticket: TicketWithRelations; profile: Profile; photos: TicketPhotoWithUrl[] }) {
+function TicketPhotosCard({ ticket, profile, photos, returnTo }: { ticket: TicketWithRelations; profile: Profile; photos: TicketPhotoWithUrl[]; returnTo: string }) {
   return (
     <SoftCard>
       <CardContent className="space-y-4 p-3.5 md:p-4">
         <SectionTitle icon={Camera} title={"Фото"} />
         <div className="grid gap-3 md:grid-cols-3">
-          {photoGroups.map((type) => <PhotoGroup key={type} type={type} photos={photos.filter((photo) => photo.type === type)} canUpload={canAddTicketPhoto(profile, ticket, type)} action={uploadTicketPhotosAction.bind(null, ticket.id, type)} />)}
+          {photoGroups.map((type) => <PhotoGroup key={type} type={type} photos={photos.filter((photo) => photo.type === type)} canUpload={canAddTicketPhoto(profile, ticket, type)} action={uploadTicketPhotosAction.bind(null, ticket.id, type)} returnTo={returnTo} />)}
         </div>
       </CardContent>
     </SoftCard>
   );
 }
 
-function TicketCommentsCard({ ticketId, comments }: { ticketId: string; comments: TicketCommentWithAuthor[] }) {
+function TicketCommentsCard({ ticketId, comments, returnTo }: { ticketId: string; comments: TicketCommentWithAuthor[]; returnTo: string }) {
   return (
     <SoftCard>
       <CardContent className="space-y-3 p-3.5 md:p-4">
         <SectionTitle icon={MessageSquare} title={"Коментарі"} />
         {comments.length === 0 ? <p className="text-[12px] text-zinc-500">{"Коментарів поки немає."}</p> : comments.map((comment) => <div key={comment.id} className="rounded-[13px] border border-white/[0.07] bg-black/20 p-3 text-[12px] md:text-sm"><div className="font-medium text-zinc-200">{comment.author?.full_name ?? "Користувач"}</div><p className="mt-1 break-words text-zinc-400">{comment.body}</p></div>)}
-        <form action={addTicketCommentAction.bind(null, ticketId)} className="space-y-2"><Textarea name="body" required placeholder={"Додати коментар"} className="min-h-20 rounded-[14px] text-sm" /><SubmitButton type="submit" pendingText="Надсилаємо..." className="h-10 rounded-[14px] px-4 text-[12px]">{"Надіслати"}</SubmitButton></form>
+        <form action={addTicketCommentAction.bind(null, ticketId)} className="space-y-2"><ReturnToInput returnTo={returnTo} /><Textarea name="body" required placeholder={"Додати коментар"} className="min-h-20 rounded-[14px] text-sm" /><SubmitButton type="submit" pendingText="Надсилаємо..." className="h-10 rounded-[14px] px-4 text-[12px]">{"Надіслати"}</SubmitButton></form>
       </CardContent>
     </SoftCard>
   );
@@ -616,16 +658,16 @@ function TicketHistoryCard({ history }: { history: TicketHistory[] }) {
   );
 }
 
-function RelatedTicketsCard({ tickets }: { tickets: TicketWithRelations[] }) {
-  return <SoftCard><CardContent className="space-y-3 p-3.5 md:p-4"><SectionTitle title={"Пов'язані заявки"} />{tickets.map((relatedTicket) => <Link key={relatedTicket.id} href={"/tickets/" + relatedTicket.id} className="block rounded-[13px] border border-white/[0.07] bg-black/20 p-3 text-[12px] transition-colors hover:bg-white/[0.05]"><div className="font-medium text-orange-200">{relatedTicket.number}</div><div className="mt-1 line-clamp-2 break-words text-zinc-300">{relatedTicket.title}</div><div className="mt-2 flex flex-wrap gap-1.5"><Badge tone="gray" className="text-[10px]">{relatedTicket.category?.name ?? "-"}</Badge><Badge tone="orange" className="text-[10px]">{statusLabels[relatedTicket.status]}</Badge></div></Link>)}</CardContent></SoftCard>;
+function RelatedTicketsCard({ tickets, returnTo }: { tickets: TicketWithRelations[]; returnTo: string }) {
+  return <SoftCard><CardContent className="space-y-3 p-3.5 md:p-4"><SectionTitle title={"Пов'язані заявки"} />{tickets.map((relatedTicket) => <Link key={relatedTicket.id} href={ticketDetailHref(relatedTicket.id, returnTo)} className="block rounded-[13px] border border-white/[0.07] bg-black/20 p-3 text-[12px] transition-colors hover:bg-white/[0.05]"><div className="font-medium text-orange-200">{relatedTicket.number}</div><div className="mt-1 line-clamp-2 break-words text-zinc-300">{relatedTicket.title}</div><div className="mt-2 flex flex-wrap gap-1.5"><Badge tone="gray" className="text-[10px]">{relatedTicket.category?.name ?? "-"}</Badge><Badge tone="orange" className="text-[10px]">{statusLabels[relatedTicket.status]}</Badge></div></Link>)}</CardContent></SoftCard>;
 }
 
 function TicketRepeatsCard({ ticket, repeats }: { ticket: TicketWithRelations; repeats: TicketRepeat[] }) {
   return <SoftCard className="border-orange-500/20 bg-orange-500/[0.05]"><CardContent className="space-y-3 p-3.5 md:p-4"><SectionTitle title={"Дублі / повторні звернення"} right={<Badge tone="orange" className="rounded-full text-[10px]">{ticket.repeat_count}</Badge>} />{repeats.map((repeat) => <div key={repeat.id} className="rounded-[13px] border border-white/[0.07] bg-black/20 p-3 text-[12px]"><div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-zinc-500"><span>{repeat.created_by_name ?? "Telegram"}</span><span>{formatDate(repeat.created_at)}</span></div><p className="mt-1.5 line-clamp-3 break-words text-zinc-300">{repeat.raw_text}</p></div>)}{(ticket.repeat_count ?? 0) > repeats.length ? <p className="text-[11px] text-zinc-500">{"Показано останні 5 з "}{ticket.repeat_count}</p> : null}</CardContent></SoftCard>;
 }
 
-function TicketDangerZone({ ticketId }: { ticketId: string }) {
-  return <details className="rounded-[20px] border border-red-500/25 bg-red-950/10 p-3.5"><summary className="cursor-pointer list-none text-[13px] font-semibold text-red-200">{"Небезпечна дія"}</summary><div className="mt-3 space-y-3"><p className="text-[11px] leading-4 text-red-100/70">{"Цю дію неможливо скасувати."}</p><form action={hardDeleteTicketAction.bind(null, ticketId)}><ConfirmSubmitButton type="submit" variant="destructive" className="h-10 w-full rounded-[14px] text-[12px]" message={"Ви точно хочете повністю видалити заявку з бази? Цю дію не можна скасувати."}><Trash2 className="h-4 w-4" />{"Видалити заявку"}</ConfirmSubmitButton></form></div></details>;
+function TicketDangerZone({ ticketId, returnTo }: { ticketId: string; returnTo: string }) {
+  return <details className="rounded-[20px] border border-red-500/25 bg-red-950/10 p-3.5"><summary className="cursor-pointer list-none text-[13px] font-semibold text-red-200">{"Небезпечна дія"}</summary><div className="mt-3 space-y-3"><p className="text-[11px] leading-4 text-red-100/70">{"Цю дію неможливо скасувати."}</p><form action={hardDeleteTicketAction.bind(null, ticketId)}><ReturnToInput returnTo={returnTo} /><ConfirmSubmitButton type="submit" variant="destructive" className="h-10 w-full rounded-[14px] text-[12px]" message={"Ви точно хочете повністю видалити заявку з бази? Цю дію не можна скасувати."}><Trash2 className="h-4 w-4" />{"Видалити заявку"}</ConfirmSubmitButton></form></div></details>;
 }
 
 function Info({ label, value }: { label: string; value: string }) {
@@ -652,6 +694,7 @@ function WorkerAssignmentCard({
   sentAt,
   completedAt,
   canUnassign,
+  returnTo,
 }: {
   ticketId: string;
   assignedWorkerId?: string | null;
@@ -663,6 +706,7 @@ function WorkerAssignmentCard({
   sentAt?: string | null;
   completedAt?: string | null;
   canUnassign: boolean;
+  returnTo: string;
 }) {
   const recommendedIds = new Set(recommendedWorkers.map((worker) => worker.id));
   const categories = workerCategories(currentWorker);
@@ -694,6 +738,7 @@ function WorkerAssignmentCard({
         </div>
 
         <form action={assignWorkerAction.bind(null, ticketId)} className="grid gap-2 md:grid-cols-[1fr_auto]">
+          <ReturnToInput returnTo={returnTo} />
           <select name="workerId" required defaultValue={currentWorker?.id ?? recommendedWorkers[0]?.id ?? ""} className="h-10 w-full rounded-[14px] border border-white/[0.09] bg-black/25 px-3 text-[12px] text-zinc-100 outline-none focus:ring-2 focus:ring-orange-500/40">
             <option value="">{"Оберіть виконавця"}</option>
             {sortedWorkers.map((worker) => <option key={worker.id} value={worker.id}>{worker.name}{recommendedIds.has(worker.id) ? " ? recommended" : ""}</option>)}
@@ -704,11 +749,13 @@ function WorkerAssignmentCard({
         {currentWorker ? (
           <div className="grid grid-cols-2 gap-2">
             <form action={sendTicketToWorkerAction.bind(null, ticketId)}>
+              <ReturnToInput returnTo={returnTo} />
               <input type="hidden" name="workerId" value={currentWorker.id} />
               <SubmitButton type="submit" pendingText="Надсилаємо..." variant="outline" className="h-10 w-full rounded-[14px] px-2 text-[11px]"><Send className="h-3.5 w-3.5" />Telegram</SubmitButton>
             </form>
             {canUnassign ? (
               <form action={unassignWorkerAction.bind(null, ticketId)}>
+                <ReturnToInput returnTo={returnTo} />
                 <ConfirmSubmitButton type="submit" variant="outline" className="h-10 w-full rounded-[14px] px-2 text-[11px]" message={"Зняти призначеного виконавця з цієї заявки?"}><UserX className="h-3.5 w-3.5" />{"Зняти"}</ConfirmSubmitButton>
               </form>
             ) : null}
@@ -720,11 +767,13 @@ function WorkerAssignmentCard({
             <p className="text-[12px] font-medium text-orange-100">{"Виконавець позначив заявку виконаною."}</p>
             <div className="mt-3 grid gap-3">
               <form action={confirmWorkerCompletionAction.bind(null, ticketId)} className="grid gap-2">
+                <ReturnToInput returnTo={returnTo} />
                 <select name="rating" defaultValue="5" className="h-10 w-full rounded-[14px] border border-white/[0.09] bg-black/25 px-3 text-[12px] text-zinc-100 outline-none">{[5, 4, 3, 2, 1].map((rating) => <option key={rating} value={rating}>{rating} / 5</option>)}</select>
                 <Textarea name="feedback" placeholder={"Коментар адміністратора"} className="min-h-16 rounded-[14px] text-sm" />
                 <SubmitButton type="submit" pendingText="Підтверджуємо..." className="h-10 rounded-[14px] bg-emerald-600 text-[12px] hover:bg-emerald-500">{"Підтвердити виконання"}</SubmitButton>
               </form>
               <form action={returnWorkerCompletionAction.bind(null, ticketId)} className="grid gap-2">
+                <ReturnToInput returnTo={returnTo} />
                 <Textarea name="feedback" required placeholder={"Що потрібно доробити?"} className="min-h-16 rounded-[14px] text-sm" />
                 <SubmitButton type="submit" pendingText="Повертаємо..." variant="outline" className="h-10 rounded-[14px] text-[12px]">{"Повернути"}</SubmitButton>
               </form>
@@ -741,11 +790,13 @@ function PhotoGroup({
   photos,
   canUpload,
   action,
+  returnTo,
 }: {
   type: PhotoType;
   photos: TicketPhotoWithUrl[];
   canUpload: boolean;
   action: (formData: FormData) => void | Promise<void>;
+  returnTo: string;
 }) {
   return (
     <section className="min-w-0 space-y-2 rounded-[16px] border border-white/[0.07] bg-black/20 p-2.5">
@@ -766,6 +817,7 @@ function PhotoGroup({
       )}
       {canUpload ? (
         <form action={action} className="grid gap-2">
+          <ReturnToInput returnTo={returnTo} />
           <input name="photos" type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" multiple className="w-full max-w-full text-[11px] text-zinc-500 file:mr-2 file:rounded-[10px] file:border-0 file:bg-zinc-800 file:px-2 file:py-1.5 file:text-[11px] file:text-zinc-200" />
           <PhotoSubmitButton />
         </form>

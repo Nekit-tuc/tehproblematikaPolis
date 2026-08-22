@@ -83,6 +83,10 @@ function groupTickets(tickets: AiTicketListItem[]) {
   );
 }
 
+function ticketDetailHref(ticketId: string, returnTo: string) {
+  return `/tickets/${ticketId}?returnTo=${encodeURIComponent(returnTo)}`;
+}
+
 export default async function AiTicketsPage({
   searchParams,
 }: {
@@ -141,6 +145,7 @@ export default async function AiTicketsPage({
     const search = next.toString();
     return search ? `/ai-tickets?${search}` : "/ai-tickets";
   };
+  const returnTo = pageHref(safePage);
 
   return (
     <div className="page-shell max-w-full space-y-2.5 overflow-x-hidden pb-20 md:space-y-6 md:pb-0">
@@ -474,7 +479,7 @@ export default async function AiTicketsPage({
                       variant="outline"
                       className="rounded-2xl"
                     >
-                      <Link href={`/tickets/${ticket.id}`}>Відкрити</Link>
+                      <Link href={ticketDetailHref(ticket.id, returnTo)}>Відкрити</Link>
                     </Button>
                   </td>
                 </tr>
@@ -502,6 +507,7 @@ export default async function AiTicketsPage({
                   : null
               }
               readiness={readinessByTicket.get(ticket.id) ?? null}
+              returnTo={returnTo}
             />
           ))}
         </div>
@@ -565,6 +571,7 @@ function AiTicketCard({
   workers,
   assignedWorker,
   readiness,
+  returnTo,
 }: {
   ticket: AiTicketListItem;
   related: AiTicketListItem[];
@@ -573,6 +580,7 @@ function AiTicketCard({
   workers: WorkerWithCategories[];
   assignedWorker: WorkerWithCategories | null;
   readiness: AiTicketConfirmReadiness | null;
+  returnTo: string;
 }) {
   const siblingTickets = related.filter((item) => item.id !== ticket.id);
   return (
@@ -667,7 +675,7 @@ function AiTicketCard({
               {siblingTickets.map((relatedTicket) => (
                 <Link
                   key={relatedTicket.id}
-                  href={`/tickets/${relatedTicket.id}`}
+                  href={ticketDetailHref(relatedTicket.id, returnTo)}
                   className="text-sm text-orange-200 hover:underline"
                 >
                   {relatedTicket.number} · {relatedTicket.title}
@@ -705,7 +713,7 @@ function AiTicketCard({
             variant="outline"
             className="min-h-8 w-full rounded-lg px-2 text-[10px] md:min-h-0 md:w-auto md:rounded-md md:text-sm"
           >
-            <Link href={`/tickets/${ticket.id}`}>Відкрити картку</Link>
+            <Link href={ticketDetailHref(ticket.id, returnTo)}>Відкрити картку</Link>
           </Button>
         </div>
 

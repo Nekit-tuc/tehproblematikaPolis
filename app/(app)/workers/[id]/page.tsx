@@ -71,6 +71,10 @@ function printHref(workerId: string, period: WorkerTicketPeriod, from: string, t
   return `/workers/${workerId}/print?${params.toString()}`;
 }
 
+function ticketDetailHref(ticketId: string, returnTo: string) {
+  return `/tickets/${ticketId}?returnTo=${encodeURIComponent(returnTo)}`;
+}
+
 export default async function WorkerTicketsPage({
   params,
   searchParams,
@@ -88,6 +92,7 @@ export default async function WorkerTicketsPage({
   const worker = workerResult.data;
   const overview = overviewResult.data;
   const error = workerResult.error ?? overviewResult.error;
+  const returnTo = periodHref(id, overview.period.period, overview.period.from, overview.period.to);
 
   return (
     <div className="page-shell max-w-full space-y-4 overflow-x-hidden pb-28 md:space-y-6 md:pb-0">
@@ -171,19 +176,19 @@ export default async function WorkerTicketsPage({
 
           <TicketSection title="Закріплені заявки" description="Активні заявки з tickets.assignee_worker_id або активних планів цього виконавця." empty="Активних заявок для цього виконавця немає.">
             {overview.activeTickets.map((ticket) => (
-              <WorkerTicketCard key={ticket.id} ticket={ticket} workerId={worker.id} />
+              <WorkerTicketCard key={ticket.id} ticket={ticket} workerId={worker.id} returnTo={returnTo} />
             ))}
           </TicketSection>
 
           <PlanTicketSection title="Заявки з планів" description={`Планові заявки за період ${overview.period.label}. Якщо заявка була у кількох планах, показано найновіший план.`} empty="Заявок у планах за вибраний період немає.">
             {overview.plannedTickets.map((row) => (
-              <PlanTicketCard key={row.ticketId} row={row} workerId={worker.id} />
+              <PlanTicketCard key={row.ticketId} row={row} workerId={worker.id} returnTo={returnTo} />
             ))}
           </PlanTicketSection>
 
           <PlanTicketSection title="Виконані заявки" description="Заявки зі статусом done, де дата виконання потрапляє у вибраний період." empty="Виконаних заявок за вибраний період немає.">
             {overview.completedTickets.map((row) => (
-              <PlanTicketCard key={row.ticketId} row={row} workerId={worker.id} showCompletionDate />
+              <PlanTicketCard key={row.ticketId} row={row} workerId={worker.id} returnTo={returnTo} showCompletionDate />
             ))}
           </PlanTicketSection>
         </>
@@ -234,15 +239,15 @@ function EmptyCard({ text }: { text: string }) {
   );
 }
 
-function WorkerTicketCard({ ticket, workerId }: { ticket: TicketWithRelations; workerId: string }) {
-  return <BaseTicketCard ticket={ticket} workerId={workerId} />;
+function WorkerTicketCard({ ticket, workerId, returnTo }: { ticket: TicketWithRelations; workerId: string; returnTo: string }) {
+  return <BaseTicketCard ticket={ticket} workerId={workerId} returnTo={returnTo} />;
 }
 
-function PlanTicketCard({ row, workerId, showCompletionDate = false }: { row: WorkerPlanTicketRow; workerId: string; showCompletionDate?: boolean }) {
-  return <BaseTicketCard ticket={row.ticket} workerId={workerId} plan={row.plan} completionDate={showCompletionDate ? getWorkerTicketCompletionDate(row.ticket) : null} />;
+function PlanTicketCard({ row, workerId, returnTo, showCompletionDate = false }: { row: WorkerPlanTicketRow; workerId: string; returnTo: string; showCompletionDate?: boolean }) {
+  return <BaseTicketCard ticket={row.ticket} workerId={workerId} returnTo={returnTo} plan={row.plan} completionDate={showCompletionDate ? getWorkerTicketCompletionDate(row.ticket) : null} />;
 }
 
-function BaseTicketCard({ ticket, workerId, plan, completionDate }: { ticket: TicketWithRelations; workerId: string; plan?: WorkerPlanTicketRow["plan"] | null; completionDate?: string | null }) {
+function BaseTicketCard({ ticket, workerId, returnTo, plan, completionDate }: { ticket: TicketWithRelations; workerId: string; returnTo: string; plan?: WorkerPlanTicketRow["plan"] | null; completionDate?: string | null }) {
   const closed = ticket.status === "done" || ticket.status === "cancelled" || ticket.status === "rejected";
   return (
     <Card className="rounded-3xl border-white/10 bg-white/[0.04] md:rounded-lg">
@@ -272,11 +277,11 @@ function BaseTicketCard({ ticket, workerId, plan, completionDate }: { ticket: Ti
         </div>
         <div className="grid gap-2 md:flex md:flex-wrap">
           <Button asChild variant="outline" className="min-h-11 w-full rounded-2xl md:min-h-0 md:w-auto md:rounded-md">
-            <Link href={`/tickets/${ticket.id}`}>Відкрити заявку</Link>
+            <Link href={ticketDetailHref(ticket.id, returnTo)}>Відкрити заявку</Link>
           </Button>
           {!closed ? (
             <form action={unassignWorkerAction.bind(null, ticket.id)}>
-              <input type="hidden" name="returnTo" value={`/workers/${workerId}`} />
+              <input type="hidden" name="returnTo" value={returnTo} />
               <ConfirmSubmitButton type="submit" variant="destructive" className="min-h-11 w-full rounded-2xl md:min-h-0 md:w-auto md:rounded-md" message="Зняти цю заявку з виконавця?">
                 Зняти з виконавця
               </ConfirmSubmitButton>

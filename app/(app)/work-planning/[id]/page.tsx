@@ -24,7 +24,7 @@ import { QuickTicketModalButton, type QuickTicketCategory, type QuickTicketData,
 
 type PageProps = {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ success?: string; error?: string }>;
+  searchParams: Promise<{ success?: string; error?: string; returnTo?: string }>;
 };
 
 const planStatusLabels: Record<WorkPlanStatus, string> = {
@@ -48,6 +48,18 @@ function safeDecode(value?: string | null) {
   } catch {
     return value;
   }
+}
+
+function safeWorkPlanningReturnTo(value?: string | null) {
+  if (!value) return null;
+  if (value.startsWith("//")) return null;
+  if (value.startsWith("http://") || value.startsWith("https://")) return null;
+  if (!value.startsWith("/work-planning")) return null;
+  return value;
+}
+
+function fallbackReturnToForPlan(plan: Pick<WorkPlan, "period_start">) {
+  return `/work-planning?week=${plan.period_start.slice(0, 10)}&view=category`;
 }
 
 function successMessage(value?: string) {
@@ -187,15 +199,20 @@ export default async function WorkPlanDetailPage({ params, searchParams }: PageP
   const quickCategories = toQuickCategories(categoriesResult.data);
   const error = safeDecode(query.error) ?? planResult.error ?? itemsResult.error ?? dispatchesResult.error ?? draftPlansResult.error ?? workersResult.error ?? categoriesResult.error;
   const success = successMessage(query.success);
+  const requestedReturnTo = safeWorkPlanningReturnTo(query.returnTo);
 
   if (!plan) {
     return (
       <div className="page-shell pb-28 md:pb-6">
         <Alert title="План не знайдено">Перевірте посилання або поверніться до списку планів.</Alert>
+        <Button asChild variant="outline" className="mt-3 w-fit">
+          <Link href={requestedReturnTo ?? "/work-planning"}><ArrowLeft className="h-4 w-4" />До планування</Link>
+        </Button>
       </div>
     );
   }
 
+  const returnTo = requestedReturnTo ?? fallbackReturnToForPlan(plan);
   const isDraft = plan.status === "draft";
   const canResend = plan.status === "sent" || plan.status === "partially_done" || plan.status === "done";
   const retryableCount = retryableDispatchCount(dispatches);
@@ -206,7 +223,7 @@ export default async function WorkPlanDetailPage({ params, searchParams }: PageP
     <div className="page-shell max-w-full space-y-2.5 overflow-x-hidden bg-[radial-gradient(circle_at_50%_0%,rgba(249,115,22,0.12),transparent_30%)] pb-32 md:space-y-6 md:bg-none md:pb-8">
       <div className="grid min-w-0 gap-2.5">
         <Button asChild variant="outline" size="sm" className="h-9 w-fit rounded-[13px] border-white/[0.08] bg-white/[0.035] px-3 text-[11px] text-zinc-200 md:h-auto md:rounded-md md:text-sm">
-          <Link href="/work-planning"><ArrowLeft className="h-3.5 w-3.5 md:h-4 md:w-4" />До планування</Link>
+          <Link href={returnTo}><ArrowLeft className="h-3.5 w-3.5 md:h-4 md:w-4" />До планування</Link>
         </Button>
 
         <div className="min-w-0 rounded-[18px] border border-white/[0.08] bg-[linear-gradient(145deg,rgba(255,255,255,0.055),rgba(255,255,255,0.025))] p-3 shadow-[0_18px_44px_rgba(0,0,0,0.32)] md:rounded-lg md:p-4">
@@ -232,6 +249,7 @@ export default async function WorkPlanDetailPage({ params, searchParams }: PageP
           </Button>
           {isDraft ? (
             <form action={sendWorkPlanAction.bind(null, plan.id)} className="min-w-0">
+              <input type="hidden" name="returnTo" value={returnTo} />
               <SubmitButton className="h-10 w-full rounded-[13px] bg-gradient-to-r from-orange-500 to-orange-400 px-2 text-[11px] font-semibold text-white shadow-[0_10px_28px_rgba(249,115,22,0.22)] md:h-auto md:w-auto md:rounded-md md:px-3 md:text-sm" pendingText="Надсилається...">
                 <Send className="h-3.5 w-3.5 shrink-0 md:h-4 md:w-4" /><span className="truncate">Надіслати</span>
               </SubmitButton>
@@ -239,6 +257,7 @@ export default async function WorkPlanDetailPage({ params, searchParams }: PageP
           ) : null}
           {canResend && retryableCount > 0 ? (
             <form action={retryFailedWorkPlanDispatchAction.bind(null, plan.id)} className="min-w-0">
+              <input type="hidden" name="returnTo" value={returnTo} />
               <SubmitButton className="h-10 w-full rounded-[13px] px-2 text-[11px] md:h-auto md:w-auto md:rounded-md md:px-3 md:text-sm" pendingText="Повторюється...">
                 <RefreshCw className="h-3.5 w-3.5 shrink-0 md:h-4 md:w-4" /><span className="truncate">Повторити невдалі</span>
               </SubmitButton>
@@ -246,6 +265,7 @@ export default async function WorkPlanDetailPage({ params, searchParams }: PageP
           ) : null}
           {canResend ? (
             <form action={resendWorkPlanToAllAction.bind(null, plan.id)} className="min-w-0">
+              <input type="hidden" name="returnTo" value={returnTo} />
               <ConfirmSubmitButton
                 type="submit"
                 variant="outline"
@@ -316,21 +336,21 @@ export default async function WorkPlanDetailPage({ params, searchParams }: PageP
                 <Badge className="h-6 shrink-0 rounded-[9px] px-2 text-[10px]" tone={group.key === "unassigned" ? "gray" : "orange"}>{group.items.length} заявок</Badge>
               </div>
               <div className="grid gap-2">
-                {group.items.map((item) => <PlanItemCard key={item.id} item={item} plan={plan} draftPlans={draftPlans} workers={quickWorkers} categories={quickCategories} profile={profile} />)}
+                {group.items.map((item) => <PlanItemCard key={item.id} item={item} plan={plan} draftPlans={draftPlans} workers={quickWorkers} categories={quickCategories} profile={profile} returnTo={returnTo} />)}
               </div>
             </div>
           ))}
         </CardContent>
       </Card>
 
-      {isDraft ? <DraftEditor plan={plan} /> : null}
+      {isDraft ? <DraftEditor plan={plan} returnTo={returnTo} /> : null}
 
       <DispatchHistory dispatches={dispatches} />
     </div>
   );
 }
 
-function DraftEditor({ plan }: { plan: WorkPlan }) {
+function DraftEditor({ plan, returnTo }: { plan: WorkPlan; returnTo: string }) {
   return (
     <Card className="rounded-[17px] border-orange-500/20 bg-orange-950/10 md:rounded-lg">
       <CardHeader className="p-3 md:p-6">
@@ -339,6 +359,7 @@ function DraftEditor({ plan }: { plan: WorkPlan }) {
       </CardHeader>
       <CardContent className="space-y-3 p-3 pt-0 md:space-y-4 md:p-6 md:pt-0">
         <form action={updateWorkPlanAction.bind(null, plan.id)} className="grid gap-3 md:grid-cols-4">
+          <input type="hidden" name="returnTo" value={returnTo} />
           <Field label="Назва">
             <Input name="title" defaultValue={plan.title} required />
           </Field>
@@ -358,6 +379,7 @@ function DraftEditor({ plan }: { plan: WorkPlan }) {
           </div>
         </form>
         <form action={cancelWorkPlanAction.bind(null, plan.id)}>
+          <input type="hidden" name="returnTo" value={returnTo} />
           <SubmitButton variant="destructive" className="min-h-8 w-full rounded-lg text-[10px] md:w-auto md:rounded-md md:text-sm" pendingText="Скасовується...">
             Скасувати план
           </SubmitButton>
@@ -408,7 +430,7 @@ function toQuickTicketData(ticket: TicketWithRelations, workerLabel: string): Qu
   };
 }
 
-function PlanItemCard({ item, plan, draftPlans, workers, categories, profile }: { item: WorkPlanItem; plan: WorkPlan; draftPlans: WorkPlan[]; workers: QuickTicketWorker[]; categories: QuickTicketCategory[]; profile: Profile }) {
+function PlanItemCard({ item, plan, draftPlans, workers, categories, profile, returnTo }: { item: WorkPlanItem; plan: WorkPlan; draftPlans: WorkPlan[]; workers: QuickTicketWorker[]; categories: QuickTicketCategory[]; profile: Profile; returnTo: string }) {
   const ticket = item.ticket;
   const workerLabel = planItemWorkerLabel(item, plan);
   const quickTicket = ticket ? toQuickTicketData(ticket, workerLabel) : null;
@@ -448,6 +470,7 @@ function PlanItemCard({ item, plan, draftPlans, workers, categories, profile }: 
             ticket={quickTicket!}
             workers={workers}
             categories={categories}
+            returnTo={returnTo}
             permissions={{
               canChangeStatus: canEditTicket(profile, ticket),
               canAssignWorker: canConfirmTicket(profile),
@@ -458,6 +481,7 @@ function PlanItemCard({ item, plan, draftPlans, workers, categories, profile }: 
         ) : null}
         {plan.status === "draft" && ticket ? (
           <form action={removeWorkPlanItemAction.bind(null, plan.id)}>
+            <input type="hidden" name="returnTo" value={returnTo} />
             <input type="hidden" name="ticket_id" value={ticket.id} />
             <SubmitButton variant="outline" size="sm" className="h-8 w-full rounded-[10px] border-white/[0.08] bg-white/[0.035] text-[10px] md:h-auto md:w-auto md:rounded-md md:text-sm" pendingText="...">
               Прибрати
@@ -466,6 +490,7 @@ function PlanItemCard({ item, plan, draftPlans, workers, categories, profile }: 
         ) : null}
         {plan.status === "draft" && ticket && draftPlans.length > 0 ? (
           <form action={moveWorkPlanItemAction.bind(null, plan.id)} className="grid gap-1.5">
+            <input type="hidden" name="returnTo" value={returnTo} />
             <input type="hidden" name="item_id" value={item.id} />
             <select
               name="target_plan_id"

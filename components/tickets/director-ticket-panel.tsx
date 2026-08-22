@@ -15,6 +15,7 @@ import { confirmDirectorTicketAction, rejectDirectorTicketAction } from "@/app/(
 type DirectorTicketPanelProps = {
   ticket: TicketWithRelations;
   profile: Profile;
+  returnTo: string;
 };
 
 async function getDirectorName(profileId?: string | null) {
@@ -33,7 +34,7 @@ function confirmationLabel(ticket: TicketWithRelations) {
   return ticket.admin_confirmed_at ? "Підтверджена" : "Очікує перевірки";
 }
 
-export async function DirectorTicketPanel({ ticket, profile }: DirectorTicketPanelProps) {
+export async function DirectorTicketPanel({ ticket, profile, returnTo }: DirectorTicketPanelProps) {
   if (ticket.source !== "director_portal") return null;
   const [director, actResult] = await Promise.all([getDirectorName(ticket.director_profile_id), getWorkCompletionActForTicket(ticket.id)]);
   const act = actResult.data;
@@ -107,6 +108,7 @@ export async function DirectorTicketPanel({ ticket, profile }: DirectorTicketPan
             )}
 
             <form action={confirmDirectorTicketAction.bind(null, ticket.id)}>
+              <input type="hidden" name="returnTo" value={returnTo} />
               <SubmitButton type="submit" pendingText="Підтверджуємо..." className="h-11 w-full rounded-[14px] bg-orange-500 px-3 text-[12px] font-semibold text-black hover:bg-orange-400 md:text-sm">
                 <CheckCircle2 className="h-4 w-4" />
                 Підтвердити і додати в план
@@ -115,6 +117,7 @@ export async function DirectorTicketPanel({ ticket, profile }: DirectorTicketPan
 
             <div className="grid gap-2 md:grid-cols-2">
               <form action={confirmDirectorTicketAction.bind(null, ticket.id)} className="grid gap-1.5">
+                <input type="hidden" name="returnTo" value={returnTo} />
                 <input type="hidden" name="planningMode" value="no_plan" />
                 <SubmitButton type="submit" pendingText="Підтверджуємо..." variant="outline" className="h-10 w-full rounded-[14px] border-white/10 px-2 text-[11px] text-zinc-200 hover:bg-white/5 md:text-xs">
                   Підтвердити без плану
@@ -122,6 +125,7 @@ export async function DirectorTicketPanel({ ticket, profile }: DirectorTicketPan
                 <p className="text-[10px] leading-4 text-zinc-500">Використовуйте тільки для нестандартних випадків.</p>
               </form>
               <form action={rejectDirectorTicketAction.bind(null, ticket.id)} className="grid gap-1.5">
+                <input type="hidden" name="returnTo" value={returnTo} />
                 <input type="hidden" name="reason" value="" />
                 <SubmitButton type="submit" pendingText="Відхиляємо..." variant="outline" className="h-10 w-full rounded-[14px] border-red-500/30 px-2 text-[11px] text-red-300 hover:bg-red-500/10 md:text-xs">
                   <XCircle className="h-3.5 w-3.5" />

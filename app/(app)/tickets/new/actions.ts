@@ -113,5 +113,5 @@ export async function createTicketAction(formData: FormData) {
 
   revalidatePath("/dashboard");
   revalidatePath("/tickets");
-  redirect(`/tickets/${ticket.id}`);
+  redirect(`/tickets/${ticket.id}?returnTo=${encodeURIComponent("/tickets")}`);
 }
