@@ -60,8 +60,35 @@ export type DashboardPlanRefreshSummaryDetail = {
   ticketId: string;
   ticketNumber: string | null;
   status: "added" | "already_planned" | "skipped" | "error";
+  reasonCode: DashboardPlanRefreshReasonCode;
+  reasonText: string;
   message: string;
 };
+
+type DashboardPlanRefreshSummaryDetailInput =
+  Omit<DashboardPlanRefreshSummaryDetail, "reasonCode" | "reasonText"> &
+  Partial<Pick<DashboardPlanRefreshSummaryDetail, "reasonCode" | "reasonText">>;
+
+export type DashboardPlanRefreshReasonCode =
+  | "added"
+  | "already_planned_current_week"
+  | "already_planned_other_active_week"
+  | "pending_review"
+  | "rejected"
+  | "cancelled"
+  | "done"
+  | "status_not_addable"
+  | "missing_category"
+  | "category_not_mapped"
+  | "worker_not_found"
+  | "worker_inactive"
+  | "draft_plan_not_found"
+  | "plan_already_sent"
+  | "insert_failed"
+  | "update_failed"
+  | "check_existing_failed"
+  | "unexpected_error"
+  | "no_active_tickets";
 
 const activePlanStatuses: WorkPlanStatus[] = ["draft", "sent", "partially_done"];
 const addableStatuses: TicketStatus[] = ["new", "assigned", "in_progress", "waiting", "waiting_admin_confirmation"];
@@ -141,9 +168,65 @@ function emptySummary(): DashboardPlanRefreshSummary {
 
 function addSummaryDetail(
   summary: DashboardPlanRefreshSummary,
-  detail: DashboardPlanRefreshSummaryDetail,
+  detail: DashboardPlanRefreshSummaryDetailInput,
 ) {
-  summary.details.push(detail);
+  const reasonCode = detail.reasonCode ?? (
+    detail.status === "added" ? "added" :
+    detail.status === "already_planned" ? "already_planned_current_week" :
+    detail.status === "skipped" ? "status_not_addable" :
+    "unexpected_error"
+  );
+  const text = detail.reasonText ?? reasonText(reasonCode);
+  summary.details.push({
+    ...detail,
+    reasonCode,
+    reasonText: text,
+  });
+}
+
+function reasonText(code: DashboardPlanRefreshReasonCode, extra?: string | null) {
+  const texts: Record<DashboardPlanRefreshReasonCode, string> = {
+    added: "Заявку додано в план.",
+    already_planned_current_week: "Заявка вже є в плані вибраного тижня.",
+    already_planned_other_active_week: "Заявка ще прив'язана до іншого активного плану. Спочатку натисніть 'Оновити систему'.",
+    pending_review: "Заявка ще на перевірці. Спочатку підтвердіть її.",
+    rejected: "Заявка відхилена і не додається в план.",
+    cancelled: "Заявка скасована і не додається в план.",
+    done: "Заявка вже виконана.",
+    status_not_addable: "Статус заявки не дозволяє додати її в план.",
+    missing_category: "У заявки не вибрана категорія.",
+    category_not_mapped: "Для категорії не налаштований маршрут планування.",
+    worker_not_found: "Не знайдено виконавця для цієї категорії.",
+    worker_inactive: "Виконавець неактивний або не має Telegram ID.",
+    draft_plan_not_found: "Не знайдено draft-план для вибраного тижня.",
+    plan_already_sent: "План вибраного тижня вже надісланий. Автоматично не додаємо.",
+    insert_failed: "Помилка Supabase при додаванні в work_plan_items.",
+    update_failed: "Помилка Supabase при оновленні заявки.",
+    check_existing_failed: "Не вдалося перевірити наявний план заявки.",
+    unexpected_error: "Неочікувана помилка.",
+    no_active_tickets: "Немає активних заявок для планування.",
+  };
+  return extra ? `${texts[code]} ${extra}` : texts[code];
+}
+
+function reasonCodeForBlockedStatus(status: TicketStatus): DashboardPlanRefreshReasonCode {
+  if (status === "pending_review") return "pending_review";
+  if (status === "rejected") return "rejected";
+  if (status === "cancelled") return "cancelled";
+  if (status === "done") return "done";
+  return "status_not_addable";
+}
+
+function addResultDetail(
+  summary: DashboardPlanRefreshSummary,
+  detail: Omit<DashboardPlanRefreshSummaryDetail, "reasonText" | "message"> & { reasonText?: string; message?: string },
+) {
+  const text = detail.reasonText ?? reasonText(detail.reasonCode);
+  addSummaryDetail(summary, {
+    ...detail,
+    reasonText: text,
+    message: detail.message ?? `${ticketLabel({ id: detail.ticketId, number: detail.ticketNumber })}: ${text}`,
+  });
 }
 
 function ticketLabel(ticket: { number?: string | null; id: string }) {
@@ -280,13 +363,19 @@ async function getOrCreateDraftPlan(
     .in("status", activePlanStatuses)
     .order("created_at", { ascending: true });
 
-  if (error) return { plan: null, error: error.message };
+  if (error) return { plan: null, error: error.message, errorCode: "draft_plan_not_found" as const };
 
   const draft = (plans ?? []).find((plan) => plan.status === "draft");
   if (draft) return { plan: draft, error: null };
 
   const activeNonDraft = (plans ?? []).find((plan) => plan.status !== "draft");
-  if (activeNonDraft) return { plan: null, error: "План вибраного тижня вже надісланий. Заявку не додано." };
+  if (activeNonDraft) {
+    return {
+      plan: null,
+      error: "План вибраного тижня вже надісланий. Заявку не додано.",
+      errorCode: "plan_already_sent" as const,
+    };
+  }
 
   const { data: created, error: createError } = await supabase
     .from("work_plans")
@@ -301,7 +390,7 @@ async function getOrCreateDraftPlan(
     .select("id,title,status,period_start,period_end")
     .single();
 
-  if (createError) return { plan: null, error: createError.message };
+  if (createError) return { plan: null, error: createError.message, errorCode: "draft_plan_not_found" as const };
   return { plan: created, error: null };
 }
 
@@ -344,6 +433,7 @@ export async function addTicketsToSelectedWeekPlans(input: {
           ticketId: ticket.id,
           ticketNumber: ticket.number ?? null,
           status: "skipped",
+          reasonCode: reasonCodeForBlockedStatus(status),
           message: status === "pending_review"
             ? `${ticketLabel(ticket)}: спочатку підтвердіть заявку.`
             : `${ticketLabel(ticket)}: статус не дозволяє додати заявку в план.`,
@@ -368,19 +458,24 @@ export async function addTicketsToSelectedWeekPlans(input: {
           ticketId: ticket.id,
           ticketNumber: ticket.number ?? null,
           status: "error",
-          message: `${ticketLabel(ticket)}: не вдалося перевірити наявний план.`,
+          reasonCode: "check_existing_failed",
+          reasonText: reasonText("check_existing_failed", existing.error.message),
+          message: `${ticketLabel(ticket)}: ${reasonText("check_existing_failed", existing.error.message)}`,
         });
         continue;
       }
 
       const existingPlan = existing.data ? one(existing.data.work_plan) : null;
       if (existingPlan) {
-        summary.alreadyPlanned += 1;
+        const isSameWeek = sameWeek(existingPlan, targetRange);
+        if (isSameWeek) summary.alreadyPlanned += 1;
+        else summary.skipped += 1;
         addSummaryDetail(summary, {
           ticketId: ticket.id,
           ticketNumber: ticket.number ?? null,
-          status: "already_planned",
-          message: sameWeek(existingPlan, targetRange)
+          status: isSameWeek ? "already_planned" : "skipped",
+          reasonCode: isSameWeek ? "already_planned_current_week" : "already_planned_other_active_week",
+          message: isSameWeek
             ? `${ticketLabel(ticket)}: вже є в плані вибраного тижня.`
             : `${ticketLabel(ticket)}: ще прив'язана до іншого активного плану. Спочатку натисніть "Оновити систему".`,
         });
@@ -398,7 +493,8 @@ export async function addTicketsToSelectedWeekPlans(input: {
           ticketId: ticket.id,
           ticketNumber: ticket.number ?? null,
           status: "error",
-          message: `${ticketLabel(ticket)}: вибраного виконавця не знайдено.`,
+          reasonCode: "worker_inactive",
+          message: `${ticketLabel(ticket)}: ${reasonText("worker_inactive")}`,
         });
         await appendHistory(supabase, ticket.id, input.actorId, "Заявку не додано в план під час оновлення: вибраного виконавця не знайдено.");
         continue;
@@ -413,13 +509,27 @@ export async function addTicketsToSelectedWeekPlans(input: {
             : null,
       });
 
+      if (!category) {
+        summary.errors += 1;
+        addSummaryDetail(summary, {
+          ticketId: ticket.id,
+          ticketNumber: ticket.number ?? null,
+          status: "error",
+          reasonCode: "missing_category",
+          message: `${ticketLabel(ticket)}: ${reasonText("missing_category")}`,
+        });
+        await appendHistory(supabase, ticket.id, input.actorId, "Заявку не додано в план під час оновлення: у заявки не вибрана категорія.");
+        continue;
+      }
+
       if (!route.found || !route.planTitle) {
         summary.errors += 1;
         addSummaryDetail(summary, {
           ticketId: ticket.id,
           ticketNumber: ticket.number ?? null,
           status: "error",
-          message: `${ticketLabel(ticket)}: категорія не має маршруту в план.`,
+          reasonCode: "category_not_mapped",
+          message: `${ticketLabel(ticket)}: ${reasonText("category_not_mapped")} Категорія: ${category.name ?? "без назви"}.`,
         });
         await appendHistory(supabase, ticket.id, input.actorId, "Заявку не додано в план під час оновлення: не знайдено маршрут категорії або виконавця.", {
           categoryName: category?.name ?? null,
@@ -430,11 +540,13 @@ export async function addTicketsToSelectedWeekPlans(input: {
       const targetWorker = overrideWorker ?? (ticket.assignee_worker_id ? activeWorkers.find((worker) => worker.id === ticket.assignee_worker_id) ?? null : null) ?? findWorkerByRoute(activeWorkers, route.workerName);
       if (!targetWorker) {
         summary.errors += 1;
+        const workerReasonCode = ticket.assignee_worker_id ? "worker_inactive" : "worker_not_found";
         addSummaryDetail(summary, {
           ticketId: ticket.id,
           ticketNumber: ticket.number ?? null,
           status: "error",
-          message: `${ticketLabel(ticket)}: не визначено виконавця.`,
+          reasonCode: workerReasonCode,
+          message: `${ticketLabel(ticket)}: ${reasonText(workerReasonCode)}`,
         });
         await appendHistory(supabase, ticket.id, input.actorId, "Заявку не додано в план під час оновлення: не визначено виконавця.", {
           planTitle: route.planTitle,
@@ -445,11 +557,15 @@ export async function addTicketsToSelectedWeekPlans(input: {
       const planResult = await getOrCreateDraftPlan(supabase, targetRange, route.planTitle, input.actorId);
       if (!planResult.plan) {
         summary.errors += 1;
+        const planReasonCode = planResult.errorCode ?? "draft_plan_not_found";
+        const planReasonText = reasonText(planReasonCode, planResult.error ?? null);
         addSummaryDetail(summary, {
           ticketId: ticket.id,
           ticketNumber: ticket.number ?? null,
           status: "error",
-          message: `${ticketLabel(ticket)}: ${planResult.error ?? "план не знайдено"}.`,
+          reasonCode: planReasonCode,
+          reasonText: planReasonText,
+          message: `${ticketLabel(ticket)}: ${planReasonText}`,
         });
         await appendHistory(supabase, ticket.id, input.actorId, `Заявку не додано в план під час оновлення: ${planResult.error ?? "план не знайдено"}.`, {
           planTitle: route.planTitle,
@@ -472,7 +588,9 @@ export async function addTicketsToSelectedWeekPlans(input: {
             ticketId: ticket.id,
             ticketNumber: ticket.number ?? null,
             status: "error",
-            message: `${ticketLabel(ticket)}: не вдалося оновити виконавця.`,
+            reasonCode: "update_failed",
+            reasonText: reasonText("update_failed", updateError.message),
+            message: `${ticketLabel(ticket)}: ${reasonText("update_failed", updateError.message)}`,
           });
           continue;
         }
@@ -501,15 +619,19 @@ export async function addTicketsToSelectedWeekPlans(input: {
             ticketId: ticket.id,
             ticketNumber: ticket.number ?? null,
             status: "already_planned",
-            message: `${ticketLabel(ticket)}: вже є в плані.`,
+            reasonCode: "already_planned_current_week",
+            message: `${ticketLabel(ticket)}: ${reasonText("already_planned_current_week")}`,
           });
         } else {
           summary.errors += 1;
+          const insertReasonText = reasonText("insert_failed", insertError.message);
           addSummaryDetail(summary, {
             ticketId: ticket.id,
             ticketNumber: ticket.number ?? null,
             status: "error",
-            message: `${ticketLabel(ticket)}: не вдалося додати в план.`,
+            reasonCode: "insert_failed",
+            reasonText: insertReasonText,
+            message: `${ticketLabel(ticket)}: ${insertReasonText}`,
           });
         }
         continue;
@@ -526,6 +648,7 @@ export async function addTicketsToSelectedWeekPlans(input: {
         ticketId: ticket.id,
         ticketNumber: ticket.number ?? null,
         status: "added",
+        reasonCode: "added",
         message: `${ticketLabel(ticket)}: додано в план ${planResult.plan.title}.`,
       });
     }
@@ -561,6 +684,7 @@ export async function autoPlanAllActiveTickets(input: {
         ticketId: "system",
         ticketNumber: null,
         status: "skipped",
+        reasonCode: "no_active_tickets",
         message: "Немає активних заявок для планування.",
       });
       return { data: summary, error: null };

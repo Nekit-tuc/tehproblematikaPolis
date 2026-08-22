@@ -25,7 +25,7 @@ const text = {
   noPlans: "На цей робочий тиждень ще немає активних планів.",
 };
 
-export default async function DashboardPage({ searchParams }: { searchParams: Promise<{ error?: string; planRefresh?: string; added?: string; already?: string; skipped?: string; errors?: string; message?: string; details?: string }> }) {
+export default async function DashboardPage({ searchParams }: { searchParams: Promise<{ error?: string; planRefresh?: string; added?: string; already?: string; skipped?: string; errors?: string; message?: string; details?: string; detailsTotal?: string; reasonGroups?: string }> }) {
   const params = await searchParams;
   const { profile } = await requireAuth();
   const canRefreshPlans = ["admin", "management", "tech_manager"].includes(profile.role);
@@ -43,6 +43,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         skipped: params.skipped ?? "0",
         errors: params.errors ?? "0",
         details: params.details ? params.details.split("\n").filter(Boolean) : [],
+        detailsTotal: params.detailsTotal ?? "0",
+        reasonGroups: params.reasonGroups ? params.reasonGroups.split("\n").filter(Boolean) : [],
       }
     : null;
   const planRefreshActionError = params.planRefresh === "error"

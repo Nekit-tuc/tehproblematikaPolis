@@ -16,6 +16,8 @@ export type PlanRefreshAutoSummary = {
   skipped: string;
   errors: string;
   details: string[];
+  detailsTotal: string;
+  reasonGroups: string[];
 };
 
 const weekLabels: Record<DashboardPlanRefreshTargetWeek, string> = {
@@ -121,7 +123,7 @@ export function PlanRefreshModal({
             role="dialog"
             aria-modal="true"
             aria-labelledby="plan-refresh-title"
-            className="fixed left-1/2 top-1/2 z-[9999] flex max-h-[calc(100dvh-24px)] w-[calc(100vw-24px)] max-w-[420px] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl border border-white/10 bg-zinc-950 shadow-2xl shadow-black/60 md:max-h-[calc(100vh-48px)] md:max-w-3xl md:rounded-3xl"
+            className="fixed left-1/2 top-1/2 z-[9999] flex max-h-[calc(100dvh-16px)] w-[calc(100vw-16px)] max-w-[420px] -translate-x-1/2 -translate-y-1/2 flex-col overflow-y-auto overscroll-contain rounded-2xl border border-white/10 bg-zinc-950 shadow-2xl shadow-black/60 md:max-h-[calc(100vh-48px)] md:w-[calc(100vw-48px)] md:max-w-3xl md:rounded-3xl"
           >
             <div className="shrink-0 border-b border-white/10 p-3 md:p-4">
               <button
@@ -148,16 +150,27 @@ export function PlanRefreshModal({
                 <div className="mt-1 text-xs text-emerald-100/80">
                   Додано: {autoSummary.added}. Уже були в плані: {autoSummary.already}. Пропущено: {autoSummary.skipped}. Помилки: {autoSummary.errors}.
                 </div>
+                {autoSummary.reasonGroups.length > 0 ? (
+                  <div className="mt-3 rounded-xl border border-emerald-300/20 bg-black/15 p-3">
+                    <div className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-100/70">Причини</div>
+                    <ul className="mt-2 space-y-1 text-xs text-emerald-50/90">
+                      {autoSummary.reasonGroups.map((reason) => <li key={reason}>- {reason}</li>)}
+                    </ul>
+                  </div>
+                ) : null}
                 {autoSummary.details.length > 0 ? (
-                  <ul className="mt-2 space-y-1 text-xs text-emerald-50/90">
+                  <ul className="mt-3 max-h-48 space-y-1 overflow-y-auto rounded-xl border border-emerald-300/20 bg-black/15 p-3 text-xs text-emerald-50/90">
                     {autoSummary.details.map((detail) => <li key={detail}>- {detail}</li>)}
                   </ul>
+                ) : null}
+                {Number(autoSummary.detailsTotal) > autoSummary.details.length ? (
+                  <div className="mt-2 text-xs text-emerald-100/70">Показано перші {autoSummary.details.length} із {autoSummary.detailsTotal}.</div>
                 ) : null}
               </div>
             ) : null}
 
             {data ? (
-              <form action={updatePlansFromDashboardAction} className="flex min-h-0 flex-1 flex-col overflow-hidden">
+              <form action={updatePlansFromDashboardAction} className="flex flex-col">
                 <div className="shrink-0 border-b border-white/10 p-3 md:p-4">
                   <div className="grid gap-2 md:grid-cols-2">
                     {(["current_week", "next_week"] as DashboardPlanRefreshTargetWeek[]).map((week) => {
@@ -177,7 +190,7 @@ export function PlanRefreshModal({
                   </p>
                 </div>
 
-                <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3 md:p-4">
+                <div className="p-3 md:p-4">
                   {data.tickets.length === 0 ? (
                     <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-6 text-center text-sm text-zinc-400">Немає невиконаних заявок для оновлення планів.</div>
                   ) : (
@@ -223,7 +236,7 @@ export function PlanRefreshModal({
                   )}
                 </div>
 
-                <div className="shrink-0 border-t border-white/10 p-3 md:p-4">
+                <div className="sticky bottom-0 z-10 shrink-0 border-t border-white/10 bg-zinc-950/95 p-3 backdrop-blur md:p-4">
                   <div className="mb-3 rounded-2xl border border-amber-400/20 bg-amber-400/10 p-3">
                     <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                       <div className="min-w-0">

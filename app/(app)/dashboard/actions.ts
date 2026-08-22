@@ -29,11 +29,22 @@ function appendSummaryParams(params: URLSearchParams, summary: DashboardPlanRefr
   params.set("already", String(summary.alreadyPlanned));
   params.set("skipped", String(summary.skipped));
   params.set("errors", String(summary.errors));
-  const details = summary.details
-    .filter((detail) => detail.status !== "added")
+  const visibleDetails = summary.details.filter((detail) => detail.status !== "added");
+  const reasonCounts = new Map<string, number>();
+  for (const detail of visibleDetails) {
+    reasonCounts.set(detail.reasonText, (reasonCounts.get(detail.reasonText) ?? 0) + 1);
+  }
+  const reasonGroups = Array.from(reasonCounts.entries())
+    .sort((a, b) => b[1] - a[1])
     .slice(0, 10)
+    .map(([reason, count]) => `${reason} — ${count}`)
+    .join("\n");
+  const details = visibleDetails
+    .slice(0, 20)
     .map((detail) => detail.message)
     .join("\n");
+  params.set("detailsTotal", String(visibleDetails.length));
+  if (reasonGroups) params.set("reasonGroups", reasonGroups);
   if (details) params.set("details", details);
 }
 
