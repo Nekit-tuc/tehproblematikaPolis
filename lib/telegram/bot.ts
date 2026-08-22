@@ -3,6 +3,7 @@ import { answerCallbackQuery } from "./client";
 import { handleTelegramCallback, isLegacyTelegramCallbackData } from "./handlers";
 import { handleTelegramGroupMessage } from "./group-intake";
 import { handleWorkerDoneCallback } from "./worker-callbacks";
+import { handleWorkerMenuCallback, isWorkerMenuCallbackData } from "./worker-menu";
 import { linkWorkerTelegramFromStart } from "./worker-linking";
 
 function callbackPrefix(data: string) {
@@ -23,6 +24,17 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
       });
       await handleWorkerDoneCallback(update.callback_query);
       return { handled: true, created: false, reason: "worker_done_callback" } as const;
+    }
+
+    if (isWorkerMenuCallbackData(data)) {
+      console.info("[telegram-callback-router]", {
+        updateId: update.update_id,
+        callbackDataPrefix: "wm",
+        callbackDataLength,
+        route: "worker_menu",
+      });
+      await handleWorkerMenuCallback(update.callback_query);
+      return { handled: true, created: false, reason: "worker_menu_callback" } as const;
     }
 
     if (!isLegacyTelegramCallbackData(data)) {

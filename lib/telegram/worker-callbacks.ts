@@ -302,7 +302,27 @@ export async function handleWorkerDoneCallback(callback: TelegramCallbackQuery) 
 
   await answerCallbackQuery(callback.id, `Заявку ${ticket.number ?? ""} позначено як виконану. Очікується підтвердження адміністратора.`);
   if (callback.message?.chat.id) {
-    await sendTelegramMessage(callback.message.chat.id, "Виконання зафіксовано. Очікується підтвердження адміністратора.");
+    const { data: planItem } = await supabase
+      .from("work_plan_items")
+      .select("work_plan_id, work_plan:work_plans!inner(id,status)")
+      .eq("ticket_id", ticketId)
+      .eq("worker_id", workerId)
+      .in("work_plan.status", ["draft", "sent", "partially_done"])
+      .limit(1)
+      .maybeSingle();
+    const planId = (planItem as { work_plan_id?: string | null } | null)?.work_plan_id ?? null;
+    await sendTelegramMessage(
+      callback.message.chat.id,
+      [
+        `✅ Заявку ${ticket.number ?? ""} позначено як виконану.`,
+        "Вона очікує підтвердження.",
+      ].join("\n"),
+      planId ? [
+        [{ text: "📋 До заявок в роботі", callback_data: `wm:a:${planId}:0` }],
+        [{ text: "⏳ На підтвердженні", callback_data: `wm:p:${planId}:0` }],
+        [{ text: "📅 Меню", callback_data: `wm:m:${planId}` }],
+      ] : undefined,
+    );
   }
 
   await sendWorkerCompletedPushSafely(ticket, worker);

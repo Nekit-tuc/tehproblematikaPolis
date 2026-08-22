@@ -77,6 +77,16 @@ export async function sendTelegramMessage(chatId: string | number, text: string,
   });
 }
 
+export async function editTelegramMessageText(chatId: string | number, messageId: number, text: string, keyboard?: InlineButton[][]) {
+  return telegramRequest("editMessageText", {
+    chat_id: chatId,
+    message_id: messageId,
+    text,
+    reply_markup: keyboard ? { inline_keyboard: keyboard } : undefined,
+    disable_web_page_preview: true,
+  });
+}
+
 export async function answerCallbackQuery(callbackQueryId: string, text?: string) {
   return telegramRequest("answerCallbackQuery", {
     callback_query_id: callbackQueryId,

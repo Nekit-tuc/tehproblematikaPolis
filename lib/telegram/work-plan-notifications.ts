@@ -1,6 +1,7 @@
 ﻿import { priorityLabels } from "@/lib/labels";
 import { sendTelegramMessage } from "@/lib/telegram/client";
 import { createWorkerDoneToken } from "@/lib/telegram/worker-notifications";
+import { buildWorkerPlanMenuKeyboard, buildWorkerPlanMenuMessage } from "@/lib/telegram/worker-menu";
 import type { WorkPlan, WorkPlanItem } from "@/lib/supabase/work-plans";
 import type { Worker } from "@/types/domain";
 
@@ -101,23 +102,25 @@ async function createKeyboard(worker: Worker, chunk: WorkPlanItem[]) {
 
 export async function sendWorkPlanToWorker(worker: Worker, plan: WorkPlan, items: WorkPlanItem[]): Promise<SendWorkPlanResult> {
   if (!worker.telegram_id) return { ok: false, error: "У виконавця не підключено Telegram." };
-  const chunks = chunkItems(items);
-  if (chunks.length === 0) return { ok: false, error: "У плані немає заявок для надсилання." };
+  if (items.length === 0) return { ok: false, error: "У плані немає заявок для надсилання." };
   const messageIds: string[] = [];
 
   try {
-    for (const [index, chunk] of chunks.entries()) {
-      const keyboard = await createKeyboard(worker, chunk);
-      if (keyboard.error) return { ok: false, error: keyboard.error };
-      const text = buildChunkText(plan, worker, chunk, index, chunks.length);
-      const result = await sendTelegramMessage(worker.telegram_id, text, keyboard.rows) as TelegramSendMessageResult;
-      messageIds.push(String(result.message_id));
-    }
+    const activeCount = items.filter((item) => {
+      const status = item.ticket?.status;
+      return status === "new" || status === "assigned" || status === "in_progress";
+    }).length;
+    const result = await sendTelegramMessage(
+      worker.telegram_id,
+      buildWorkerPlanMenuMessage(plan, worker, activeCount),
+      buildWorkerPlanMenuKeyboard(plan.id),
+    ) as TelegramSendMessageResult;
+    messageIds.push(String(result.message_id));
     console.info("[work-plan-dispatch]", {
       result: "sent",
       workerId: worker.id,
       workPlanId: plan.id,
-      chunks: chunks.length,
+      mode: "worker_menu",
       tickets: items.length,
     });
     return { ok: true, messageIds };
