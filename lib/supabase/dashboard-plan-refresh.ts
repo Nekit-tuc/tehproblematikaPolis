@@ -53,6 +53,14 @@ export type DashboardPlanRefreshSummary = {
   alreadyPlanned: number;
   skipped: number;
   errors: number;
+  details: DashboardPlanRefreshSummaryDetail[];
+};
+
+export type DashboardPlanRefreshSummaryDetail = {
+  ticketId: string;
+  ticketNumber: string | null;
+  status: "added" | "already_planned" | "skipped" | "error";
+  message: string;
 };
 
 const activePlanStatuses: WorkPlanStatus[] = ["draft", "sent", "partially_done"];
@@ -125,6 +133,25 @@ function findWorkerByRoute(workers: WorkerRow[], workerName: string | null | und
 
 function activePlanInAnyWeek(planLinks: DashboardPlanRefreshTicketPlan[]) {
   return planLinks[0] ?? null;
+}
+
+function emptySummary(): DashboardPlanRefreshSummary {
+  return { added: 0, alreadyPlanned: 0, skipped: 0, errors: 0, details: [] };
+}
+
+function addSummaryDetail(
+  summary: DashboardPlanRefreshSummary,
+  detail: DashboardPlanRefreshSummaryDetail,
+) {
+  summary.details.push(detail);
+}
+
+function ticketLabel(ticket: { number?: string | null; id: string }) {
+  return ticket.number ?? ticket.id;
+}
+
+function sameWeek(plan: { period_start: string; period_end: string }, range: WorkWeekRange) {
+  return plan.period_start === range.startIso && plan.period_end === range.endIso;
 }
 
 async function appendHistory(
@@ -283,8 +310,9 @@ export async function addTicketsToSelectedWeekPlans(input: {
   targetWeek: DashboardPlanRefreshTargetWeek;
   workerOverrides?: Record<string, string | null | undefined>;
   actorId: string;
+  historyDescription?: string;
 }): Promise<QueryResult<DashboardPlanRefreshSummary>> {
-  const summary: DashboardPlanRefreshSummary = { added: 0, alreadyPlanned: 0, skipped: 0, errors: 0 };
+  const summary: DashboardPlanRefreshSummary = emptySummary();
   if (!hasSupabaseEnv()) return { data: summary, error: missingSupabaseMessage };
   if (input.ticketIds.length === 0) return { data: summary, error: null };
 
@@ -312,6 +340,14 @@ export async function addTicketsToSelectedWeekPlans(input: {
       const status = ticket.status as TicketStatus;
       if (blockedStatuses.includes(status) || !addableStatuses.includes(status)) {
         summary.skipped += 1;
+        addSummaryDetail(summary, {
+          ticketId: ticket.id,
+          ticketNumber: ticket.number ?? null,
+          status: "skipped",
+          message: status === "pending_review"
+            ? `${ticketLabel(ticket)}: спочатку підтвердіть заявку.`
+            : `${ticketLabel(ticket)}: статус не дозволяє додати заявку в план.`,
+        });
         if (status === "pending_review") {
           await appendHistory(supabase, ticket.id, input.actorId, "Заявку не додано в план під час оновлення: спочатку потрібно підтвердити заявку.");
         }
@@ -328,12 +364,26 @@ export async function addTicketsToSelectedWeekPlans(input: {
 
       if (existing.error) {
         summary.errors += 1;
+        addSummaryDetail(summary, {
+          ticketId: ticket.id,
+          ticketNumber: ticket.number ?? null,
+          status: "error",
+          message: `${ticketLabel(ticket)}: не вдалося перевірити наявний план.`,
+        });
         continue;
       }
 
       const existingPlan = existing.data ? one(existing.data.work_plan) : null;
       if (existingPlan) {
         summary.alreadyPlanned += 1;
+        addSummaryDetail(summary, {
+          ticketId: ticket.id,
+          ticketNumber: ticket.number ?? null,
+          status: "already_planned",
+          message: sameWeek(existingPlan, targetRange)
+            ? `${ticketLabel(ticket)}: вже є в плані вибраного тижня.`
+            : `${ticketLabel(ticket)}: ще прив'язана до іншого активного плану. Спочатку натисніть "Оновити систему".`,
+        });
         continue;
       }
 
@@ -344,6 +394,12 @@ export async function addTicketsToSelectedWeekPlans(input: {
 
       if (overrideWorkerId && !overrideWorker) {
         summary.errors += 1;
+        addSummaryDetail(summary, {
+          ticketId: ticket.id,
+          ticketNumber: ticket.number ?? null,
+          status: "error",
+          message: `${ticketLabel(ticket)}: вибраного виконавця не знайдено.`,
+        });
         await appendHistory(supabase, ticket.id, input.actorId, "Заявку не додано в план під час оновлення: вибраного виконавця не знайдено.");
         continue;
       }
@@ -359,6 +415,12 @@ export async function addTicketsToSelectedWeekPlans(input: {
 
       if (!route.found || !route.planTitle) {
         summary.errors += 1;
+        addSummaryDetail(summary, {
+          ticketId: ticket.id,
+          ticketNumber: ticket.number ?? null,
+          status: "error",
+          message: `${ticketLabel(ticket)}: категорія не має маршруту в план.`,
+        });
         await appendHistory(supabase, ticket.id, input.actorId, "Заявку не додано в план під час оновлення: не знайдено маршрут категорії або виконавця.", {
           categoryName: category?.name ?? null,
         });
@@ -368,6 +430,12 @@ export async function addTicketsToSelectedWeekPlans(input: {
       const targetWorker = overrideWorker ?? (ticket.assignee_worker_id ? activeWorkers.find((worker) => worker.id === ticket.assignee_worker_id) ?? null : null) ?? findWorkerByRoute(activeWorkers, route.workerName);
       if (!targetWorker) {
         summary.errors += 1;
+        addSummaryDetail(summary, {
+          ticketId: ticket.id,
+          ticketNumber: ticket.number ?? null,
+          status: "error",
+          message: `${ticketLabel(ticket)}: не визначено виконавця.`,
+        });
         await appendHistory(supabase, ticket.id, input.actorId, "Заявку не додано в план під час оновлення: не визначено виконавця.", {
           planTitle: route.planTitle,
         });
@@ -377,6 +445,12 @@ export async function addTicketsToSelectedWeekPlans(input: {
       const planResult = await getOrCreateDraftPlan(supabase, targetRange, route.planTitle, input.actorId);
       if (!planResult.plan) {
         summary.errors += 1;
+        addSummaryDetail(summary, {
+          ticketId: ticket.id,
+          ticketNumber: ticket.number ?? null,
+          status: "error",
+          message: `${ticketLabel(ticket)}: ${planResult.error ?? "план не знайдено"}.`,
+        });
         await appendHistory(supabase, ticket.id, input.actorId, `Заявку не додано в план під час оновлення: ${planResult.error ?? "план не знайдено"}.`, {
           planTitle: route.planTitle,
           targetWeek: input.targetWeek,
@@ -394,6 +468,12 @@ export async function addTicketsToSelectedWeekPlans(input: {
         const { error: updateError } = await supabase.from("tickets").update(updatePayload).eq("id", ticket.id);
         if (updateError) {
           summary.errors += 1;
+          addSummaryDetail(summary, {
+            ticketId: ticket.id,
+            ticketNumber: ticket.number ?? null,
+            status: "error",
+            message: `${ticketLabel(ticket)}: не вдалося оновити виконавця.`,
+          });
           continue;
         }
         await appendHistory(supabase, ticket.id, input.actorId, "Виконавця змінено під час оновлення планів.", {
@@ -417,21 +497,73 @@ export async function addTicketsToSelectedWeekPlans(input: {
       if (insertError) {
         if (insertError.code === "23505") {
           summary.alreadyPlanned += 1;
+          addSummaryDetail(summary, {
+            ticketId: ticket.id,
+            ticketNumber: ticket.number ?? null,
+            status: "already_planned",
+            message: `${ticketLabel(ticket)}: вже є в плані.`,
+          });
         } else {
           summary.errors += 1;
+          addSummaryDetail(summary, {
+            ticketId: ticket.id,
+            ticketNumber: ticket.number ?? null,
+            status: "error",
+            message: `${ticketLabel(ticket)}: не вдалося додати в план.`,
+          });
         }
         continue;
       }
 
-      await appendHistory(supabase, ticket.id, input.actorId, "Заявку додано в план через оновлення планів.", {
+      await appendHistory(supabase, ticket.id, input.actorId, input.historyDescription ?? "Заявку додано в план через оновлення планів.", {
         planId: planResult.plan.id,
         planTitle: planResult.plan.title,
         targetWeek: input.targetWeek,
         workerId: targetWorker.id,
       });
       summary.added += 1;
+      addSummaryDetail(summary, {
+        ticketId: ticket.id,
+        ticketNumber: ticket.number ?? null,
+        status: "added",
+        message: `${ticketLabel(ticket)}: додано в план ${planResult.plan.title}.`,
+      });
     }
 
     return { data: summary, error: null };
+  });
+}
+
+export async function autoPlanAllActiveTickets(input: {
+  targetWeek: DashboardPlanRefreshTargetWeek;
+  actorId: string;
+}): Promise<QueryResult<DashboardPlanRefreshSummary>> {
+  const summary = emptySummary();
+  if (!hasSupabaseEnv()) return { data: summary, error: missingSupabaseMessage };
+
+  return measureAsync("dashboard-plan-refresh:auto-plan", async () => {
+    const supabase = createAdminClient();
+    const { data: tickets, error } = await supabase
+      .from("tickets")
+      .select("id")
+      .in("status", addableStatuses)
+      .order("created_at", { ascending: true })
+      .limit(2000);
+
+    if (error) return { data: summary, error: error.message };
+
+    const ticketIds = (tickets ?? [])
+      .map((ticket) => ticket.id)
+      .filter((ticketId): ticketId is string => Boolean(ticketId));
+
+    if (ticketIds.length === 0) return { data: summary, error: null };
+
+    return addTicketsToSelectedWeekPlans({
+      actorId: input.actorId,
+      targetWeek: input.targetWeek,
+      ticketIds,
+      workerOverrides: {},
+      historyDescription: "Заявку додано в план через автопланування.",
+    });
   });
 }

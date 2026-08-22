@@ -259,6 +259,7 @@ export default async function WorkPlanningPage({ searchParams }: { searchParams:
               <Link href="/work-planning?create=1"><Plus className="h-3.5 w-3.5" /><span className="md:hidden">План</span><span className="hidden md:inline">Створити план</span></Link>
             </Button>
           ) : null}
+          <WorkWeekCloseModal preview={closePreviewResult.data} weekLabel={shortWeekPeriod({ startDate: currentWorkWeek.startDate, endDate: currentWorkWeek.endDate })} />
         </div>
       </div>
 
@@ -311,7 +312,6 @@ export default async function WorkPlanningPage({ searchParams }: { searchParams:
       <WeekSlider weeks={weekOverview} selectedWeekStart={selectedWeek.startDate} params={params} />
       <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-start">
         <WorkPlanningDocumentsMenu weekStart={selectedWeekOverview.startDate} weekPeriod={shortWeekPeriod(selectedWeekOverview)} plans={plansResult.data.map((plan) => ({ id: plan.id, title: plan.title, itemsCount: plan.items_count ?? 0 }))} />
-        <WorkWeekCloseModal preview={closePreviewResult.data} weekLabel={shortWeekPeriod({ startDate: currentWorkWeek.startDate, endDate: currentWorkWeek.endDate })} />
       </div>
 
       {createMode ? (

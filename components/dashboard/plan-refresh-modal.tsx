@@ -3,12 +3,20 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { AlertTriangle, CheckCircle2, RefreshCw, X } from "lucide-react";
-import { updatePlansFromDashboardAction } from "@/app/(app)/dashboard/actions";
+import { autoPlanAllActiveTicketsAction, updatePlansFromDashboardAction } from "@/app/(app)/dashboard/actions";
 import type {
   DashboardPlanRefreshData,
   DashboardPlanRefreshTargetWeek,
   DashboardPlanRefreshTicket,
 } from "@/lib/supabase/dashboard-plan-refresh";
+
+export type PlanRefreshAutoSummary = {
+  added: string;
+  already: string;
+  skipped: string;
+  errors: string;
+  details: string[];
+};
 
 const weekLabels: Record<DashboardPlanRefreshTargetWeek, string> = {
   current_week: "Поточний тиждень",
@@ -51,9 +59,17 @@ function disabledReason(ticket: DashboardPlanRefreshTicket, week: DashboardPlanR
   return null;
 }
 
-export function PlanRefreshModal({ data, error }: { data: DashboardPlanRefreshData | null; error?: string | null }) {
-  const [open, setOpen] = useState(false);
-  const [targetWeek, setTargetWeek] = useState<DashboardPlanRefreshTargetWeek>("next_week");
+export function PlanRefreshModal({
+  data,
+  error,
+  autoSummary = null,
+}: {
+  data: DashboardPlanRefreshData | null;
+  error?: string | null;
+  autoSummary?: PlanRefreshAutoSummary | null;
+}) {
+  const [open, setOpen] = useState(Boolean(autoSummary));
+  const [targetWeek, setTargetWeek] = useState<DashboardPlanRefreshTargetWeek>("current_week");
   const selectedWeek = targetWeek === "current_week" ? data?.weeks.current : data?.weeks.next;
   const selectableCount = useMemo(() => data?.tickets.filter((ticket) => !disabledReason(ticket, targetWeek)).length ?? 0, [data, targetWeek]);
   const closeModal = () => setOpen(false);
@@ -71,6 +87,10 @@ export function PlanRefreshModal({ data, error }: { data: DashboardPlanRefreshDa
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, [open]);
+
+  useEffect(() => {
+    if (autoSummary) setOpen(true);
+  }, [autoSummary]);
 
   return (
     <>
@@ -110,6 +130,19 @@ export function PlanRefreshModal({ data, error }: { data: DashboardPlanRefreshDa
             </div>
 
             {error ? <div className="m-4 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">{error}</div> : null}
+            {autoSummary ? (
+              <div className="m-3 rounded-2xl border border-emerald-400/25 bg-emerald-500/10 p-3 text-sm text-emerald-50 md:m-4 md:p-4">
+                <div className="font-semibold">Автопланування завершено</div>
+                <div className="mt-1 text-xs text-emerald-100/80">
+                  Додано: {autoSummary.added}. Уже були в плані: {autoSummary.already}. Пропущено: {autoSummary.skipped}. Помилки: {autoSummary.errors}.
+                </div>
+                {autoSummary.details.length > 0 ? (
+                  <ul className="mt-2 space-y-1 text-xs text-emerald-50/90">
+                    {autoSummary.details.map((detail) => <li key={detail}>- {detail}</li>)}
+                  </ul>
+                ) : null}
+              </div>
+            ) : null}
 
             {data ? (
               <form action={updatePlansFromDashboardAction} className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -179,6 +212,23 @@ export function PlanRefreshModal({ data, error }: { data: DashboardPlanRefreshDa
                 </div>
 
                 <div className="shrink-0 border-t border-white/10 p-3 md:p-4">
+                  <div className="mb-3 rounded-2xl border border-amber-400/20 bg-amber-400/10 p-3">
+                    <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                      <div className="min-w-0">
+                        <div className="text-sm font-semibold text-amber-100">Автопланування</div>
+                        <p className="mt-1 text-xs leading-5 text-amber-100/75">
+                          Система сама знайде всі активні невиконані заявки та додасть їх у плани вибраного тижня за категорією і виконавцем.
+                        </p>
+                      </div>
+                      <button
+                        type="submit"
+                        formAction={autoPlanAllActiveTicketsAction}
+                        className="h-10 shrink-0 rounded-xl border border-amber-300/30 bg-amber-400/15 px-4 text-sm font-bold text-amber-100 hover:bg-amber-400/20"
+                      >
+                        Автопланування
+                      </button>
+                    </div>
+                  </div>
                   <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                     <div className="flex items-center gap-2 text-xs text-zinc-500">
                     <AlertTriangle className="h-4 w-4 shrink-0 text-amber-300" />

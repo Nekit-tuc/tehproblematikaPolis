@@ -5,7 +5,9 @@ import { redirect } from "next/navigation";
 import { requireRole } from "@/lib/auth/server";
 import {
   addTicketsToSelectedWeekPlans,
+  autoPlanAllActiveTickets,
   type DashboardPlanRefreshTargetWeek,
+  type DashboardPlanRefreshSummary,
 } from "@/lib/supabase/dashboard-plan-refresh";
 
 const targetWeeks: DashboardPlanRefreshTargetWeek[] = ["current_week", "next_week"];
@@ -15,12 +17,29 @@ function readString(formData: FormData, key: string) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
-export async function updatePlansFromDashboardAction(formData: FormData) {
-  const { profile } = await requireRole(["admin", "management", "tech_manager"]);
+function readTargetWeek(formData: FormData) {
   const targetWeekValue = readString(formData, "targetWeek");
-  const targetWeek = targetWeeks.includes(targetWeekValue as DashboardPlanRefreshTargetWeek)
+  return targetWeeks.includes(targetWeekValue as DashboardPlanRefreshTargetWeek)
     ? (targetWeekValue as DashboardPlanRefreshTargetWeek)
     : null;
+}
+
+function appendSummaryParams(params: URLSearchParams, summary: DashboardPlanRefreshSummary) {
+  params.set("added", String(summary.added));
+  params.set("already", String(summary.alreadyPlanned));
+  params.set("skipped", String(summary.skipped));
+  params.set("errors", String(summary.errors));
+  const details = summary.details
+    .filter((detail) => detail.status !== "added")
+    .slice(0, 10)
+    .map((detail) => detail.message)
+    .join("\n");
+  if (details) params.set("details", details);
+}
+
+export async function updatePlansFromDashboardAction(formData: FormData) {
+  const { profile } = await requireRole(["admin", "management", "tech_manager"]);
+  const targetWeek = readTargetWeek(formData);
   const ticketIds = formData
     .getAll("ticketId")
     .filter((value): value is string => typeof value === "string" && Boolean(value.trim()))
@@ -54,10 +73,34 @@ export async function updatePlansFromDashboardAction(formData: FormData) {
 
   const params = new URLSearchParams({
     planRefresh: "success",
-    added: String(result.data.added),
-    already: String(result.data.alreadyPlanned),
-    skipped: String(result.data.skipped),
-    errors: String(result.data.errors),
   });
+  appendSummaryParams(params, result.data);
+  redirect(`/dashboard?${params.toString()}`);
+}
+
+export async function autoPlanAllActiveTicketsAction(formData: FormData) {
+  const { profile } = await requireRole(["admin", "management", "tech_manager"]);
+  const targetWeek = readTargetWeek(formData);
+
+  if (!targetWeek) {
+    redirect("/dashboard?planRefresh=error&message=" + encodeURIComponent("Оберіть тиждень для автопланування."));
+  }
+
+  const result = await autoPlanAllActiveTickets({
+    actorId: profile.id,
+    targetWeek,
+  });
+
+  revalidatePath("/dashboard");
+  revalidatePath("/work-planning");
+  revalidatePath("/tickets");
+  revalidatePath("/weekly-control");
+
+  if (result.error || !result.data) {
+    redirect("/dashboard?planRefresh=error&message=" + encodeURIComponent(result.error ?? "Не вдалося виконати автопланування."));
+  }
+
+  const params = new URLSearchParams({ planRefresh: "auto" });
+  appendSummaryParams(params, result.data);
   redirect(`/dashboard?${params.toString()}`);
 }

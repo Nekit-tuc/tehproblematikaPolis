@@ -2,7 +2,7 @@ import Link from "next/link";
 import type React from "react";
 import { AlertTriangle, ArrowRight, CalendarCheck, CheckCircle2, ClipboardList, Hourglass, ListChecks, Sparkles } from "lucide-react";
 import { Alert } from "@/components/ui/alert";
-import { PlanRefreshModal } from "@/components/dashboard/plan-refresh-modal";
+import { PlanRefreshModal, type PlanRefreshAutoSummary } from "@/components/dashboard/plan-refresh-modal";
 import { requireAuth } from "@/lib/auth/server";
 import { getDashboardOverview } from "@/lib/supabase/queries";
 import { getDashboardPlanRefreshData } from "@/lib/supabase/dashboard-plan-refresh";
@@ -25,7 +25,7 @@ const text = {
   noPlans: "На цей робочий тиждень ще немає активних планів.",
 };
 
-export default async function DashboardPage({ searchParams }: { searchParams: Promise<{ error?: string; planRefresh?: string; added?: string; already?: string; skipped?: string; errors?: string; message?: string }> }) {
+export default async function DashboardPage({ searchParams }: { searchParams: Promise<{ error?: string; planRefresh?: string; added?: string; already?: string; skipped?: string; errors?: string; message?: string; details?: string }> }) {
   const params = await searchParams;
   const { profile } = await requireAuth();
   const canRefreshPlans = ["admin", "management", "tech_manager"].includes(profile.role);
@@ -36,6 +36,15 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const data = result.data;
   const ticketsHref = `/tickets?from=${data.week.startDate}&to=${data.week.endDate}`;
   const plansHref = `/work-planning?from=${data.week.startDate}&to=${data.week.endDate}`;
+  const autoSummary: PlanRefreshAutoSummary | null = params.planRefresh === "auto"
+    ? {
+        added: params.added ?? "0",
+        already: params.already ?? "0",
+        skipped: params.skipped ?? "0",
+        errors: params.errors ?? "0",
+        details: params.details ? params.details.split("\n").filter(Boolean) : [],
+      }
+    : null;
 
   return (
     <div className="page-shell relative mx-auto max-w-6xl overflow-hidden pb-28 md:pb-8">
@@ -46,6 +55,9 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         {params.planRefresh === "error" ? <Alert title="Не вдалося оновити плани">{params.message ?? "Спробуйте ще раз."}</Alert> : null}
         {params.planRefresh === "success" ? (
           <Alert title="Плани оновлено">Додано: {params.added ?? "0"}. Уже були в плані: {params.already ?? "0"}. Пропущено: {params.skipped ?? "0"}. Помилки: {params.errors ?? "0"}.</Alert>
+        ) : null}
+        {params.planRefresh === "auto" ? (
+          <Alert title="Автопланування завершено">Додано: {params.added ?? "0"}. Уже були в плані: {params.already ?? "0"}. Пропущено: {params.skipped ?? "0"}. Помилки: {params.errors ?? "0"}.</Alert>
         ) : null}
 
         <section className="rounded-[20px] border border-white/[0.08] bg-white/[0.04] p-4 shadow-sm shadow-black/20 backdrop-blur md:p-5">
@@ -60,7 +72,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                 <p className="text-[10px] text-orange-200">{text.workWeek}</p>
                 <p className="text-[16px] font-semibold text-orange-100 md:text-lg">{data.week.label}</p>
               </div>
-              {canRefreshPlans ? <PlanRefreshModal data={planRefreshData?.data ?? null} error={planRefreshData?.error ?? null} /> : null}
+              {canRefreshPlans ? <PlanRefreshModal data={planRefreshData?.data ?? null} error={planRefreshData?.error ?? null} autoSummary={autoSummary} /> : null}
             </div>
           </div>
         </section>
