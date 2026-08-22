@@ -482,6 +482,10 @@ function PlanItemCard({ item, plan, draftPlans, workers, categories, profile }: 
               Перенести
             </SubmitButton>
           </form>
+        ) : plan.status === "draft" && ticket ? (
+          <div className="rounded-[10px] border border-white/[0.08] bg-white/[0.025] px-2 py-1.5 text-[10px] leading-4 text-zinc-500">
+            Немає інших планів у цьому тижні
+          </div>
         ) : null}
       </div>
     </div>

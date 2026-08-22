@@ -1031,6 +1031,21 @@ export async function ensureWeeklyDraftPlansForAutoRouting(
 export async function getDraftWorkPlansForMove(excludePlanId?: string): Promise<QueryResult<WorkPlan[]>> {
   if (!hasSupabaseEnv()) return emptyWithError([]);
   const supabase = await createClient();
+  let sourcePlan: Pick<WorkPlan, "period_start" | "period_end"> | null = null;
+
+  if (excludePlanId) {
+    const { data: sourcePlanData, error: sourcePlanError } = await measureAsync("work-planning:draft_plans_for_move_source", () =>
+      supabase
+        .from("work_plans")
+        .select("period_start, period_end")
+        .eq("id", excludePlanId)
+        .maybeSingle(),
+    );
+    if (sourcePlanError) return { data: [], error: sourcePlanError.message };
+    sourcePlan = sourcePlanData as Pick<WorkPlan, "period_start" | "period_end"> | null;
+    if (!sourcePlan) return { data: [], error: "Поточний план не знайдено." };
+  }
+
   let query = supabase
     .from("work_plans")
     .select("id, title, period_start, period_end, status, created_by, created_at, updated_at, sent_at, notes")
@@ -1039,6 +1054,11 @@ export async function getDraftWorkPlansForMove(excludePlanId?: string): Promise<
     .order("title", { ascending: true })
     .limit(100);
   if (excludePlanId) query = query.neq("id", excludePlanId);
+  if (sourcePlan) {
+    query = query
+      .eq("period_start", sourcePlan.period_start)
+      .eq("period_end", sourcePlan.period_end);
+  }
   const { data, error } = await measureAsync("work-planning:draft_plans_for_move", () => query);
   return { data: (data ?? []) as WorkPlan[], error: error?.message ?? null };
 }
@@ -1663,13 +1683,20 @@ export async function moveWorkPlanItemToDraftPlan(input: {
   if (input.currentPlanId === input.targetPlanId) return { data: null, error: "Оберіть інший план для перенесення." };
 
   const supabase = await createClient();
-  const [itemResult, targetPlanResult] = await Promise.all([
+  const [itemResult, currentPlanResult, targetPlanResult] = await Promise.all([
     measureAsync("work-planning:move_item_load", () =>
       supabase
         .from("work_plan_items")
         .select("id, work_plan_id, ticket_id, worker_id, category, sort_order")
         .eq("id", input.itemId)
         .eq("work_plan_id", input.currentPlanId)
+        .maybeSingle(),
+    ),
+    measureAsync("work-planning:move_current_plan", () =>
+      supabase
+        .from("work_plans")
+        .select("id, title, period_start, period_end, status, created_by, created_at, updated_at, sent_at, notes")
+        .eq("id", input.currentPlanId)
         .maybeSingle(),
     ),
     measureAsync("work-planning:move_target_plan", () =>
@@ -1682,12 +1709,19 @@ export async function moveWorkPlanItemToDraftPlan(input: {
   ]);
 
   if (itemResult.error) return { data: null, error: itemResult.error.message };
+  if (currentPlanResult.error) return { data: null, error: currentPlanResult.error.message };
   if (targetPlanResult.error) return { data: null, error: targetPlanResult.error.message };
   const item = itemResult.data as { id: string; work_plan_id: string; ticket_id: string; worker_id?: string | null; category?: string | null; sort_order?: number | null } | null;
+  const currentPlan = currentPlanResult.data as WorkPlan | null;
   const targetPlan = targetPlanResult.data as WorkPlan | null;
   if (!item) return { data: null, error: "Заявку в поточному плані не знайдено." };
+  if (!currentPlan) return { data: null, error: "Поточний план не знайдено." };
+  if (currentPlan.status !== "draft") return { data: null, error: "Перенести заявку можна тільки з плану-чернетки." };
   if (!targetPlan) return { data: null, error: "Цільовий план не знайдено." };
   if (targetPlan.status !== "draft") return { data: null, error: "Перенести заявку можна тільки в план-чернетку." };
+  if (targetPlan.period_start !== currentPlan.period_start || targetPlan.period_end !== currentPlan.period_end) {
+    return { data: null, error: "Не можна перенести заявку в план іншого робочого тижня." };
+  }
 
   const duplicateResult = await measureAsync("work-planning:move_duplicate_check", () =>
     supabase
