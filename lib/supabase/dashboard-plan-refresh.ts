@@ -449,8 +449,7 @@ export async function addTicketsToSelectedWeekPlans(input: {
         .select("id, work_plan:work_plans!inner(id,title,status,period_start,period_end)")
         .eq("ticket_id", ticket.id)
         .in("work_plan.status", activePlanStatuses)
-        .limit(1)
-        .maybeSingle();
+        .limit(20);
 
       if (existing.error) {
         summary.errors += 1;
@@ -465,7 +464,13 @@ export async function addTicketsToSelectedWeekPlans(input: {
         continue;
       }
 
-      const existingPlan = existing.data ? one(existing.data.work_plan) : null;
+      const existingItems = (existing.data ?? []) as Array<{
+        work_plan?: { id: string; title: string; status: WorkPlanStatus; period_start: string; period_end: string } | { id: string; title: string; status: WorkPlanStatus; period_start: string; period_end: string }[] | null;
+      }>;
+      const existingPlans = existingItems
+        .map((item) => one(item.work_plan))
+        .filter((plan): plan is { id: string; title: string; status: WorkPlanStatus; period_start: string; period_end: string } => Boolean(plan));
+      const existingPlan = existingPlans.find((plan) => sameWeek(plan, targetRange)) ?? existingPlans[0] ?? null;
       if (existingPlan) {
         const isSameWeek = sameWeek(existingPlan, targetRange);
         if (isSameWeek) summary.alreadyPlanned += 1;

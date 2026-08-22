@@ -1522,8 +1522,8 @@ export async function getWorkPlanningWeeksOverview(weeks: Array<Pick<WorkPlannin
 
   const supabase = await createClient();
   const weekRanges = weeks.map((week) => ({ ...week, range: getWorkWeekRange(new Date(`${week.startDate}T17:00:00`)) }));
-  const firstStart = weekRanges[0].range.startIso;
-  const lastEnd = weekRanges[weekRanges.length - 1].range.endIso;
+  const firstStart = weekRanges[0].range.startDate;
+  const lastEnd = weekRanges[weekRanges.length - 1].range.endDate;
   const ticketIdsByWeek = new Map<string, Set<string>>();
 
   const { data: plansData, error: plansError } = await measureAsync("work-planning:weeks_overview:plans", () =>
@@ -1542,8 +1542,8 @@ export async function getWorkPlanningWeeksOverview(weeks: Array<Pick<WorkPlannin
   const weekStartByPlanId = new Map<string, string>();
 
   for (const plan of plans) {
-    const planStart = new Date(plan.period_start);
-    const weekRange = weekRanges.find((item) => planStart >= item.range.start && planStart < item.range.end);
+    const planStart = plan.period_start;
+    const weekRange = weekRanges.find((item) => planStart >= item.range.startDate && planStart < item.range.endDate);
     if (!weekRange) continue;
     const overviewWeek = overview.find((item) => item.startDate === weekRange.startDate);
     if (!overviewWeek) continue;
@@ -1868,11 +1868,10 @@ async function sendWorkPlanToWorkerGroup(input: {
 }
 
 
-export async function getWorkPlanningSummary(): Promise<QueryResult<WorkPlanningSummary>> {
+export async function getWorkPlanningSummary(range: WorkWeekRange = getWorkWeekRange()): Promise<QueryResult<WorkPlanningSummary>> {
   if (!hasSupabaseEnv()) return emptyWithError({ totalActive: 0, plannedActive: 0, unplannedActive: 0 });
   const supabase = await createClient();
   const activeStatuses: TicketStatus[] = planningStatuses;
-  const currentWeek = getWorkWeekRange();
 
   const [activeTicketsResult, plannedRowsResult] = await Promise.all([
     measureAsync("work-planning:summary_active_tickets", () =>
@@ -1884,8 +1883,8 @@ export async function getWorkPlanningSummary(): Promise<QueryResult<WorkPlanning
         .select("ticket_id, ticket:tickets!inner(status), work_plan:work_plans!inner(status)")
         .in("work_plan.status", activeWorkPlanStatuses)
         .in("ticket.status", activeStatuses)
-        .eq("work_plan.period_start", currentWeek.startDate)
-        .eq("work_plan.period_end", currentWeek.endDate),
+        .eq("work_plan.period_start", range.startDate)
+        .eq("work_plan.period_end", range.endDate),
     ),
   ]);
 
