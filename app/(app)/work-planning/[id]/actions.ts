@@ -161,6 +161,6 @@ export async function retryFailedWorkPlanDispatchAction(workPlanId: string, form
   await sendPlanWithMode(workPlanId, "retry_failed", "retry", formData);
 }
 
-export async function resendWorkPlanToAllAction(workPlanId: string, formData?: FormData) {
+export async function resendSingleWorkPlanAction(workPlanId: string, formData?: FormData) {
   await sendPlanWithMode(workPlanId, "resend_all", "resend", formData);
 }

@@ -19,7 +19,7 @@ import { getDraftWorkPlansForMove, getWorkPlanById, getWorkPlanDispatches, getWo
 import { getActiveWorkers } from "@/lib/supabase/worker-queries";
 import { cn, formatDate } from "@/lib/utils";
 import type { Category, Profile, TicketWithRelations, WorkerWithCategories } from "@/types/domain";
-import { cancelWorkPlanAction, moveWorkPlanItemAction, removeWorkPlanItemAction, resendWorkPlanToAllAction, retryFailedWorkPlanDispatchAction, sendWorkPlanAction, updateWorkPlanAction } from "./actions";
+import { cancelWorkPlanAction, moveWorkPlanItemAction, removeWorkPlanItemAction, resendSingleWorkPlanAction, retryFailedWorkPlanDispatchAction, sendWorkPlanAction, updateWorkPlanAction } from "./actions";
 import { QuickTicketModalButton, type QuickTicketCategory, type QuickTicketData, type QuickTicketWorker } from "./quick-ticket-modal";
 
 type PageProps = {
@@ -76,7 +76,7 @@ function successMessage(value?: string) {
     const prefix = mode === "retry"
       ? "Повтор невдалих завершено"
       : mode === "resend"
-        ? "Повторну розсилку всім завершено"
+        ? "Повторне надсилання плану завершено"
         : "Розсилку завершено";
     if (mode === "retry" && sent === 0 && failed === 0 && skipped === 0) return "Немає невдалих надсилань для повтору.";
     if (sent > 0 && failed === 0 && skipped === 0) return mode === "sent" ? "План надіслано виконавцям." : `${prefix}. Надіслано: ${sent}.`;
@@ -251,7 +251,7 @@ export default async function WorkPlanDetailPage({ params, searchParams }: PageP
             <form action={sendWorkPlanAction.bind(null, plan.id)} className="min-w-0">
               <input type="hidden" name="returnTo" value={returnTo} />
               <SubmitButton className="h-10 w-full rounded-[13px] bg-gradient-to-r from-orange-500 to-orange-400 px-2 text-[11px] font-semibold text-white shadow-[0_10px_28px_rgba(249,115,22,0.22)] md:h-auto md:w-auto md:rounded-md md:px-3 md:text-sm" pendingText="Надсилається...">
-                <Send className="h-3.5 w-3.5 shrink-0 md:h-4 md:w-4" /><span className="truncate">Надіслати</span>
+                <Send className="h-3.5 w-3.5 shrink-0 md:h-4 md:w-4" /><span className="truncate">Надіслати план</span>
               </SubmitButton>
             </form>
           ) : null}
@@ -264,16 +264,16 @@ export default async function WorkPlanDetailPage({ params, searchParams }: PageP
             </form>
           ) : null}
           {canResend ? (
-            <form action={resendWorkPlanToAllAction.bind(null, plan.id)} className="min-w-0">
+            <form action={resendSingleWorkPlanAction.bind(null, plan.id)} className="min-w-0">
               <input type="hidden" name="returnTo" value={returnTo} />
               <ConfirmSubmitButton
                 type="submit"
                 variant="outline"
                 className="h-10 w-full rounded-[13px] border-white/[0.08] bg-white/[0.035] px-2 text-[11px] md:h-auto md:w-auto md:rounded-md md:px-3 md:text-sm"
                 pendingText="Надсилається..."
-                message="План уже надсилався. Ви точно хочете повторно надіслати його всім виконавцям?"
+                message="План уже надсилався. Ви точно хочете повторно надіслати саме цей план?"
               >
-                <Send className="h-3.5 w-3.5 shrink-0 md:h-4 md:w-4" /><span className="truncate">Повторно всім</span>
+                <Send className="h-3.5 w-3.5 shrink-0 md:h-4 md:w-4" /><span className="truncate">Надіслати повторно</span>
               </ConfirmSubmitButton>
             </form>
           ) : null}
