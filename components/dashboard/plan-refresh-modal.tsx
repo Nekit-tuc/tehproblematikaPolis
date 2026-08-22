@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { AlertTriangle, CheckCircle2, RefreshCw, X } from "lucide-react";
 import { updatePlansFromDashboardAction } from "@/app/(app)/dashboard/actions";
 import type {
@@ -82,14 +83,14 @@ export function PlanRefreshModal({ data, error }: { data: DashboardPlanRefreshDa
         Оновити плани
       </button>
 
-      {open ? (
+      {open && typeof document !== "undefined" ? createPortal(
         <>
-          <div className="fixed inset-0 z-[100] bg-black/75 backdrop-blur-sm" onClick={closeModal} />
+          <div className="fixed inset-0 z-[9998] bg-black/75 backdrop-blur-sm" onClick={closeModal} />
           <div
             role="dialog"
             aria-modal="true"
             aria-labelledby="plan-refresh-title"
-            className="fixed left-1/2 top-1/2 z-[101] flex max-h-[calc(100dvh-32px)] w-[calc(100vw-24px)] max-w-[420px] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-[18px] border border-white/10 bg-zinc-950 shadow-2xl shadow-black/60 md:max-h-[calc(100vh-48px)] md:max-w-5xl md:rounded-3xl"
+            className="fixed left-1/2 top-1/2 z-[9999] flex max-h-[calc(100dvh-24px)] w-[calc(100vw-24px)] max-w-[420px] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl border border-white/10 bg-zinc-950 shadow-2xl shadow-black/60 md:max-h-[calc(100vh-48px)] md:max-w-3xl md:rounded-3xl"
           >
             <div className="shrink-0 border-b border-white/10 p-3 md:p-4">
               <button
@@ -180,12 +181,12 @@ export function PlanRefreshModal({ data, error }: { data: DashboardPlanRefreshDa
                 <div className="shrink-0 border-t border-white/10 p-3 md:p-4">
                   <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                     <div className="flex items-center gap-2 text-xs text-zinc-500">
-                    <AlertTriangle className="h-4 w-4 text-amber-300" />
+                    <AlertTriangle className="h-4 w-4 shrink-0 text-amber-300" />
                     Pending review не додаються в план до підтвердження.
                   </div>
                     <div className="flex gap-2">
-                    <button type="button" onClick={closeModal} className="h-11 rounded-xl border border-white/10 px-4 text-sm font-semibold text-zinc-200 hover:bg-white/10">Скасувати</button>
-                    <button type="submit" className="inline-flex h-11 items-center rounded-xl bg-amber-400 px-4 text-sm font-bold text-black hover:bg-amber-300">
+                    <button type="button" onClick={closeModal} className="h-11 flex-1 rounded-xl border border-white/10 px-4 text-sm font-semibold text-zinc-200 hover:bg-white/10 md:flex-none">Скасувати</button>
+                    <button type="submit" className="inline-flex h-11 flex-[1.4] items-center justify-center rounded-xl bg-amber-400 px-4 text-sm font-bold text-black hover:bg-amber-300 md:flex-none">
                       <CheckCircle2 className="mr-2 h-4 w-4" />
                       Додати вибрані в план
                     </button>
@@ -195,7 +196,8 @@ export function PlanRefreshModal({ data, error }: { data: DashboardPlanRefreshDa
               </form>
             ) : null}
           </div>
-        </>
+        </>,
+        document.body,
       ) : null}
     </>
   );
