@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireRole } from "@/lib/auth/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import type { ObjectType } from "@/types/domain";
 
@@ -125,4 +126,158 @@ export async function setObjectActiveAction(objectId: string, isActive: boolean)
 
 export async function deactivateObjectAction(objectId: string) {
   await setObjectActiveAction(objectId, false);
+}
+
+async function requireDirectorLinkAdmin() {
+  return requireRole(["admin", "management", "tech_manager"]);
+}
+
+function refreshObjectsAndDirectors() {
+  revalidatePath("/objects");
+  revalidatePath("/objects/directors");
+  revalidatePath("/director");
+  revalidatePath("/director/tickets");
+  revalidatePath("/dashboard");
+}
+
+function redirectObjectsSuccess(success: string) {
+  redirect(`/objects?success=${success}`);
+}
+
+async function loadDirectorAndObject(supabase: ReturnType<typeof createAdminClient>, directorProfileId: string, objectId: string) {
+  const [directorResult, objectResult] = await Promise.all([
+    supabase.from("profiles").select("id, full_name, phone, role, approval_status").eq("id", directorProfileId).maybeSingle(),
+    supabase.from("objects").select("id, name").eq("id", objectId).maybeSingle(),
+  ]);
+  if (directorResult.error) return { error: directorResult.error.message };
+  if (objectResult.error) return { error: objectResult.error.message };
+  const director = directorResult.data as { id: string; full_name?: string | null; phone?: string | null; role?: string | null; approval_status?: string | null } | null;
+  const object = objectResult.data as { id: string; name?: string | null } | null;
+  if (!director || director.role !== "store_director") return { error: "Обраний профіль не є директором магазину." };
+  if (!object) return { error: "Об'єкт не знайдено." };
+  return { director, object, error: null };
+}
+
+async function resetPrimaryForObject(supabase: ReturnType<typeof createAdminClient>, objectId: string) {
+  return supabase.from("director_objects").update({ is_primary: false }).eq("object_id", objectId);
+}
+
+export async function linkDirectorToObjectAction(formData: FormData) {
+  const { profile } = await requireDirectorLinkAdmin();
+  const directorProfileId = text(formData, "directorProfileId");
+  const objectId = text(formData, "objectId");
+  const phone = text(formData, "phone");
+  const isPrimary = bool(formData, "isPrimary");
+  if (!directorProfileId || !objectId) redirect(`/objects?error=${encodeURIComponent("Оберіть директора та об'єкт.")}`);
+
+  const supabase = createAdminClient();
+  const context = await loadDirectorAndObject(supabase, directorProfileId, objectId);
+  if (context.error) redirect(`/objects?error=${encodeURIComponent(context.error)}`);
+
+  if (isPrimary) {
+    const reset = await resetPrimaryForObject(supabase, objectId);
+    if (reset.error) redirect(`/objects?error=${encodeURIComponent(reset.error.message)}`);
+  }
+
+  const now = new Date().toISOString();
+  const { error } = await supabase.from("director_objects").upsert({
+    profile_id: directorProfileId,
+    object_id: objectId,
+    phone: phone || context.director?.phone || null,
+    approval_status: "approved",
+    is_primary: isPrimary,
+    approved_at: now,
+    approved_by_profile_id: profile.id,
+    rejected_at: null,
+    rejection_reason: null,
+  }, { onConflict: "profile_id,object_id" });
+  if (error) redirect(`/objects?error=${encodeURIComponent(error.message)}`);
+
+  refreshObjectsAndDirectors();
+  redirectObjectsSuccess("director-linked");
+}
+
+export async function unlinkDirectorFromObjectAction(formData: FormData) {
+  await requireDirectorLinkAdmin();
+  const directorProfileId = text(formData, "directorProfileId");
+  const objectId = text(formData, "objectId");
+  if (!directorProfileId || !objectId) redirect(`/objects?error=${encodeURIComponent("Прив'язку не знайдено.")}`);
+
+  const supabase = createAdminClient();
+  const { error } = await supabase.from("director_objects").delete().eq("profile_id", directorProfileId).eq("object_id", objectId);
+  if (error) redirect(`/objects?error=${encodeURIComponent(error.message)}`);
+
+  refreshObjectsAndDirectors();
+  redirectObjectsSuccess("director-unlinked");
+}
+
+export async function approveDirectorObjectLinkFromObjectsAction(formData: FormData) {
+  const { profile } = await requireDirectorLinkAdmin();
+  const linkId = text(formData, "linkId");
+  const objectId = text(formData, "objectId");
+  const isPrimary = bool(formData, "isPrimary");
+  if (!linkId || !objectId) redirect(`/objects?error=${encodeURIComponent("Прив'язку не знайдено.")}`);
+
+  const supabase = createAdminClient();
+  if (isPrimary) {
+    const reset = await resetPrimaryForObject(supabase, objectId);
+    if (reset.error) redirect(`/objects?error=${encodeURIComponent(reset.error.message)}`);
+  }
+  const { error } = await supabase
+    .from("director_objects")
+    .update({
+      approval_status: "approved",
+      is_primary: isPrimary,
+      approved_at: new Date().toISOString(),
+      approved_by_profile_id: profile.id,
+      rejected_at: null,
+      rejection_reason: null,
+    })
+    .eq("id", linkId)
+    .eq("object_id", objectId);
+  if (error) redirect(`/objects?error=${encodeURIComponent(error.message)}`);
+
+  refreshObjectsAndDirectors();
+  redirectObjectsSuccess("director-link-approved");
+}
+
+export async function rejectDirectorObjectLinkFromObjectsAction(formData: FormData) {
+  await requireDirectorLinkAdmin();
+  const linkId = text(formData, "linkId");
+  const objectId = text(formData, "objectId");
+  const note = text(formData, "note");
+  if (!linkId || !objectId) redirect(`/objects?error=${encodeURIComponent("Прив'язку не знайдено.")}`);
+
+  const supabase = createAdminClient();
+  const { error } = await supabase
+    .from("director_objects")
+    .update({
+      approval_status: "rejected",
+      is_primary: false,
+      rejected_at: new Date().toISOString(),
+      rejection_reason: note || null,
+      note: note || null,
+    })
+    .eq("id", linkId)
+    .eq("object_id", objectId);
+  if (error) redirect(`/objects?error=${encodeURIComponent(error.message)}`);
+
+  refreshObjectsAndDirectors();
+  redirectObjectsSuccess("director-link-rejected");
+}
+
+export async function setPrimaryDirectorForObjectAction(formData: FormData) {
+  await requireDirectorLinkAdmin();
+  const linkId = text(formData, "linkId");
+  const objectId = text(formData, "objectId");
+  if (!linkId || !objectId) redirect(`/objects?error=${encodeURIComponent("Прив'язку не знайдено.")}`);
+
+  const supabase = createAdminClient();
+  const reset = await resetPrimaryForObject(supabase, objectId);
+  if (reset.error) redirect(`/objects?error=${encodeURIComponent(reset.error.message)}`);
+  const selected = await supabase.from("director_objects").update({ is_primary: true, approval_status: "approved" }).eq("id", linkId).eq("object_id", objectId);
+  if (selected.error) redirect(`/objects?error=${encodeURIComponent(selected.error.message)}`);
+
+  refreshObjectsAndDirectors();
+  redirectObjectsSuccess("director-primary");
 }

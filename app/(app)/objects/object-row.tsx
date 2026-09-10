@@ -9,8 +9,9 @@ import { Label } from "@/components/ui/label";
 import { TD, TR } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { objectTypeLabels } from "@/lib/labels";
+import type { DirectorOption, ObjectDirectorLink, ObjectWithDirectorLinks } from "@/lib/supabase/object-director-sync";
 import type { CompanyObject, ObjectType, Profile } from "@/types/domain";
-import { deactivateObjectAction, setObjectActiveAction, updateObjectAction } from "./actions";
+import { approveDirectorObjectLinkFromObjectsAction, deactivateObjectAction, linkDirectorToObjectAction, rejectDirectorObjectLinkFromObjectsAction, setObjectActiveAction, setPrimaryDirectorForObjectAction, unlinkDirectorFromObjectAction, updateObjectAction } from "./actions";
 
 const objectTypes: ObjectType[] = ["store", "warehouse", "production", "office", "other"];
 
@@ -35,7 +36,19 @@ function ReviewBadges({ object }: { object: CompanyObject }) {
   );
 }
 
-export function ObjectRow({ object, managers, canManage, districts }: { object: CompanyObject; managers: Profile[]; canManage: boolean; districts: string[] }) {
+function statusLabel(status?: string | null) {
+  if (status === "approved") return "Підтверджено";
+  if (status === "rejected") return "Відхилено";
+  return "Очікує";
+}
+
+function directorOptionLabel(director: DirectorOption) {
+  const status = director.approval_status ?? "approved";
+  const linkLabel = director.activeLinkCount > 0 ? `${director.activeLinkCount} об'єкт.` : "без об'єкта";
+  return [director.full_name, director.phone, statusLabel(status), linkLabel].filter(Boolean).join(" · ");
+}
+
+export function ObjectRow({ object, managers, directors, canManage, canManageDirectorLinks, districts }: { object: ObjectWithDirectorLinks; managers: Profile[]; directors: DirectorOption[]; canManage: boolean; canManageDirectorLinks: boolean; districts: string[] }) {
   const [isOpen, setIsOpen] = useState(false);
   const rowId = `object-row-${object.id}`;
   const manager = managers.find((item) => item.id === object.manager_id);
@@ -67,6 +80,7 @@ export function ObjectRow({ object, managers, canManage, districts }: { object: 
         <TD>{getObjectTypeLabel(object.type)}</TD>
         <TD>{object.city}{getObjectDistrict(object) ? ` / ${getObjectDistrict(object)}` : ""}</TD>
         <TD>{object.address}</TD>
+        <TD><DirectorLinksCell object={object} directors={directors} canManageDirectorLinks={canManageDirectorLinks} /></TD>
         <TD>{manager?.full_name ?? "-"}</TD>
         <TD>
           <div className="flex flex-wrap items-center gap-2">
@@ -81,7 +95,7 @@ export function ObjectRow({ object, managers, canManage, districts }: { object: 
       </TR>
       {canManage && isOpen ? (
         <TR>
-          <TD colSpan={7} className="bg-stone-950/20">
+          <TD colSpan={8} className="bg-stone-950/20">
             <div className="py-3">
               <div className="mb-3 flex flex-wrap items-center gap-2 text-sm font-medium text-orange-200">
                 <span>▼</span>
@@ -128,4 +142,83 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 function Select({ children, ...props }: React.SelectHTMLAttributes<HTMLSelectElement>) {
   return <select {...props} className="h-10 w-full rounded-md border border-input bg-stone-950/30 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring">{children}</select>;
+}
+
+function DirectorLinksCell({ object, directors, canManageDirectorLinks }: { object: ObjectWithDirectorLinks; directors: DirectorOption[]; canManageDirectorLinks: boolean }) {
+  return (
+    <div className="min-w-72 space-y-2">
+      <div className="flex flex-wrap gap-1.5">
+        {object.approvedDirectorLinks.length === 0 ? <Badge tone="gray">Без директора</Badge> : null}
+        {object.pendingDirectorLinks.length > 0 ? <Badge tone="orange">Очікує підтвердження</Badge> : null}
+      </div>
+      <div className="space-y-1.5">
+        {object.directorLinks.length > 0 ? object.directorLinks.map((link) => <DirectorLinkRow key={link.id} link={link} objectId={object.id} canManageDirectorLinks={canManageDirectorLinks} />) : <div className="text-xs text-stone-500">Немає прив'язок</div>}
+      </div>
+      {canManageDirectorLinks ? <DirectorLinkForm objectId={object.id} directors={directors} /> : null}
+    </div>
+  );
+}
+
+function DirectorLinkRow({ link, objectId, canManageDirectorLinks }: { link: ObjectDirectorLink; objectId: string; canManageDirectorLinks: boolean }) {
+  return (
+    <div className="rounded-lg border border-white/10 bg-white/[0.03] p-2">
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className="font-medium text-stone-100">{link.director?.full_name ?? "Директор"}</span>
+        <span className="text-stone-500">{link.phone ?? link.director?.phone ?? "без телефону"}</span>
+        <Badge tone={link.approvalStatus === "approved" ? "green" : link.approvalStatus === "rejected" ? "red" : "orange"}>{statusLabel(link.approvalStatus)}</Badge>
+        {link.isPrimary ? <Badge tone="orange">Primary</Badge> : null}
+      </div>
+      {canManageDirectorLinks ? (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {link.approvalStatus === "pending" ? (
+            <form action={approveDirectorObjectLinkFromObjectsAction}>
+              <input type="hidden" name="linkId" value={link.id} />
+              <input type="hidden" name="objectId" value={objectId} />
+              <input type="hidden" name="isPrimary" value={link.isPrimary ? "on" : ""} />
+              <Button type="submit" variant="outline" size="sm" className="h-7 px-2 text-[11px]">Підтвердити</Button>
+            </form>
+          ) : null}
+          {link.approvalStatus === "approved" && !link.isPrimary ? (
+            <form action={setPrimaryDirectorForObjectAction}>
+              <input type="hidden" name="linkId" value={link.id} />
+              <input type="hidden" name="objectId" value={objectId} />
+              <Button type="submit" variant="outline" size="sm" className="h-7 px-2 text-[11px]">Primary</Button>
+            </form>
+          ) : null}
+          {link.approvalStatus !== "rejected" ? (
+            <form action={unlinkDirectorFromObjectAction}>
+              <input type="hidden" name="directorProfileId" value={link.profileId} />
+              <input type="hidden" name="objectId" value={objectId} />
+              <Button type="submit" variant="outline" size="sm" className="h-7 px-2 text-[11px]">Відв'язати</Button>
+            </form>
+          ) : null}
+          {link.approvalStatus === "pending" ? (
+            <form action={rejectDirectorObjectLinkFromObjectsAction} className="flex gap-1">
+              <input type="hidden" name="linkId" value={link.id} />
+              <input type="hidden" name="objectId" value={objectId} />
+              <Input name="note" placeholder="Причина" className="h-7 w-24 px-2 text-[11px]" />
+              <Button type="submit" variant="outline" size="sm" className="h-7 px-2 text-[11px]">Відхилити</Button>
+            </form>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function DirectorLinkForm({ objectId, directors }: { objectId: string; directors: DirectorOption[] }) {
+  return (
+    <form action={linkDirectorToObjectAction} className="grid gap-1.5">
+      <input type="hidden" name="objectId" value={objectId} />
+      <Select name="directorProfileId" required defaultValue="">
+        <option value="" disabled>Прив'язати / змінити директора</option>
+        {directors.map((director) => <option key={director.id} value={director.id}>{directorOptionLabel(director)}</option>)}
+      </Select>
+      <div className="flex flex-wrap items-center gap-2">
+        <Input name="phone" placeholder="Телефон" className="h-8 max-w-36 px-2 text-xs" />
+        <label className="flex items-center gap-1 text-[11px] text-stone-300"><input name="isPrimary" type="checkbox" defaultChecked className="h-4 w-4 accent-orange-500" />Primary</label>
+        <Button type="submit" size="sm" className="h-8 px-2 text-xs">Прив'язати</Button>
+      </div>
+    </form>
+  );
 }

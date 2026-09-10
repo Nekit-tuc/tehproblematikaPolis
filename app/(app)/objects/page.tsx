@@ -1,6 +1,6 @@
 ﻿import type React from "react";
 import Link from "next/link";
-import { ChevronRight, UserCog } from "lucide-react";
+import { ChevronRight, RefreshCw, UserCog } from "lucide-react";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -10,10 +10,11 @@ import { Label } from "@/components/ui/label";
 import { TH, THead, TBody, TR, Table } from "@/components/ui/table";
 import { objectTypeLabels } from "@/lib/labels";
 import { requireRole } from "@/lib/auth/server";
-import { getObjectManagers, getObjectsDirectoryMeta, getObjectsPage } from "@/lib/supabase/queries";
+import { getObjectDirectorSyncPage, type DirectorOption, type ObjectDirectorFilter, type ObjectWithDirectorLinks } from "@/lib/supabase/object-director-sync";
+import { getObjectManagers, getObjectsDirectoryMeta } from "@/lib/supabase/queries";
 import type { CompanyObject, ObjectType, Profile } from "@/types/domain";
 import { CreateObjectForm } from "./create-object-form";
-import { setObjectActiveAction, updateObjectAction } from "./actions";
+import { linkDirectorToObjectAction, setObjectActiveAction, updateObjectAction } from "./actions";
 import { ObjectRow } from "./object-row";
 
 const objectTypes: ObjectType[] = ["store", "warehouse", "production", "office", "other"];
@@ -65,17 +66,38 @@ function filterObjects(objects: CompanyObject[], filters: { q?: string; type?: s
   });
 }
 
-export default async function ObjectsPage({ searchParams }: { searchParams: Promise<{ q?: string; type?: string; status?: string; district?: string; error?: string; success?: string; view?: string; page?: string }> }) {
+const directorFilters: Array<{ label: string; value: ObjectDirectorFilter }> = [
+  { label: "Усі об'єкти", value: "all" },
+  { label: "Без директора", value: "without_director" },
+  { label: "Очікують підтвердження", value: "pending" },
+  { label: "Потребують перевірки", value: "needs_review" },
+];
+
+function directorStatusLabel(status?: string | null) {
+  if (status === "approved") return "Підтверджено";
+  if (status === "rejected") return "Відхилено";
+  return "Очікує";
+}
+
+function directorOptionLabel(director: DirectorOption) {
+  const status = director.approval_status ?? "approved";
+  const linkLabel = director.activeLinkCount > 0 ? `${director.activeLinkCount} об'єкт.` : "без об'єкта";
+  return [director.full_name, director.phone, directorStatusLabel(status), linkLabel].filter(Boolean).join(" · ");
+}
+
+export default async function ObjectsPage({ searchParams }: { searchParams: Promise<{ q?: string; type?: string; status?: string; district?: string; directorFilter?: ObjectDirectorFilter; error?: string; success?: string; view?: string; page?: string }> }) {
   const { profile } = await requireRole(["admin", "management", "tech_manager"]);
   const params = await searchParams;
   const pageSize = 25;
   const currentPage = Math.max(1, Number.parseInt(params.page ?? "1", 10) || 1);
+  const activeDirectorFilter = directorFilters.some((filter) => filter.value === params.directorFilter) ? params.directorFilter ?? "all" : "all";
   const [objectsResult, objectsMetaResult, managersResult] = await Promise.all([
-    getObjectsPage({
+    getObjectDirectorSyncPage({
       q: params.q,
       type: params.type ?? "all",
       status: params.status ?? "active",
       district: params.district ?? "all",
+      directorFilter: activeDirectorFilter,
       page: currentPage,
       limit: pageSize,
     }),
@@ -85,7 +107,9 @@ export default async function ObjectsPage({ searchParams }: { searchParams: Prom
   const error = objectsResult.error ?? objectsMetaResult.error ?? managersResult.error ?? (params.error ? decodeURIComponent(params.error) : null);
   const filteredObjects = objectsResult.data.objects;
   const managers = managersResult.data;
+  const directors = objectsResult.data.directors;
   const canManage = profile.role === "admin";
+  const canManageDirectorLinks = ["admin", "management", "tech_manager"].includes(profile.role);
   const canOpenDirectorManagement = ["admin", "management", "tech_manager"].includes(profile.role);
   const nextObjectNumber = getNextObjectNumber(objectsMetaResult.data.objects as CompanyObject[]);
   const districts = getDistricts(objectsMetaResult.data.objects as CompanyObject[]);
@@ -96,7 +120,7 @@ export default async function ObjectsPage({ searchParams }: { searchParams: Prom
   const pagedObjects = filteredObjects;
   const mobileHref = (updates: Record<string, string | number | undefined>) => {
     const next = new URLSearchParams();
-    for (const key of ["q", "type", "status", "district", "view", "page"] as const) {
+    for (const key of ["q", "type", "status", "district", "directorFilter", "view", "page"] as const) {
       const value = params[key];
       if (value && value !== "all") next.set(key, value);
     }
@@ -145,6 +169,76 @@ export default async function ObjectsPage({ searchParams }: { searchParams: Prom
       {params.success === "updated" ? <Alert title="Об'єкт оновлено">Зміни збережено.</Alert> : null}
       {params.success === "activated" ? <Alert title="Об'єкт активовано">Статус об'єкта змінено на активний.</Alert> : null}
       {params.success === "deactivated" ? <Alert title="Об'єкт деактивовано">Об'єкт приховано з активного довідника без видалення заявок.</Alert> : null}
+      {params.success === "director-linked" ? <Alert title="Директора прив'язано">Прив'язку до об'єкта підтверджено.</Alert> : null}
+      {params.success === "director-unlinked" ? <Alert title="Директора відв'язано">Директор більше не має доступу до цього об'єкта.</Alert> : null}
+      {params.success === "director-link-approved" ? <Alert title="Прив'язку підтверджено">Директор бачить об'єкт у порталі після approved-прив'язки.</Alert> : null}
+      {params.success === "director-link-rejected" ? <Alert title="Прив'язку відхилено">Директор не має доступу до цього об'єкта.</Alert> : null}
+      {params.success === "director-primary" ? <Alert title="Основного директора змінено">Для об'єкта оновлено primary-прив'язку.</Alert> : null}
+
+      <div className="grid gap-2 md:grid-cols-4">
+        <Info label="Директорів" value={String(objectsResult.data.audit.totalDirectors)} />
+        <Info label="Approved прив'язок" value={String(objectsResult.data.audit.approvedLinks)} />
+        <Info label="Об'єктів без директора" value={String(objectsResult.data.audit.objectsWithoutApprovedDirector)} />
+        <Info label="Директорів без об'єкта" value={String(objectsResult.data.audit.directorsWithoutObject)} />
+      </div>
+
+      <Card className="border-white/10 bg-white/[0.04]">
+        <CardHeader className="pb-3">
+          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2 text-base"><RefreshCw className="h-4 w-4 text-orange-300" /> Синхронізація директорів</CardTitle>
+              <CardDescription>Аудит показує об'єкти без директора, pending-прив'язки, об'єкти на перевірці та директорів без об'єкта.</CardDescription>
+            </div>
+            <Button asChild variant="outline" size="sm"><Link href="/objects">Оновити аудит</Link></Button>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex flex-wrap gap-2">
+            {directorFilters.map((filter) => (
+              <Button key={filter.value} asChild variant={activeDirectorFilter === filter.value ? "default" : "outline"} size="sm">
+                <Link href={mobileHref({ directorFilter: filter.value === "all" ? undefined : filter.value, page: 1 })}>{filter.label}</Link>
+              </Button>
+            ))}
+          </div>
+          <div className="grid gap-2 text-xs text-stone-400 md:grid-cols-4">
+            <div>Очікують підтвердження: <span className="text-stone-100">{objectsResult.data.audit.pendingLinks}</span></div>
+            <div>Відхилені прив'язки: <span className="text-stone-100">{objectsResult.data.audit.rejectedLinks}</span></div>
+            <div>Потребують перевірки: <span className="text-stone-100">{objectsResult.data.audit.objectsPendingReview}</span></div>
+            <div>Директорів з прив'язками: <span className="text-stone-100">{objectsResult.data.audit.directorsWithLinks}</span></div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {canManageDirectorLinks && objectsResult.data.directorsWithoutObjects.length > 0 ? (
+        <Card className="border-white/10 bg-white/[0.04]">
+          <CardHeader>
+            <CardTitle>Директори без об'єкта</CardTitle>
+            <CardDescription>Профілі `store_director` без approved/pending прив'язки. Старі заявки при прив'язці не змінюються.</CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-3 md:grid-cols-2">
+            {objectsResult.data.directorsWithoutObjects.slice(0, 12).map((director) => (
+              <form key={director.id} action={linkDirectorToObjectAction} className="rounded-lg border border-white/10 bg-black/20 p-3">
+                <input type="hidden" name="directorProfileId" value={director.id} />
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold text-stone-100">{director.full_name}</div>
+                    <div className="mt-1 text-xs text-stone-400">{director.phone ?? "Телефон не вказано"}</div>
+                  </div>
+                  <Badge tone={director.approval_status === "approved" ? "green" : "orange"}>{directorStatusLabel(director.approval_status)}</Badge>
+                </div>
+                <div className="mt-3 grid gap-2 md:grid-cols-[1fr_auto]">
+                  <Select name="objectId" required defaultValue="">
+                    <option value="" disabled>Оберіть об'єкт</option>
+                    {objectsMetaResult.data.objects.map((object) => <option key={object.id} value={object.id}>{object.object_number ? `${object.object_number} · ` : ""}{object.name} · {object.address}</option>)}
+                  </Select>
+                  <Button type="submit" size="sm">Прив'язати</Button>
+                </div>
+                <label className="mt-2 flex items-center gap-2 text-xs text-stone-300"><input name="isPrimary" type="checkbox" defaultChecked className="h-4 w-4 accent-orange-500" />Основний директор об'єкта</label>
+              </form>
+            ))}
+          </CardContent>
+        </Card>
+      ) : null}
 
       {canManage ? (
         <details className="mobile-card p-2.5 md:hidden">
@@ -197,6 +291,11 @@ export default async function ObjectsPage({ searchParams }: { searchParams: Prom
                 {districts.map((district) => <option key={district} value={district}>{district}</option>)}
               </Select>
             </Field>
+            <Field label="Директори">
+              <Select name="directorFilter" defaultValue={activeDirectorFilter}>
+                {directorFilters.map((filter) => <option key={filter.value} value={filter.value}>{filter.label}</option>)}
+              </Select>
+            </Field>
           </div>
           {mobileView === "table" ? <input type="hidden" name="view" value="table" /> : null}
           <div className="grid grid-cols-2 gap-2">
@@ -212,7 +311,7 @@ export default async function ObjectsPage({ searchParams }: { searchParams: Prom
           <CardDescription>Пошук працює по назві, номеру, адресі та місту.</CardDescription>
         </CardHeader>
         <CardContent>
-          <form className="grid gap-4 md:grid-cols-5">
+          <form className="grid gap-4 md:grid-cols-6">
             <Field label="Пошук"><Input name="q" defaultValue={params.q ?? ""} placeholder="Назва, номер, адреса, місто" /></Field>
             <Field label="Тип">
               <Select name="type" defaultValue={params.type ?? "all"}>
@@ -231,6 +330,11 @@ export default async function ObjectsPage({ searchParams }: { searchParams: Prom
               <Select name="district" defaultValue={params.district ?? "all"}>
                 <option value="all">Всі райони</option>
                 {districts.map((district) => <option key={district} value={district}>{district}</option>)}
+              </Select>
+            </Field>
+            <Field label="Директори">
+              <Select name="directorFilter" defaultValue={activeDirectorFilter}>
+                {directorFilters.map((filter) => <option key={filter.value} value={filter.value}>{filter.label}</option>)}
               </Select>
             </Field>
             <div className="flex flex-col gap-2 md:flex-row md:items-end">
@@ -289,7 +393,7 @@ export default async function ObjectsPage({ searchParams }: { searchParams: Prom
         ) : (
           <>
             {pagedObjects.map((object) => (
-              <MobileObjectCard key={object.id} object={object} managers={managers} canManage={canManage} districts={districts} />
+              <MobileObjectCard key={object.id} object={object} managers={managers} directors={directors} canManage={canManage} canManageDirectorLinks={canManageDirectorLinks} districts={districts} />
             ))}
           </>
         )}
@@ -309,12 +413,12 @@ export default async function ObjectsPage({ searchParams }: { searchParams: Prom
               <Table>
                 <THead>
                   <TR>
-                    <TH>Назва</TH><TH>№</TH><TH>Тип</TH><TH>Місто / район</TH><TH>Адреса</TH><TH>Керуючий</TH><TH>Статус</TH>
+                    <TH>Назва</TH><TH>№</TH><TH>Тип</TH><TH>Місто / район</TH><TH>Адреса</TH><TH>Директори</TH><TH>Керуючий</TH><TH>Статус</TH>
                   </TR>
                 </THead>
                 <TBody>
                   {filteredObjects.map((object) => (
-                    <ObjectRow key={object.id} object={object} managers={managers} canManage={canManage} districts={districts} />
+                    <ObjectRow key={object.id} object={object} managers={managers} directors={directors} canManage={canManage} canManageDirectorLinks={canManageDirectorLinks} districts={districts} />
                   ))}
                 </TBody>
               </Table>
@@ -359,7 +463,7 @@ function ObjectPagination({ safePage, totalPages, hrefForPage, mobile = false }:
   );
 }
 
-function MobileObjectCard({ object, managers, canManage, districts }: { object: CompanyObject; managers: Profile[]; canManage: boolean; districts: string[] }) {
+function MobileObjectCard({ object, managers, directors, canManage, canManageDirectorLinks, districts }: { object: ObjectWithDirectorLinks; managers: Profile[]; directors: DirectorOption[]; canManage: boolean; canManageDirectorLinks: boolean; districts: string[] }) {
   const manager = managers.find((item) => item.id === object.manager_id);
 
   return (
@@ -376,6 +480,10 @@ function MobileObjectCard({ object, managers, canManage, districts }: { object: 
       <div className="mt-2 grid grid-cols-2 gap-1.5 text-[10px]">
         <Info label="Тип" value={getObjectTypeLabel(object.type)} />
         <Info label="Керуючий" value={manager?.full_name ?? "-"} />
+      </div>
+      <div className="mt-2 rounded-2xl border border-white/10 bg-white/[0.03] p-3">
+        <DirectorLinksSummary object={object} />
+        {canManageDirectorLinks ? <DirectorLinkForm objectId={object.id} directors={directors} compact /> : null}
       </div>
       {canManage ? (
         <div className="mt-2 space-y-1.5">
@@ -425,6 +533,47 @@ function Info({ label, value }: { label: string; value: string }) {
       <div className="text-xs text-stone-500">{label}</div>
       <div className="mt-1 truncate text-sm">{value}</div>
     </div>
+  );
+}
+
+function DirectorLinksSummary({ object }: { object: ObjectWithDirectorLinks }) {
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2">
+        {object.approvedDirectorLinks.length === 0 ? <Badge tone="gray">Без директора</Badge> : null}
+        {object.pendingDirectorLinks.length > 0 ? <Badge tone="orange">Очікує підтвердження</Badge> : null}
+        <ObjectReviewBadges object={object} />
+      </div>
+      {object.directorLinks.length > 0 ? (
+        <div className="space-y-1.5 text-xs text-stone-300">
+          {object.directorLinks.slice(0, 4).map((link) => (
+            <div key={link.id} className="flex flex-wrap items-center gap-2">
+              <span className="font-medium text-stone-100">{link.director?.full_name ?? "Директор"}</span>
+              <span className="text-stone-500">{link.phone ?? link.director?.phone ?? "без телефону"}</span>
+              <Badge tone={link.approvalStatus === "approved" ? "green" : link.approvalStatus === "rejected" ? "red" : "orange"}>{directorStatusLabel(link.approvalStatus)}</Badge>
+              {link.isPrimary ? <Badge tone="orange">Primary</Badge> : null}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="text-xs text-stone-500">До об'єкта ще не прив'язаний директор.</div>
+      )}
+    </div>
+  );
+}
+
+function DirectorLinkForm({ objectId, directors, compact = false }: { objectId: string; directors: DirectorOption[]; compact?: boolean }) {
+  return (
+    <form action={linkDirectorToObjectAction} className={compact ? "mt-3 grid gap-2" : "mt-3 grid gap-2 md:grid-cols-[1fr_160px_auto]"}>
+      <input type="hidden" name="objectId" value={objectId} />
+      <Select name="directorProfileId" required defaultValue="">
+        <option value="" disabled>Прив'язати директора</option>
+        {directors.map((director) => <option key={director.id} value={director.id}>{directorOptionLabel(director)}</option>)}
+      </Select>
+      <Input name="phone" placeholder="Телефон прив'язки" />
+      <label className="flex items-center gap-2 text-xs text-stone-300"><input name="isPrimary" type="checkbox" defaultChecked className="h-4 w-4 accent-orange-500" />Primary</label>
+      <Button type="submit" size="sm" className={compact ? "w-full" : ""}>Прив'язати</Button>
+    </form>
   );
 }
 

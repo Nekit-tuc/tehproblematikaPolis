@@ -70,7 +70,7 @@ export type ObjectPageResult = {
 };
 
 export type ObjectsDirectoryMeta = {
-  objects: Array<Pick<CompanyObject, "id" | "object_number" | "district">>;
+  objects: Array<Pick<CompanyObject, "id" | "name" | "object_number" | "district" | "address">>;
 };
 
 function applyObjectFilters(query: any, filters: ObjectListFilters) {
@@ -116,7 +116,7 @@ export async function getObjectsDirectoryMeta(): Promise<QueryResult<ObjectsDire
   const supabase = await createClient();
   let query = supabase
     .from("objects")
-    .select("id, object_number, district")
+    .select("id, name, object_number, district, address")
     .order("object_number");
   if (profile.role === "store_manager" && profile.object_id) query = query.eq("id", profile.object_id);
 
