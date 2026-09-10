@@ -63,7 +63,6 @@ type DirectorObjectRow = {
   approved_at?: string | null;
   rejected_at?: string | null;
   rejection_reason?: string | null;
-  director?: Profile | Profile[] | null;
 };
 
 export type ObjectDirectorSyncFilters = {
@@ -80,10 +79,6 @@ function emptyWithError<T>(data: T): QueryResult<T> {
   return { data, error: missingSupabaseMessage };
 }
 
-function firstRelation<T>(value: T | T[] | null | undefined) {
-  return Array.isArray(value) ? value[0] ?? null : value ?? null;
-}
-
 function normalize(value: string | null | undefined) {
   return (value ?? "").toLowerCase().trim();
 }
@@ -92,7 +87,7 @@ function objectNumber(object: CompanyObject) {
   return object.object_number || object.id.slice(0, 8);
 }
 
-function toDirectorLink(row: DirectorObjectRow): ObjectDirectorLink {
+function toDirectorLink(row: DirectorObjectRow, director: Profile | null): ObjectDirectorLink {
   return {
     id: row.id,
     profileId: row.profile_id,
@@ -103,7 +98,7 @@ function toDirectorLink(row: DirectorObjectRow): ObjectDirectorLink {
     approvedAt: row.approved_at ?? null,
     rejectedAt: row.rejected_at ?? null,
     rejectionReason: row.rejection_reason ?? null,
-    director: firstRelation(row.director),
+    director,
   };
 }
 
@@ -158,7 +153,7 @@ export async function getObjectDirectorSyncPage(filters: ObjectDirectorSyncFilte
     measureAsync("objects-director-sync:links", () =>
       supabase
         .from("director_objects")
-        .select("id, profile_id, object_id, phone, is_primary, approval_status, approved_at, rejected_at, rejection_reason, director:profiles(id, full_name, email, role, phone, approval_status, is_active, created_at)")
+        .select("id, profile_id, object_id, phone, is_primary, approval_status, approved_at, rejected_at, rejection_reason")
         .order("created_at", { ascending: false })
         .limit(5000),
     ),
@@ -175,17 +170,19 @@ export async function getObjectDirectorSyncPage(filters: ObjectDirectorSyncFilte
   const error = objectsResult.error ?? linksResult.error ?? directorsResult.error;
   if (error) return { data: empty, error: error.message };
 
-  const links = ((linksResult.data ?? []) as unknown as DirectorObjectRow[]).map(toDirectorLink);
+  const directorProfiles = (directorsResult.data ?? []) as Profile[];
+  const directorsById = new Map(directorProfiles.map((director) => [director.id, director]));
+  const links = ((linksResult.data ?? []) as unknown as DirectorObjectRow[]).map((row) => toDirectorLink(row, directorsById.get(row.profile_id) ?? null));
   const linksByObject = new Map<string, ObjectDirectorLink[]>();
-  const activeLinkProfileIds = new Set<string>();
+  const approvedLinkProfileIds = new Set<string>();
   for (const link of links) {
     const group = linksByObject.get(link.objectId) ?? [];
     group.push(link);
     linksByObject.set(link.objectId, group);
-    if (link.approvalStatus === "approved" || link.approvalStatus === "pending") activeLinkProfileIds.add(link.profileId);
+    if (link.approvalStatus === "approved") approvedLinkProfileIds.add(link.profileId);
   }
 
-  const directors = ((directorsResult.data ?? []) as Profile[]).map((director) => ({
+  const directors = directorProfiles.map((director) => ({
     id: director.id,
     full_name: director.full_name,
     phone: director.phone ?? null,
@@ -193,7 +190,7 @@ export async function getObjectDirectorSyncPage(filters: ObjectDirectorSyncFilte
     approval_status: director.approval_status ?? "approved",
     activeLinkCount: links.filter((link) => link.profileId === director.id && (link.approvalStatus === "approved" || link.approvalStatus === "pending")).length,
   }));
-  const directorsWithoutObjects = directors.filter((director) => (director.approval_status === "approved" || director.approval_status === "pending") && !activeLinkProfileIds.has(director.id));
+  const directorsWithoutObjects = directors.filter((director) => (director.approval_status === "approved" || director.approval_status === "pending") && !approvedLinkProfileIds.has(director.id));
 
   const objects = ((objectsResult.data ?? []) as CompanyObject[]).map((object) => {
     const directorLinks = linksByObject.get(object.id) ?? [];
@@ -212,6 +209,7 @@ export async function getObjectDirectorSyncPage(filters: ObjectDirectorSyncFilte
   const approvedLinks = links.filter((link) => link.approvalStatus === "approved").length;
   const pendingLinks = links.filter((link) => link.approvalStatus === "pending").length;
   const rejectedLinks = links.filter((link) => link.approvalStatus === "rejected").length;
+  const directorsWithApprovedLinks = directors.filter((director) => approvedLinkProfileIds.has(director.id)).length;
   const objectsWithoutApprovedDirector = objects.filter((object) => object.approvedDirectorLinks.length === 0).length;
   const objectsPendingReview = objects.filter((object) => object.needs_admin_review || object.source === "director_registration").length;
 
@@ -225,7 +223,7 @@ export async function getObjectDirectorSyncPage(filters: ObjectDirectorSyncFilte
       directorsWithoutObjects,
       audit: {
         totalDirectors: directors.length,
-        directorsWithLinks: directors.length - directorsWithoutObjects.length,
+        directorsWithLinks: directorsWithApprovedLinks,
         approvedLinks,
         pendingLinks,
         rejectedLinks,

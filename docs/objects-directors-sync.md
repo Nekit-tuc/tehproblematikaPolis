@@ -67,9 +67,37 @@
 
 - `profiles.role = 'store_director'`
 - `approval_status = 'approved'` або `pending`
-- немає жодної active прив'язки `approved` або `pending`
+- немає жодної confirmed прив'язки `approved`
 
-Rejected-прив'язки не рахуються як активний об'єкт директора.
+Pending і rejected-прив'язки не рахуються як підтверджений об'єкт директора. Pending-прив'язки показуються окремо як такі, що очікують підтвердження.
+
+## Виправлення ambiguous Supabase relationship
+
+На `/objects` не можна робити embed `profiles(...)` напряму з `director_objects`, наприклад:
+
+```text
+director:profiles(...)
+```
+
+Причина: між `director_objects` і `profiles` є більше одного foreign key:
+
+- `director_objects.profile_id -> profiles.id`
+- `director_objects.approved_by_profile_id -> profiles.id`
+
+Через це PostgREST/Supabase не знає, який саме relationship треба використати, і повертає помилку:
+
+```text
+Could not embed because more than one relationship was found for 'director_objects' and 'profiles'
+```
+
+Для `/objects` запит виправлено без embed-а:
+
+1. Окремо завантажуються `objects`.
+2. Окремо завантажуються `director_objects`.
+3. Окремо завантажуються `profiles where role = 'store_director'`.
+4. Дані збираються в TypeScript через `director_objects.profile_id`.
+
+Це прибирає залежність від назв FK constraint-ів і не ламає `/objects/directors`, де використовується окрема read-модель.
 
 ## Прив'язка директора
 
@@ -146,6 +174,25 @@ director_objects.approval_status = 'approved'
 
 ## SQL для перевірки
 
+FK між `director_objects` і `profiles`:
+
+```sql
+select
+tc.constraint_name,
+kcu.column_name,
+ccu.table_name as foreign_table_name,
+ccu.column_name as foreign_column_name
+from information_schema.table_constraints tc
+join information_schema.key_column_usage kcu
+on tc.constraint_name = kcu.constraint_name
+join information_schema.constraint_column_usage ccu
+on ccu.constraint_name = tc.constraint_name
+where tc.constraint_type = 'FOREIGN KEY'
+and tc.table_name = 'director_objects'
+and ccu.table_name = 'profiles'
+order by kcu.column_name;
+```
+
 Усі директори:
 
 ```sql
@@ -160,10 +207,12 @@ order by created_at desc;
 ```sql
 select p.id, p.full_name, p.phone, p.approval_status
 from profiles p
-left join director_objects do on do.profile_id = p.id
+left join director_objects do
+on do.profile_id = p.id
+and do.approval_status = 'approved'
 where p.role = 'store_director'
-group by p.id, p.full_name, p.phone, p.approval_status
-having count(do.object_id) = 0;
+and do.object_id is null
+order by p.created_at desc;
 ```
 
 Об'єкти без approved директора:
@@ -176,6 +225,14 @@ on do.object_id = o.id
 and do.approval_status = 'approved'
 where do.object_id is null
 order by o.name;
+```
+
+Approved прив'язки:
+
+```sql
+select *
+from director_objects
+where approval_status = 'approved';
 ```
 
 Всі прив'язки:
