@@ -6,6 +6,7 @@ type PushPayload = {
   body: string;
   url?: string;
   tag?: string;
+  data?: Record<string, unknown>;
 };
 
 type PushSubscriptionRow = {
@@ -19,10 +20,27 @@ type PushSubscriptionRow = {
 
 type AiTicketPushInput = {
   id: string;
+  number?: string | null;
   title?: string | null;
   description?: string | null;
   objectName?: string | null;
 };
+
+type DirectorTicketPushInput = {
+  id: string;
+  number?: string | null;
+  title?: string | null;
+  description?: string | null;
+  objectName?: string | null;
+  objectAddress?: string | null;
+};
+
+type DirectorRegisteredPushInput = {
+  directorProfileId: string;
+  fullName?: string | null;
+  phone?: string | null;
+};
+
 type Relation<T> = T | T[] | null | undefined;
 
 type WorkerCompletedPushTicket = {
@@ -122,8 +140,9 @@ export async function sendPushToSubscription(subscription: PushSubscriptionRow, 
       JSON.stringify({
         title: payload.title,
         body: payload.body,
-        url: payload.url ?? "/ai-tickets",
+        url: payload.url ?? "/dashboard",
         tag: payload.tag ?? "ai-ticket",
+        data: payload.data ?? {},
       }),
     );
     await updatePushSuccess(subscription.id);
@@ -185,7 +204,13 @@ export async function sendPushToAdmins(payload: PushPayload) {
   const results = await Promise.allSettled(subscriptions.map((subscription) => sendPushToSubscription(subscription, payload)));
   const sent = results.filter((result) => result.status === "fulfilled" && result.value.ok).length;
   const failed = results.length - sent;
-  return { sent, failed, total: subscriptions.length };
+  console.info("[push] admin push result", {
+    type: typeof payload.data?.type === "string" ? payload.data.type : payload.tag ?? "unknown",
+    recipients: subscriptions.length,
+    sent,
+    failed,
+  });
+  return { attempted: subscriptions.length, sent, failed, total: subscriptions.length };
 }
 
 export async function sendPushToUser(userId: string, payload: PushPayload) {
@@ -205,20 +230,82 @@ export async function sendNewAiTicketPush(ticket: AiTicketPushInput) {
     body,
     url: "/ai-tickets",
     tag: "ai-ticket",
+    data: {
+      type: "ai_ticket_created",
+      ticketId: ticket.id,
+      ticketNumber: ticket.number ?? null,
+      url: "/ai-tickets",
+    },
+  });
+}
+
+export async function sendAdminPushNotification(payload: PushPayload) {
+  try {
+    return await sendPushToAdmins(payload);
+  } catch (error) {
+    console.error("[push] admin push failed", {
+      type: typeof payload.data?.type === "string" ? payload.data.type : payload.tag ?? "unknown",
+      error: safeErrorMessage(error),
+    });
+    return { attempted: 0, sent: 0, failed: 1, total: 0 };
+  }
+}
+
+export async function sendDirectorTicketCreatedPush(ticket: DirectorTicketPushInput) {
+  const address = cleanText(ticket.objectAddress || ticket.objectName, "Без адреси");
+  const description = truncate(cleanText(ticket.description || ticket.title, "Без опису"), 80);
+  const body = truncate(`${address} · ${description}`, 120);
+  return sendAdminPushNotification({
+    title: "Нова заявка від директора",
+    body,
+    url: `/tickets/${ticket.id}?returnTo=${encodeURIComponent("/tickets?source=director_portal")}`,
+    tag: `director-ticket-${ticket.id}`,
+    data: {
+      type: "director_ticket_created",
+      url: `/tickets/${ticket.id}?returnTo=${encodeURIComponent("/tickets?source=director_portal")}`,
+      ticketId: ticket.id,
+      ticketNumber: ticket.number ?? null,
+      source: "director_portal",
+    },
+  });
+}
+
+export async function sendDirectorRegisteredPush(director: DirectorRegisteredPushInput) {
+  const fullName = cleanText(director.fullName, "Новий директор");
+  const phone = cleanText(director.phone, "");
+  const body = truncate(phone ? `${fullName} · ${phone} · очікує підтвердження` : `${fullName} · очікує підтвердження`, 120);
+  const url = `/objects/directors/${director.directorProfileId}`;
+  return sendAdminPushNotification({
+    title: "Новий директор зареєструвався",
+    body,
+    url,
+    tag: `director-registered-${director.directorProfileId}`,
+    data: {
+      type: "director_registered",
+      url,
+      directorProfileId: director.directorProfileId,
+    },
   });
 }
 
 export async function sendWorkerCompletedPush(ticket: WorkerCompletedPushTicket, worker?: WorkerCompletedPushWorker | null) {
   const ticketNumber = cleanText(ticket.number, "Заявка");
   const objectLabel = ticketObjectLabel(ticket);
-  const body = truncate(`${ticketNumber} · ${objectLabel} — очікує підтвердження`, 120);
+  const body = truncate(`${ticketNumber} · ${objectLabel} · очікує підтвердження`, 120);
 
   try {
-    const result = await sendPushToAdmins({
-      title: "Роботу виконано",
+    const result = await sendAdminPushNotification({
+      title: "Виконавець виконав заявку",
       body,
       url: `/tickets/${ticket.id}`,
       tag: `ticket-completed-${ticket.id}`,
+      data: {
+        type: "worker_completed_ticket",
+        url: `/tickets/${ticket.id}`,
+        ticketId: ticket.id,
+        ticketNumber: ticket.number ?? null,
+        status: "waiting_admin_confirmation",
+      },
     });
     console.info("[push] worker completed push result", {
       ticketId: ticket.id,

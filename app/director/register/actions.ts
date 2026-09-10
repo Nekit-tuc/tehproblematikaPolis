@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
 import { directorEmailFromPhone, isValidDirectorPhone, normalizeDirectorPhone } from "@/lib/auth/director";
 import { measureAsync } from "@/lib/performance";
+import { sendDirectorRegisteredPush } from "@/lib/push/send-push-notification";
 
 function values(formData: FormData, key: string) {
   return formData.getAll(key).map((value) => (typeof value === "string" ? value.trim() : "")).filter(Boolean);
@@ -22,6 +23,23 @@ function fail(message: string): never {
 
 function normalizeAddress(address: string) {
   return address.replace(/\s+/g, " ").trim().slice(0, 200);
+}
+
+async function sendDirectorRegisteredPushSafely(input: { directorProfileId: string; fullName: string; phone: string }) {
+  try {
+    const result = await sendDirectorRegisteredPush(input);
+    console.info("[push] director registered push result", {
+      directorProfileId: input.directorProfileId,
+      sent: result.sent,
+      failed: result.failed,
+      total: result.total,
+    });
+  } catch (error) {
+    console.error("[push] director registered push failed", {
+      directorProfileId: input.directorProfileId,
+      error: error instanceof Error ? error.message.slice(0, 240) : String(error).slice(0, 240),
+    });
+  }
 }
 
 function uniqueAddresses(addresses: string[]) {
@@ -146,6 +164,8 @@ export async function registerDirectorAction(formData: FormData) {
     const { error } = await measureAsync("director-register:director_objects", () => admin.from("director_objects").upsert(links, { onConflict: "profile_id,object_id" }));
     if (error) fail(error.message);
   }
+
+  await sendDirectorRegisteredPushSafely({ directorProfileId: userId, fullName, phone: normalizedPhone });
 
   const supabase = await createClient();
   await supabase.auth.signInWithPassword({ email, password });

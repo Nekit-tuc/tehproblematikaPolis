@@ -19,7 +19,7 @@ self.addEventListener("push", (event) => {
     body: payload.body || "Нове сповіщення",
     icon: payload.icon || "/icons/icon-192.jpg",
     badge: payload.badge || "/icons/icon-192.jpg",
-    data: { url: payload.url || "/ai-tickets" },
+    data: { ...(payload.data || {}), url: payload.url || payload.data?.url || "/dashboard" },
     tag: payload.tag || "ai-ticket",
     renotify: true,
   };
@@ -29,7 +29,7 @@ self.addEventListener("push", (event) => {
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const targetUrl = event.notification.data && event.notification.data.url ? event.notification.data.url : "/ai-tickets";
+  const targetUrl = event.notification.data && event.notification.data.url ? event.notification.data.url : "/dashboard";
   const url = new URL(targetUrl, self.location.origin).href;
 
   event.waitUntil((async () => {

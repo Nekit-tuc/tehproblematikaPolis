@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireApprovedDirector } from "@/lib/auth/server";
 import { measureAsync } from "@/lib/performance";
+import { sendDirectorTicketCreatedPush } from "@/lib/push/send-push-notification";
 import { createClient } from "@/lib/supabase/server";
 import { generateTicketNumber, isDuplicateTicketNumberError, TICKET_NUMBER_RETRY_LIMIT } from "@/lib/tickets/numbering";
 import type { TicketPriority } from "@/types/domain";
@@ -15,6 +16,35 @@ function value(formData: FormData, key: string) {
 
 function errorRedirect(message: string): never {
   redirect(`/director/tickets/new?error=${encodeURIComponent(message)}`);
+}
+
+async function sendDirectorTicketPushSafely(input: {
+  ticketId: string;
+  ticketNumber: string;
+  description: string;
+  object?: { name?: string | null; address?: string | null } | { name?: string | null; address?: string | null }[] | null;
+}) {
+  try {
+    const object = Array.isArray(input.object) ? input.object[0] : input.object;
+    const result = await sendDirectorTicketCreatedPush({
+      id: input.ticketId,
+      number: input.ticketNumber,
+      description: input.description,
+      objectName: object?.name ?? null,
+      objectAddress: object?.address ?? null,
+    });
+    console.info("[push] director ticket created push result", {
+      ticketId: input.ticketId,
+      sent: result.sent,
+      failed: result.failed,
+      total: result.total,
+    });
+  } catch (error) {
+    console.error("[push] director ticket created push failed", {
+      ticketId: input.ticketId,
+      error: error instanceof Error ? error.message.slice(0, 240) : String(error).slice(0, 240),
+    });
+  }
 }
 
 export async function createDirectorTicketAction(formData: FormData) {
@@ -30,7 +60,7 @@ export async function createDirectorTicketAction(formData: FormData) {
 
   const supabase = await createClient();
   const [directorObjectResult, categoryResult] = await Promise.all([
-    measureAsync("director:create_object_check", () => supabase.from("director_objects").select("id, phone, approval_status, object:objects(id, is_active, name)").eq("profile_id", profile.id).eq("object_id", objectId).eq("approval_status", "approved").maybeSingle()),
+    measureAsync("director:create_object_check", () => supabase.from("director_objects").select("id, phone, approval_status, object:objects(id, is_active, name, address)").eq("profile_id", profile.id).eq("object_id", objectId).eq("approval_status", "approved").maybeSingle()),
     measureAsync("director:create_category_check", () => supabase.from("categories").select("id, name, is_active").eq("id", categoryId).eq("is_active", true).maybeSingle()),
   ]);
 
@@ -57,6 +87,13 @@ export async function createDirectorTicketAction(formData: FormData) {
   if (!ticket) errorRedirect(lastError?.message ?? "Не вдалося створити заявку.");
   const { error: historyError } = await supabase.from("ticket_history").insert({ ticket_id: ticket.id, actor_id: user.id, action: "Директор створив заявку", metadata: { source: "director_portal", status: "pending_review" } });
   if (historyError) errorRedirect(historyError.message);
+
+  await sendDirectorTicketPushSafely({
+    ticketId: ticket.id,
+    ticketNumber: number,
+    description,
+    object: (directorObjectResult.data as { object?: { name?: string | null; address?: string | null } | { name?: string | null; address?: string | null }[] | null }).object,
+  });
 
   revalidatePath("/director/tickets");
   revalidatePath("/tickets");
